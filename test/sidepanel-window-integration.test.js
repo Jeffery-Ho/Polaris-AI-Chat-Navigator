@@ -8,10 +8,13 @@ async function boot(windowType = "sidepanel", { locale = "zh", transitionApi = f
   const win = dom.window;
   win.matchMedia = () => ({ matches: false, addEventListener() {} });
   win.scrollTo = () => {};
+  win.HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
+  win.HTMLDialogElement.prototype.close = function () { this.removeAttribute("open"); this.dispatchEvent(new win.Event("close")); };
   if (stallAnimationFrames) win.requestAnimationFrame = () => 1;
   win.setInterval = () => 0;
   win.PolarisI18n = { locale, t: (key) => key };
   const listeners = []; const commands = [];
+  win.chrome = { storage: { local: { get: async () => ({ "polaris-release-notice-version": "0.66.0" }), set: async () => {} } } };
   const transitions = [];
   if (transitionApi) win.document.startViewTransition = (update) => {
     const updateCallbackDone = Promise.resolve().then(update);
@@ -19,7 +22,7 @@ async function boot(windowType = "sidepanel", { locale = "zh", transitionApi = f
     transitions.push(transition);
     return transition;
   };
-  win.chrome = { runtime: { getURL: (path) => `https://extension.test/${path}`, onMessage: { addListener(listener) { listeners.push(listener); } }, sendMessage: async (message) => { commands.push(message); return { ok: true }; }, getManifest: () => ({ version: "0.66.0" }) } };
+  win.chrome = { ...win.chrome, runtime: { getURL: (path) => `https://extension.test/${path}`, onMessage: { addListener(listener) { listeners.push(listener); } }, sendMessage: async (message) => { commands.push(message); return { ok: true }; }, getManifest: () => ({ version: "0.66.0" }) } };
   let source = await readFile(new URL("../src/window.js", import.meta.url), "utf8");
   for (const match of source.matchAll(/import\s+\{([^}]+)\}\s+from\s+"([^"]+)";/g)) {
     const exports = await import(new URL(`../src/${match[2].replace(/^\.\//, "")}`, import.meta.url));
@@ -76,37 +79,18 @@ test("ordinary mode fade completes even when sidepanel animation frames are thro
   assert.equal(s.win.document.querySelector("#polaris-window > .window-body")?.dataset.activeTab, "chapters");
   s.dom.window.close();
 });
-test("standalone continues using the original directory and chapter actions", async () => {
-  const s = await boot("standalone");
-  assert.ok(s.win.document.querySelector(".chapter-selector"));
-  assert.ok(s.win.document.querySelector(".chapter-actions"));
-  assert.equal(s.win.document.querySelector(".chapter-tree-reader"), null);
-  s.dom.window.close();
-});
 
-for (const windowType of ["sidepanel", "standalone"]) {
-  for (const locale of ["zh", "en"]) {
-    test(`${windowType} ${locale} settings keep working group controls and omit page-only display controls`, async () => {
-      const s = await boot(windowType, { locale, openChapters: false });
-      try {
-        const config = { maxVisible: 30, maxVisibleUserGroups: 50, foldThreshold: 20, tooltipMaxWidth: 360 };
-        s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...s.snapshot, config } });
-        s.win.document.querySelector(".window-settings-button").click();
-        const ranges = [...s.win.document.querySelectorAll('.settings-panel input[type="range"]')];
-        const labels = [...s.win.document.querySelectorAll(".settings-range .settings-label")].map((label) => label.textContent);
-        assert.deepEqual(labels, locale === "zh" ? ["用户分组上限", "折叠阈值"] : ["User group limit", "Fold threshold"]);
-        assert.deepEqual(ranges.map((input) => input.value), ["50", "20"]);
-        for (const [index, key, value] of [[0, "maxVisibleUserGroups", 27], [1, "foldThreshold", 12]]) {
-          ranges[index].value = String(value);
-          ranges[index].dispatchEvent(new s.win.Event("input", { bubbles: true }));
-          assert.equal(ranges[index].closest("label").querySelector("output").textContent, String(value));
-          const command = JSON.parse(JSON.stringify(s.commands.at(-1)));
-          assert.deepEqual(command, { type: "POLARIS_WINDOW_COMMAND", command: "update-config", patch: { [key]: value } });
-        }
-        assert.equal(s.win.document.querySelectorAll('.settings-types input[type="checkbox"]').length, 7);
-      } finally {
-        s.dom.window.close();
-      }
-    });
-  }
-}
+test("设置页可打开说明，后续会话快照不重建弹窗", async () => {
+  const s = await boot("sidepanel", { openChapters: false });
+  try {
+    await Promise.resolve();
+    s.win.document.querySelector(".window-settings-button").click();
+    s.win.document.querySelector(".settings-release-notes").click();
+    const dialog = s.win.document.querySelector("dialog[open]");
+    assert.ok(dialog);
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...s.snapshot, revision: 2 } });
+    assert.equal(s.win.document.querySelector("dialog[open]"), dialog);
+    dialog.querySelector(".release-notice-acknowledge").click();
+    assert.equal(s.win.document.activeElement, s.win.document.querySelector(".settings-release-notes"));
+  } finally { s.dom.window.close(); }
+});

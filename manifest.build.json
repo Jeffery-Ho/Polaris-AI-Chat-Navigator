@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
+  "minimum_chrome_version": "114",
   "name": "Polaris: AI Chat Navigator",
-  "version": "0.67.7",
-  "version_name": "0.67.7(274)",
+  "version": "0.68.0",
+  "version_name": "0.68.0(275)",
   "description": "Show heading markers for supported AI web answers and jump to headings from the right edge.",
   "icons": {
     "16": "icons/gpt-voyager-icon-16.png",

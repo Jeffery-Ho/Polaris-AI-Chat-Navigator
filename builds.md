@@ -10,6 +10,13 @@
 - Version update type must be declared by the user before recording a build.
 - After each build is recorded, confirm the build number and version with the user.
 
+## 275
+
+- Date: 2026-10-13
+- Version: 0.68.0
+- Summary: Uses the browser sidepanel exclusively and restores in-panel update notes.
+- Notes: Removes the standalone page, popup creation and recovery, and standalone chapter UI. Clears legacy window IDs while retaining preferences and source tracking. Requires Chrome 114 or a browser with the Side Panel API. Feature upgrades show localized update notes when the panel opens; dismissal is persisted and Settings can reopen the notes. The content script no longer automatically opens or records page update notices. Updated the current version to `0.68.0(275)`.
+
 ## 274
 
 - Date: 2026-10-13

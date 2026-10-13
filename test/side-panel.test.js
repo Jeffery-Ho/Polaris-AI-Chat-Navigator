@@ -19,8 +19,7 @@ test("side panel reuses the Polaris window UI entry", () => {
   assert.match(sidePanelHtml, /data-window-type="sidepanel"/);
   assert.match(sidePanelHtml, /href="\/src\/window\.css"/);
   assert.match(sidePanelHtml, /src="\/src\/window\.js"/);
-  assert.match(windowSource, /dataset\.windowType/);
-  assert.match(windowSource, /windowType\s*===\s*"sidepanel"/);
+  assert.match(windowSource, /windowType: "sidepanel"/);
 });
 
 test("Vite builds the side panel as an extension page", () => {

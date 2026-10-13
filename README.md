@@ -2,7 +2,7 @@
 
 A browser extension that adds section navigation to AI-generated web responses.
 
-Polaris: AI Chat Navigator automatically detects headings and list titles in AI responses and displays them in a movable standalone window. Click a Maker to jump directly to the corresponding section—ideal for reading long answers, reports, step-by-step guides, and research results.
+Polaris: AI Chat Navigator automatically detects headings and list titles in AI responses and displays them in the browser sidepanel. Click a Maker to jump directly to the corresponding section—ideal for reading long answers, reports, step-by-step guides, and research results.
 
 ## Development
 
@@ -20,6 +20,8 @@ After that, `dist/` stays current without a manual build. Switching branches, me
 While editing, `pnpm dev` rebuilds `dist/` after each save. Click refresh in `chrome://extensions` after that rebuild finishes.
 
 Do not load the repository root. The root is source, not an extension package. `manifest.build.json` is the only manifest source. A root `manifest.json` must not be added back.
+
+Polaris requires Chrome 114 or a compatible browser with the Side Panel API. Standalone windows and fallback popup windows are no longer supported.
 
 ## Supported Platforms
 
@@ -80,7 +82,9 @@ DeepSeek navigation reads only mounted messages inside its virtual list. Final-a
 
 ## Settings
 
-Open **Settings** from the Polaris window to adjust:
+Feature-version upgrades show update notes inside the sidepanel when you open it. Dismissing the dialog marks that feature version as read; patch upgrades do not show it again. Select **What's new** in Settings to review the current notes anytime.
+
+Open **Settings** from the Polaris sidepanel to adjust:
 
 - User group limit
 - Fold group size
@@ -92,17 +96,12 @@ The Diagnostics section keeps a bounded session-only event log in the current ta
 
 ## Chapter View
 
-- Click **Chapters** in the Polaris window.
+- Click **Chapters** in the Polaris sidepanel.
 - Available on every supported platform: ChatGPT, Claude, Gemini, Grok, Doubao, Kimi, Qwen, Yuanbao, Xiaohongshu Diandian AI, Manus, and DeepSeek.
-- Processes only AI response content on the current page; input fields, sidebars, and the extension's own interface are excluded.
-- Rebuilds supported rendered Markdown with a strict element and URL allowlist; images load from existing `http`/`https` page URLs and open in a new tab when clicked.
-- Formats unrendered raw Markdown text safely, including mixed inline styles, nested task lists, code blocks, tables, and Unicode characters; raw image syntax and HTML remain text.
-- When a titled chapter has no extractable body, use **Go to original position** to close the modal and return to that chapter in the conversation.
-- Displays the response in a medium-sized modal approximately `524pt` wide, with a translucent backdrop, and divides the content into sections using the platform's existing marker results.
-- Use the modal search box, or press `Cmd/Ctrl+F` while the modal is open, to filter section chips by title and click a chip to switch sections.
-- Horizontal section chips appear at the top of the modal. By default, the current section and its adjacent sections are displayed.
-- **Copy current chapter**, **Copy full text**, and **Close** controls appear in the modal's upper-right corner.
-- Press `Escape` or click **Close** to exit and restore page scrolling.
+- Reads currently mounted conversation content and rebuilds supported rendered Markdown with a strict element and URL allowlist; input fields, sidebars, and the extension's own interface are excluded.
+- Expand chapters inline with the triangle controls. Open a chapter's bullet menu to focus its subtree, locate the original source, or copy content. Use the chapter path to return while preserving the reading position.
+- Search chapter titles from the sidepanel search field, or use `Cmd/Ctrl+F`; `Cmd/Ctrl+Shift+F` opens Chapters. Matching is Unicode-aware and uses the existing fuzzy title search.
+- Preserves the current chapter and reading position as a reply updates. Images load from existing `http`/`https` page URLs, with previews and source location available through the existing controls.
 
 ## Privacy
 
@@ -118,7 +117,7 @@ Do not commit `dist/` or load `dist.zip` as the extension. The release workflow 
 
 ## Version
 
-Current version: `0.67.7(274)`
+Current version: `0.68.0(275)`
 
 ## License
 

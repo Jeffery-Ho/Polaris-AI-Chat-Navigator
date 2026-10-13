@@ -8,7 +8,6 @@ const watchDirectories = ["src", "icons", "assets"];
 const rootFiles = new Set([
   "manifest.build.json",
   "vite.config.js",
-  "polaris-home.html",
   "sidepanel.html",
   "support.html",
   "support-config.js",

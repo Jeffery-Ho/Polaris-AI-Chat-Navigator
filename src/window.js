@@ -5,13 +5,7 @@ import { bindSearchInput } from "./search-input.js";
 import { sendRuntimeMessage } from "./runtime-message.js";
 import { createMarkerListReconciler } from "./marker-list-reconciler.js";
 import { createMarkerStreamingIndicator } from "./marker-motion-suppression.js";
-import { appendParsedMarkdownInline, parseChapterMarkdown } from "./chapter-markdown.js";
-import { revealChapterOption } from "./chapter-selector-scroll.js";
-import {
-  chapterSelectionIdentity,
-  chapterParentPath,
-  resolveSelectedChapterKey
-} from "./window-chapter-outline.js";
+import { createSidepanelReleaseNotice } from "./sidepanel-release-notice.js";
 import { didWindowConversationChange } from "./window-source-state.js";
 
 (() => {
@@ -40,14 +34,7 @@ import { didWindowConversationChange } from "./window-source-state.js";
     returnFocusTarget: "",
     markerQuery: "",
     chapterQuery: "",
-    chapterKey: "",
-    chapterSelection: null,
-    pendingChapterJump: null,
     chaptersStatus: "idle",
-    chapterDirectoryExpanded: false,
-    chapterSelectorScrollTop: 0,
-    chapterFocusPending: false,
-    chapters: [],
     treeChapters: [],
     imageUrls: [],
     imageIndex: 0,
@@ -66,8 +53,7 @@ import { didWindowConversationChange } from "./window-source-state.js";
     createRow: renderMarker,
     updateRow: updateWindowMarker
   });
-  const isSidepanel = document.documentElement.dataset.windowType === "sidepanel";
-  const chapterReader = isSidepanel ? createSidepanelChapterReader({
+  const chapterReader = createSidepanelChapterReader({
     document, locale,
     onQueryChange(query) {
       state.chapterQuery = query;
@@ -85,7 +71,7 @@ import { didWindowConversationChange } from "./window-source-state.js";
       });
       if (!response?.ok) throw new Error("Source unavailable");
     }
-  }) : null;
+  });
   let sourceRetryTimer = 0;
 
   function changeContentMode(nextTab) {
@@ -93,7 +79,7 @@ import { didWindowConversationChange } from "./window-source-state.js";
     if (previousTab === nextTab) return;
     if (previousTab === "navigation") state.navigationScrollY = window.scrollY;
     state.activeTab = nextTab;
-    state.isChangingMode = isSidepanel && ["navigation", "chapters"].includes(previousTab)
+    state.isChangingMode = ["navigation", "chapters"].includes(previousTab)
       && ["navigation", "chapters"].includes(nextTab);
     render();
     state.isChangingMode = false;
@@ -158,27 +144,8 @@ import { didWindowConversationChange } from "./window-source-state.js";
     send({ command: "request-chapters" });
   }
 
-  async function sendReady() {
-    const windowType = document.documentElement.dataset.windowType;
-    if (windowType === "sidepanel") {
-      sendRuntimeMessage(chrome, {
-        type: "POLARIS_WINDOW_READY",
-        windowType
-      });
-      return;
-    }
-    try {
-      const currentWindow = await chrome.windows.getCurrent({ populate: true });
-      const currentTab = currentWindow.tabs?.find((tab) => tab.active) || currentWindow.tabs?.[0];
-      sendRuntimeMessage(chrome, {
-        type: "POLARIS_WINDOW_READY",
-        windowId: currentWindow.id,
-        windowTabId: currentTab?.id,
-        windowType: currentWindow.type
-      });
-    } catch {
-      // The background worker will be recreated after an extension reload.
-    }
+  function sendReady() {
+    sendRuntimeMessage(chrome, { type: "POLARIS_WINDOW_READY", windowType: "sidepanel" });
   }
 
   function element(tag, className, text) {
@@ -262,7 +229,7 @@ import { didWindowConversationChange } from "./window-source-state.js";
     const body = renderBody(snapshot, { isLoading, existingBody });
     const header = renderHeader(snapshot);
     const oldHeader = root.querySelector(":scope > .window-header");
-    if (isSidepanel && existingBody === body && oldHeader) {
+    if (existingBody === body && oldHeader) {
       oldHeader.replaceWith(header);
     } else root.replaceChildren(header, body);
     if (focusedTab) header.querySelector(`[data-window-tab="${focusedTab}"]`)?.focus({ preventScroll: true });
@@ -657,270 +624,13 @@ import { didWindowConversationChange } from "./window-source-state.js";
   }
 
   function renderChapters(snapshot) {
-    if (chapterReader) return chapterReader.update({
+    return chapterReader.update({
       conversationKey: `${state.sourceTabId}:${state.routeKey}`,
       nodes: state.treeChapters,
       preferredKey: snapshot.activeMarkerKey,
       query: state.chapterQuery,
       ready: state.chaptersStatus === "ready" || !snapshot.hasConversation
     });
-    const panel = element("div", "chapters-panel");
-    const hasLoadedChapters = state.chaptersStatus === "ready";
-    const chapters = hasLoadedChapters ? state.chapters : (snapshot.headings || []).map((heading) => ({
-      id: heading.id,
-      title: heading.title,
-      markerKey: heading.markerKey,
-      depth: 0,
-      parentKey: "",
-      paragraphs: []
-    }));
-    if (!chapters.length) {
-      panel.appendChild(element(
-        "p",
-        "empty-search",
-        state.chaptersStatus === "loading"
-          ? (locale === "zh" ? "正在读取章节内容…" : "Reading chapter content…")
-          : (locale === "zh" ? "当前对话没有章节" : "No chapters in this conversation")
-      ));
-      return panel;
-    }
-    const filtered = chapters.filter((chapter) => matchesSearch(
-      state.chapterQuery,
-      [chapterParentPath(chapters, chapter), chapter.title].filter(Boolean).join(" / ")
-    ));
-    if (!filtered.length) {
-      panel.appendChild(renderSearchEmpty(state.chapterQuery, () => { state.chapterQuery = ""; }));
-      return panel;
-    }
-    const preferredSelection = state.pendingChapterJump || state.chapterSelection;
-    state.chapterKey = resolveSelectedChapterKey(chapters, state.chapterKey, preferredSelection);
-    const currentChapter = chapters.find((entry) => entry.markerKey === state.chapterKey) || chapters[0];
-    const visibleIndex = Math.max(0, filtered.indexOf(currentChapter));
-    const chapter = filtered[visibleIndex] || filtered[0];
-    state.chapterKey = chapter.markerKey || "";
-    state.chapterSelection = chapterSelectionIdentity(chapters, chapter);
-    const layout = element("div", "chapter-layout");
-    const selectorSlot = element("div", "chapter-selector-slot");
-    const selectorShell = element("div", `chapter-selector-shell${state.chapterDirectoryExpanded ? " is-expanded" : ""}`);
-    const selector = element("nav", "chapter-selector");
-    selector.id = "chapter-selector";
-    selector.setAttribute("aria-label", locale === "zh" ? "章节目录" : "Chapters");
-    selector.addEventListener("scroll", () => { state.chapterSelectorScrollTop = selector.scrollTop; });
-    filtered.forEach((entry) => {
-      const isActive = entry === chapter;
-      const option = element("button", `chapter-option${isActive ? " is-active" : ""}`);
-      option.type = "button";
-      option.style.setProperty("--chapter-depth", String(Math.max(0, Number(entry.depth) || 0)));
-      const path = state.chapterQuery.trim() ? chapterParentPath(chapters, entry) : "";
-      if (path) option.appendChild(element("span", "chapter-option-path", path));
-      option.appendChild(element("span", "chapter-option-title", entry.title));
-      if (isActive) option.setAttribute("aria-current", "true");
-      option.addEventListener("click", () => {
-        state.chapterSelectorScrollTop = selector.scrollTop;
-        state.chapterKey = entry.markerKey || "";
-        const selection = chapterSelectionIdentity(chapters, entry);
-        state.chapterSelection = selection;
-        state.pendingChapterJump = selection;
-        if (entry.markerKey) {
-          send({ command: "jump-to-chapter", markerKey: entry.markerKey });
-        }
-        state.chapterDirectoryExpanded = false;
-        state.chapterFocusPending = true;
-        render();
-      });
-      selector.appendChild(option);
-    });
-    const menu = element("button", "chapter-menu-button");
-    menu.type = "button";
-    const setMenuLabel = () => {
-      const label = state.chapterDirectoryExpanded
-        ? (locale === "zh" ? "收起章节目录" : "Collapse chapters")
-        : (locale === "zh" ? "展开章节目录" : "Expand chapters");
-      menu.setAttribute("aria-label", label);
-      menu.title = label;
-      menu.setAttribute("aria-expanded", String(state.chapterDirectoryExpanded));
-    };
-    menu.setAttribute("aria-controls", selector.id);
-    setMenuLabel();
-    menu.appendChild(createChapterMenuIcon());
-    menu.addEventListener("click", () => {
-      state.chapterDirectoryExpanded = !state.chapterDirectoryExpanded;
-      selectorShell.classList.toggle("is-expanded", state.chapterDirectoryExpanded);
-      if (state.chapterDirectoryExpanded) fitExpandedChapterDirectory(selectorShell, selector);
-      else {
-        selectorShell.style.removeProperty("--chapter-directory-top");
-        selectorShell.style.removeProperty("--chapter-directory-max-height");
-      }
-      setMenuLabel();
-    });
-    selectorShell.append(selector, menu);
-    selectorSlot.appendChild(selectorShell);
-    layout.appendChild(selectorSlot);
-    window.requestAnimationFrame(() => {
-      if (!selector.isConnected) return;
-      selector.scrollTop = state.chapterSelectorScrollTop;
-      const activeOption = selector.querySelector(".chapter-option.is-active");
-      if (state.chapterFocusPending && activeOption) {
-        revealChapterOption(selector, activeOption);
-        state.chapterSelectorScrollTop = selector.scrollTop;
-        state.chapterFocusPending = false;
-        activeOption.focus({ preventScroll: true });
-      }
-      if (state.chapterDirectoryExpanded) fitExpandedChapterDirectory(selectorShell, selector);
-    });
-    const card = element("article", "chapter-card");
-    card.appendChild(element("h1", "chapter-title", chapter.title));
-    const content = element("div", "chapter-content");
-    const blocks = Array.isArray(chapter.blocks) && chapter.blocks.length
-      ? chapter.blocks
-      : (chapter.paragraphs || []).map((text) => ({ tagName: "p", text }));
-    blocks.forEach((block) => appendChapterBlock(content, block));
-    if (!blocks.length) {
-      content.appendChild(element(
-        "p",
-        "chapter-muted",
-        hasLoadedChapters
-          ? (locale === "zh" ? "当前章节没有可读取的正文。" : "No readable content was found for this chapter.")
-          : (locale === "zh" ? "正在读取章节内容…" : "Reading chapter content…")
-      ));
-    }
-    card.appendChild(content);
-    const actions = element("div", "chapter-actions");
-    const copy = element("button", "secondary-button", locale === "zh" ? "复制本章" : "Copy chapter");
-    copy.type = "button";
-    copy.addEventListener("click", () => writeClipboardAndConfirm(copy, chapterPlainText(chapter)));
-    const more = element("details", "chapter-more");
-    const moreLabel = element("summary", "secondary-button", locale === "zh" ? "更多" : "More");
-    const full = element("button", "chapter-more-action copy-full-text", locale === "zh" ? "复制全文" : "Copy full text");
-    full.type = "button";
-    full.addEventListener("click", () => writeClipboardAndConfirm(full, chapters.map(chapterPlainText).join("\n\n")));
-    more.append(moreLabel, full);
-    if (blocks.length) actions.append(copy, more);
-    card.appendChild(actions);
-    layout.appendChild(card);
-    panel.appendChild(layout);
-    return panel;
-  }
-
-  function createChapterMenuIcon() {
-    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    icon.setAttribute("viewBox", "0 0 24 24");
-    icon.setAttribute("fill", "none");
-    icon.setAttribute("stroke", "currentColor");
-    icon.setAttribute("stroke-width", "1.8");
-    icon.setAttribute("stroke-linecap", "round");
-    icon.setAttribute("aria-hidden", "true");
-    for (const y of [6, 12, 18]) {
-      const line = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      line.setAttribute("d", `M4 ${y}h16`);
-      icon.appendChild(line);
-    }
-    return icon;
-  }
-
-  function fitExpandedChapterDirectory(shell, selector) {
-    const top = shell.getBoundingClientRect().top;
-    const brandBottom = document.querySelector(".window-identity")?.getBoundingClientRect().bottom || 0;
-    const minTop = Math.max(12, brandBottom + 8);
-    const maxHeight = Math.max(180, window.innerHeight - minTop - 12);
-    shell.style.setProperty("--chapter-directory-max-height", `${maxHeight}px`);
-    const height = Math.min(selector.scrollHeight, maxHeight);
-    const shift = Math.min(0, window.innerHeight - 12 - height - top);
-    shell.style.setProperty("--chapter-directory-top", `${Math.max(minTop - top, shift)}px`);
-  }
-
-  function appendChapterMarkdownBlocks(target, blocks) {
-    blocks.forEach((block) => {
-      if (block.type === "list") {
-        const list = element(block.ordered ? "ol" : "ul");
-        block.items.forEach((item) => {
-          const li = element("li");
-          if (typeof item.checked === "boolean") {
-            const checkbox = element("input");
-            checkbox.type = "checkbox";
-            checkbox.checked = item.checked;
-            checkbox.disabled = true;
-            li.appendChild(checkbox);
-          }
-          appendParsedMarkdownInline(li, item.inline, document, state.snapshot?.routeKey || location.href);
-          appendChapterMarkdownBlocks(li, item.children);
-          list.appendChild(li);
-        });
-        target.appendChild(list);
-        return;
-      }
-      if (block.type === "table") {
-        const wrap = element("div", "chapter-table-wrap");
-        const table = element("table");
-        const head = element("thead");
-        const headerRow = element("tr");
-        block.headers.forEach((nodes) => {
-          const cell = element("th");
-          appendParsedMarkdownInline(cell, nodes, document, state.snapshot?.routeKey || location.href);
-          headerRow.appendChild(cell);
-        });
-        head.appendChild(headerRow);
-        table.appendChild(head);
-        const body = element("tbody");
-        block.rows.forEach((row) => {
-          const tr = element("tr");
-          row.forEach((nodes) => {
-            const cell = element("td");
-            appendParsedMarkdownInline(cell, nodes, document, state.snapshot?.routeKey || location.href);
-            tr.appendChild(cell);
-          });
-          body.appendChild(tr);
-        });
-        table.appendChild(body);
-        wrap.appendChild(table);
-        target.appendChild(wrap);
-        return;
-      }
-      if (block.type === "codeBlock") {
-        const pre = element("pre");
-        pre.appendChild(element("code", "", block.value));
-        target.appendChild(pre);
-        return;
-      }
-      if (block.type === "rule") {
-        target.appendChild(element("hr"));
-        return;
-      }
-      const node = element(block.type === "heading" ? `h${block.level}` : block.type === "quote" ? "blockquote" : "p");
-      if (block.type === "quote") appendChapterMarkdownBlocks(node, block.blocks);
-      else appendParsedMarkdownInline(node, block.children, document, state.snapshot?.routeKey || location.href);
-      target.appendChild(node);
-    });
-  }
-
-  function appendChapterBlock(target, block) {
-    const value = block.text || (block.hasImage ? "[Image]" : "");
-    const parsed = ["p", "table"].includes(block.tagName) ? parseChapterMarkdown(value) : null;
-    if (parsed) {
-      appendChapterMarkdownBlocks(target, parsed);
-      return;
-    }
-    const tagName = ["pre", "blockquote", "h1", "h2", "h3", "h4", "h5", "h6"].includes(block.tagName) ? block.tagName : "p";
-    target.appendChild(element(tagName, "", value));
-  }
-
-  function chapterPlainText(chapter) {
-    const content = Array.isArray(chapter.blocks) && chapter.blocks.length
-      ? chapter.blocks.map((block) => block.text || (block.hasImage ? "[Image]" : ""))
-      : (chapter.paragraphs || []);
-    return [chapter.title, ...content].filter(Boolean).join("\n\n");
-  }
-
-  async function writeClipboardAndConfirm(button, text) {
-    const label = button.textContent;
-    try {
-      if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable");
-      await navigator.clipboard.writeText(text);
-      button.textContent = locale === "zh" ? "已复制" : "Copied";
-    } catch {
-      button.textContent = locale === "zh" ? "复制失败" : "Copy failed";
-    }
-    window.setTimeout(() => { button.textContent = label; }, 1200);
   }
 
   function renderSettings(snapshot) {
@@ -993,17 +703,18 @@ import { didWindowConversationChange } from "./window-source-state.js";
     });
     helpSection.appendChild(footer);
     const links = element("div", "settings-links");
-    [[locale === "zh" ? "更新说明" : "Release notes", "https://github.com/Jeffery-Ho/Polaris-AI-Chat-Navigator/blob/main/changelog.md"], [locale === "zh" ? "反馈" : "Feedback", "https://github.com/Jeffery-Ho/Polaris-AI-Chat-Navigator/issues"]].forEach(([label, url]) => {
-      const link = element("a", "settings-link", label);
-      link.href = url;
-      link.target = "_blank";
-      link.rel = "noreferrer";
-      links.appendChild(link);
-    });
+    const releaseNotes = element("button", "settings-link settings-release-notes", t("settings.releaseNotes"));
+    releaseNotes.type = "button";
+    releaseNotes.addEventListener("click", () => releaseNotice.open());
+    const feedback = element("a", "settings-link", locale === "zh" ? "反馈" : "Feedback");
+    feedback.href = "https://github.com/Jeffery-Ho/Polaris-AI-Chat-Navigator/issues";
+    feedback.target = "_blank";
+    feedback.rel = "noreferrer";
+    links.append(releaseNotes, feedback);
     helpSection.appendChild(links);
     const note = snapshot.releaseNotes?.[0];
     if (note) helpSection.appendChild(element("p", "settings-release-note", `${note.version}: ${note.summary || note.title || ""}`));
-    helpSection.appendChild(element("p", "settings-version", snapshot.version || ""));
+    helpSection.appendChild(element("p", "settings-version", snapshot.version || chrome.runtime.getManifest().version_name || chrome.runtime.getManifest().version));
     panel.appendChild(helpSection);
     return panel;
   }
@@ -1038,17 +749,10 @@ import { didWindowConversationChange } from "./window-source-state.js";
       const nextTabId = message.tabId ?? null;
       const changedConversation = didWindowConversationChange(state, message);
       if (changedConversation) {
-        const pendingChapterJump = state.pendingChapterJump;
-        state.chapters = [];
         state.treeChapters = [];
         state.imageUrls = [];
         state.imageIndex = 0;
-        state.chapterKey = pendingChapterJump?.markerKey || "";
-        state.chapterSelection = pendingChapterJump;
         state.chaptersStatus = "idle";
-        state.chapterDirectoryExpanded = false;
-        state.chapterSelectorScrollTop = 0;
-        state.chapterFocusPending = false;
         windowMarkerListReconciler.reset();
         markerStreamingIndicator.reset();
       }
@@ -1074,13 +778,7 @@ import { didWindowConversationChange } from "./window-source-state.js";
       if (message.tabId != null && message.tabId !== state.sourceTabId) return;
       if (message.routeKey && message.routeKey !== state.routeKey) return;
       state.treeChapters = Array.isArray(message.treeChapters) ? message.treeChapters : [];
-      state.chapters = Array.isArray(message.chapters) ? message.chapters : [];
       state.chaptersStatus = "ready";
-      const preferredSelection = state.pendingChapterJump || state.chapterSelection;
-      state.chapterKey = resolveSelectedChapterKey(state.chapters, state.chapterKey, preferredSelection);
-      const selectedChapter = state.chapters.find((chapter) => chapter.markerKey === state.chapterKey) || null;
-      state.chapterSelection = chapterSelectionIdentity(state.chapters, selectedChapter);
-      state.pendingChapterJump = null;
       if (state.pendingModeTarget === "chapters" && state.activeTab === "navigation") {
         state.pendingModeTarget = "";
         changeContentMode("chapters");
@@ -1093,24 +791,20 @@ import { didWindowConversationChange } from "./window-source-state.js";
     }
   });
 
+  const releaseNotice = createSidepanelReleaseNotice({ document, chrome, locale, t });
   render();
   startThemeObserver();
   startSourceObserver();
-  if (isSidepanel) window.setInterval(() => {
+  window.setInterval(() => {
     if (state.activeTab === "chapters" && !document.hidden && state.snapshot?.hasConversation) {
       send({ command: "request-chapters", onlyIfChanged: true });
     }
   }, 1500);
-  window.addEventListener("resize", () => {
-    if (!state.chapterDirectoryExpanded) return;
-    const shell = document.querySelector(".chapter-selector-shell.is-expanded");
-    const selector = shell?.querySelector(".chapter-selector");
-    if (shell && selector) fitExpandedChapterDirectory(shell, selector);
-  });
-  if (isSidepanel) window.addEventListener("scroll", () => {
+  window.addEventListener("scroll", () => {
     if (state.activeTab === "navigation") state.navigationScrollY = window.scrollY;
   }, { passive: true });
   window.addEventListener("keydown", (event) => {
+    if (document.querySelector(".release-notice-dialog[open]")) return;
     if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "f") {
       event.preventDefault();
       if (event.shiftKey) {
@@ -1124,14 +818,6 @@ import { didWindowConversationChange } from "./window-source-state.js";
       if (state.imageUrls.length) {
         state.imageUrls = [];
         render();
-      } else if (state.chapterDirectoryExpanded && state.activeTab === "chapters") {
-        state.chapterDirectoryExpanded = false;
-        document.querySelector(".chapter-selector-shell")?.classList.remove("is-expanded");
-        const menu = document.querySelector(".chapter-menu-button");
-        menu?.setAttribute("aria-expanded", "false");
-        menu?.setAttribute("aria-label", locale === "zh" ? "展开章节目录" : "Expand chapters");
-        if (menu) menu.title = locale === "zh" ? "展开章节目录" : "Expand chapters";
-        menu?.focus({ preventScroll: true });
       } else if (state.activeTab === "settings") {
         closeSettings();
       }

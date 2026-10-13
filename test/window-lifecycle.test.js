@@ -8,20 +8,14 @@ const packagedContentScripts = [{
   js: ["assets/i18n-HASH.js", "assets/content-HASH.js"]
 }];
 
-const [backgroundSource, lifecycleSource, deliverySource] = await Promise.all([
+const [backgroundSource, deliverySource] = await Promise.all([
   readFile(new URL("../src/background.js", import.meta.url), "utf8"),
-  readFile(new URL("../src/window-lifecycle.js", import.meta.url), "utf8"),
   readFile(new URL("../src/snapshot-delivery.js", import.meta.url), "utf8")
 ]);
-const executableBackgroundSource = backgroundSource
-  .replace(
-    'import { matchingPolarisTab, restorePopupWindowUpdate } from "./window-lifecycle.js";\n',
-    lifecycleSource.replaceAll("export ", "")
-  )
-  .replace(
-    'import { snapshotDeliveryResult } from "./snapshot-delivery.js";\n',
-    deliverySource.replaceAll("export ", "")
-  );
+const executableBackgroundSource = backgroundSource.replace(
+  'import { snapshotDeliveryResult } from "./snapshot-delivery.js";\n',
+  deliverySource.replaceAll("export ", "")
+);
 
 function createEvent() {
   let listener = null;
@@ -35,7 +29,7 @@ function createEvent() {
   };
 }
 
-async function runAction({ storedWindow, getError = null, updateError = null, syncGetError = null, sidePanel = false, contentScriptFailures = 0, contentResponse, scripting = false, cssError = null, scriptError = null, contentScripts = packagedContentScripts, settleMs = 0 }) {
+async function runAction({ storedWindow, getError = null, updateError = null, syncGetError = null, sidePanel = false, behaviorError = null, contentScriptFailures = 0, contentResponse, scripting = false, cssError = null, scriptError = null, contentScripts = packagedContentScripts, settleMs = 0 }) {
   const windowUrl = "chrome-extension://test/polaris-home.html";
   const sourceTab = { id: 42, windowId: 9, active: true, url: "https://chatgpt.com/c/test" };
   const local = {
@@ -44,6 +38,8 @@ async function runAction({ storedWindow, getError = null, updateError = null, sy
     "polaris-source-window-id": sourceTab.windowId,
     "polaris-source-tab-id": sourceTab.id
   };
+  local["polaris-release-notice-version"] = "0.67.7";
+  local["existing-preference"] = { enabled: true };
   const action = createEvent();
   const runtimeMessage = createEvent();
   const calls = { creates: [], updates: [], contentRequests: [], runtimeMessages: [], sidePanelBehaviors: [], cssInjections: [], scriptInjections: [], warnings: [] };
@@ -52,7 +48,7 @@ async function runAction({ storedWindow, getError = null, updateError = null, sy
   const chrome = {
     action: { onClicked: action },
     sidePanel: sidePanel ? {
-      async setPanelBehavior(behavior) { calls.sidePanelBehaviors.push(behavior); }
+      async setPanelBehavior(behavior) { calls.sidePanelBehaviors.push(behavior); if (behaviorError) throw behaviorError; }
     } : undefined,
     scripting: scripting ? {
       async insertCSS(details) {
@@ -143,8 +139,10 @@ async function runAction({ storedWindow, getError = null, updateError = null, sy
     }
   });
   action.emit(sourceTab);
+  runtimeMessage.emit({ type: "POLARIS_WINDOW_READY", windowType: "sidepanel" }, {});
   await new Promise((resolve) => setTimeout(resolve, settleMs));
   calls.command = (message) => new Promise((resolve) => runtimeMessage.emit(message, {}, resolve));
+  calls.local = local;
   return calls;
 }
 
@@ -163,72 +161,6 @@ test("章节来源定位保留失败结果并拒绝已切换的来源标签页",
   assert.equal((await calls.command({ ...command, expectedTabId: 99 })).ok, false);
   assert.equal(calls.contentRequests.length, requests);
 });
-
-async function runWindowReady() {
-  const windowUrl = "chrome-extension://test/polaris-home.html";
-  const sourceTab = { id: 42, windowId: 7, active: false, url: "https://chatgpt.com/c/test" };
-  const extensionTab = { id: 99, windowId: 7, active: true, url: windowUrl };
-  const local = {
-    "polaris-source-window-id": sourceTab.windowId,
-    "polaris-source-tab-id": sourceTab.id
-  };
-  const runtimeMessage = createEvent();
-  const sends = [];
-  const noOpEvent = () => createEvent();
-  const chrome = {
-    action: { onClicked: noOpEvent() },
-    runtime: {
-      getURL(path) { return `chrome-extension://test/${path}`; },
-      async sendMessage() {},
-      onMessage: runtimeMessage
-    },
-    storage: {
-      local: {
-        async get(key) {
-          if (typeof key === "string") return { [key]: local[key] };
-          return { ...local };
-        },
-        async set(values) { Object.assign(local, values); },
-        async remove(keys) {
-          for (const key of [].concat(keys)) delete local[key];
-        }
-      },
-      sync: {
-        async get() { return {}; },
-        async set() {},
-        async remove() {}
-      }
-    },
-    windows: {
-      WINDOW_ID_NONE: -1,
-      onFocusChanged: noOpEvent(),
-      onRemoved: noOpEvent()
-    },
-    tabs: {
-      async query(query) {
-        if (query?.active) return [extensionTab];
-        return [sourceTab, extensionTab];
-      },
-      async get(tabId) {
-        return tabId === sourceTab.id ? sourceTab : extensionTab;
-      },
-      async sendMessage(tabId) { sends.push(tabId); },
-      onActivated: noOpEvent(),
-      onUpdated: noOpEvent(),
-      onRemoved: noOpEvent()
-    }
-  };
-
-  vm.runInNewContext(executableBackgroundSource, { chrome, URL, Number, Date, Promise, console });
-  runtimeMessage.emit({
-    type: "POLARIS_WINDOW_READY",
-    windowId: extensionTab.windowId,
-    windowTabId: extensionTab.id,
-    windowType: "normal"
-  });
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  return sends;
-}
 
 async function runSidePanelReady() {
   const sourceTab = { id: 42, windowId: 7, active: true, url: "https://chatgpt.com/c/test" };
@@ -286,37 +218,27 @@ async function runSidePanelReady() {
   return { local, sends };
 }
 
-test("缓存 ID 指向普通窗口时，点击扩展图标会创建新的 Polaris popup", async () => {
-  const calls = await runAction({
-    storedWindow: {
-      id: 9,
-      type: "normal",
-      focused: true,
-      tabs: [{ id: 42, url: "https://chatgpt.com/c/test" }]
-    }
-  });
 
-  assert.equal(calls.creates.length, 1);
-  assert.equal(calls.creates[0].type, "popup");
-  assert.equal(calls.updates.length, 0);
+
+test("Side Panel API 缺失时不再创建独立窗口", async () => {
+  const calls = await runAction({ storedWindow: null, sidePanel: false });
+  assert.equal(calls.creates.length, 0);
 });
 
-test("有效的 Polaris popup 会恢复为正常状态并聚焦，不会重复创建", async () => {
-  const calls = await runAction({
-    storedWindow: {
-      id: 9,
-      type: "popup",
-      state: "minimized",
-      focused: false,
-      tabs: [{ id: 42, url: "chrome-extension://test/polaris-home.html" }]
-    }
-  });
-
+test("侧栏配置失败不会回退创建独立窗口", async () => {
+  const calls = await runAction({ sidePanel: true, behaviorError: new Error("unsupported") });
   assert.equal(calls.creates.length, 0);
-  assert.equal(calls.updates.length, 1);
-  assert.equal(calls.updates[0].id, 9);
-  assert.equal(calls.updates[0].data.state, "normal");
-  assert.equal(calls.updates[0].data.focused, true);
+  assert.equal(calls.warnings.some((args) => String(args[0]).includes("could not be configured")), true);
+});
+
+test("清理旧窗口标识保留已读和偏好，残留 ID 不影响当前来源", async () => {
+  const calls = await runAction({ sidePanel: true, storedWindow: { id: 9, tabs: [{ id: 42 }] } });
+  assert.equal(calls.local["polaris-window-id"], undefined);
+  assert.equal(calls.local["polaris-window-tab-id"], undefined);
+  assert.equal(calls.local["polaris-release-notice-version"], "0.67.7");
+  assert.deepEqual(calls.local["existing-preference"], { enabled: true });
+  assert.equal(calls.contentRequests[0].tabId, 42);
+  assert.equal(calls.creates.length, 0);
 });
 
 test("支持系统 side panel 时，扩展图标交给浏览器打开面板", async () => {
@@ -380,46 +302,8 @@ test("同一次回退只注入一次，消息仍然失败时会记录日志", as
   assert.equal(calls.warnings.some((args) => String(args[0]).includes("[Polaris] Content script did not respond after injection.")), true);
 });
 
-test("有效窗口在聚焦竞态失败后会清理并重建", async () => {
-  const calls = await runAction({
-    storedWindow: {
-      id: 9,
-      type: "popup",
-      focused: true,
-      tabs: [{ id: 42, url: "chrome-extension://test/polaris-home.html" }]
-    },
-    updateError: new Error("window closed")
-  });
 
-  assert.equal(calls.updates.length, 1);
-  assert.equal(calls.creates.length, 1);
-  assert.equal(calls.creates[0].type, "popup");
-});
 
-test("缓存窗口已关闭时会清理状态并创建新的 Polaris popup", async () => {
-  const calls = await runAction({
-    storedWindow: { id: 9, type: "popup", tabs: [{ id: 42, url: "chrome-extension://test/polaris-home.html" }] },
-    getError: new Error("window closed")
-  });
-
-  assert.equal(calls.updates.length, 0);
-  assert.equal(calls.creates.length, 1);
-  assert.equal(calls.creates[0].type, "popup");
-});
-
-test("复用窗口后的状态请求失败不会重复创建 popup", async () => {
-  const calls = await runAction({
-    storedWindow: {
-      id: 9,
-      type: "popup",
-      tabs: [{ id: 42, url: "chrome-extension://test/polaris-home.html" }]
-    },
-    syncGetError: new Error("temporary storage failure")
-  });
-
-  assert.equal(calls.updates.length, 1);
-  assert.equal(calls.creates.length, 0);
-});
 
 test("启动时支持会话先请求内容状态，不先显示无会话空快照", async () => {
   const calls = await runAction({ storedWindow: null });
@@ -432,10 +316,6 @@ test("启动时支持会话先请求内容状态，不先显示无会话空快�
   assert.equal(stateMessage.snapshot.loading, true);
 });
 
-test("直接打开普通浏览器标签中的插件页面时仍请求已生成会话", async () => {
-  const sends = await runWindowReady();
-  assert.deepEqual(sends, [42]);
-});
 
 test("系统 side panel 就绪时不会把宿主浏览器窗口登记为 Polaris popup", async () => {
   const { local, sends } = await runSidePanelReady();

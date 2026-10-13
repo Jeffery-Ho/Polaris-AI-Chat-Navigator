@@ -45,22 +45,12 @@ test("页面清理后滚动监听不会重新创建插件根节点", () => {
   assert.doesNotMatch(floatingSource, /const root = getRoot\(\)/);
 });
 
-test("首次加载的更新说明只在有效会话中打开", () => {
+test("网页脚本不再自动打开或保存更新说明", () => {
   const startSource = functionSource("start", null);
-  const pendingNotice = functionSource("showPendingReleaseNotice", "closeReleaseNoticeForNonConversation");
-
-  assert.match(startSource, /state\.releaseNoticePending = state\.releaseNotes\.length > 0/);
-  assert.doesNotMatch(startSource, /if \(state\.releaseNoticePending[\s\S]*?lockPageScroll\(\)/);
-  assert.match(pendingNotice, /state\.releaseNoticePending = false/);
-  assert.match(pendingNotice, /lockPageScroll\(\)/);
-});
-
-test("已展示的更新说明离开会话页时标记为已读", () => {
-  const closeSource = functionSource("closeReleaseNoticeForNonConversation", "closeReleaseNotice");
-
-  assert.match(closeSource, /const wasOpen = state\.isReleaseNoticeOpen/);
-  assert.match(closeSource, /if \(wasOpen\) \{[\s\S]*markReleaseNoticeReadIfNeeded\(\)/);
-  assert.match(closeSource, /unlockPageScroll\(\)/);
+  const renderSource = functionSource("render", "scheduleRender");
+  assert.doesNotMatch(startSource, /readReleaseNoticeVersion|releaseNoticePending =/);
+  assert.doesNotMatch(renderSource, /showPendingReleaseNotice\(\)/);
+  assert.doesNotMatch(contentSource, /polaris-release-notice-version|saveReleaseNoticeVersion/);
 });
 
 test("滚动锁恢复进入插件前的 html/body overflow 值", async () => {

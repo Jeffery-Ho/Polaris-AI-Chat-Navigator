@@ -8,7 +8,6 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       input: {
-        "polaris-home": "polaris-home.html",
         sidepanel: "sidepanel.html"
       },
       output: {

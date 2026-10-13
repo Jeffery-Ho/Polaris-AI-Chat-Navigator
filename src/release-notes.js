@@ -1,5 +1,27 @@
 const RELEASE_NOTES = Object.freeze([
   {
+    version: "0.68.0",
+    en: {
+      title: "A single sidepanel experience",
+      changes: ["Polaris now uses the browser sidepanel exclusively. Update notes appear inside the panel after a feature upgrade, and can be reopened from Settings. Standalone windows are no longer supported."]
+    },
+    zh: {
+      title: "统一使用浏览器侧栏",
+      changes: ["Polaris 统一使用浏览器侧栏，移除独立窗口。功能版本升级后，更新说明会在侧栏内展示，也可随时从设置页再次查看。"]
+    }
+  },
+  {
+    version: "0.67.0",
+    en: {
+      title: "Smoother navigation and chapter reading",
+      changes: ["Navigation and Chapters switch with a lightweight transition that preserves reading positions. User prompts remain chapter roots on ChatGPT, Doubao, DeepSeek, and Qwen; navigation cards follow the panel width and settings keep the active group controls."]
+    },
+    zh: {
+      title: "更顺畅的导航与章节阅读",
+      changes: ["导航与章节使用轻量转场并保留阅读位置；ChatGPT、豆包、DeepSeek 和千问的用户提问作为章节入口，导航卡片跟随侧栏宽度，设置保留有效的分组控制。"]
+    }
+  },
+  {
     version: "0.66.0",
     en: {
       title: "Read chapters as an outline",

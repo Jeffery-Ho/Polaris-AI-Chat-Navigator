@@ -297,7 +297,6 @@ import {
   const DEFAULT_HEADER_HEIGHT = 64;
   const CONFIG_STORAGE_KEY = "gpt-paragraph-nav-config";
   const RATING_DISMISSAL_STORAGE_KEY = "polaris-rating-dismissed-until";
-  const RELEASE_NOTICE_STORAGE_KEY = "polaris-release-notice-version";
   const SUPPORT_URL = "https://jeffery-ho.github.io/polaris-landing/entry/extension/";
   const X_PROFILE_URL = "https://x.com/JefferyHo_";
   const RATING_DISMISSAL_DURATION_MS = 24 * 60 * 60 * 1000;
@@ -1678,7 +1677,6 @@ import {
       return;
     }
     state.shouldMarkReleaseNoticeRead = false;
-    saveReleaseNoticeVersion();
   }
 
   function showPendingReleaseNotice() {
@@ -1978,56 +1976,6 @@ import {
       return window.top === window;
     } catch {
       return false;
-    }
-  }
-
-  function readReleaseNoticeVersion() {
-    if (!hasLocalStorage()) {
-      return Promise.resolve(null);
-    }
-
-    return new Promise((resolve) => {
-      try {
-        chrome.storage.local.get(RELEASE_NOTICE_STORAGE_KEY, (result) => {
-          if (!isExtensionContextValid()) {
-            disposeInvalidExtensionContext();
-            resolve(null);
-            return;
-          }
-          const error = runtimeLastError();
-          if (error) {
-            console.warn("[Polaris: AI Chat Navigator] release notice read failed", error);
-            resolve(null);
-            return;
-          }
-          const version = result[RELEASE_NOTICE_STORAGE_KEY];
-          resolve(typeof version === "string" ? version : null);
-        });
-      } catch {
-        disposeInvalidExtensionContext();
-        resolve(null);
-      }
-    });
-  }
-
-  function saveReleaseNoticeVersion() {
-    if (!hasLocalStorage()) {
-      return;
-    }
-
-    try {
-      chrome.storage.local.set({ [RELEASE_NOTICE_STORAGE_KEY]: extensionMetadata.releaseVersion }, () => {
-        if (!isExtensionContextValid()) {
-          disposeInvalidExtensionContext();
-          return;
-        }
-        const error = runtimeLastError();
-        if (error) {
-          console.warn("[Polaris: AI Chat Navigator] release notice write failed", error);
-        }
-      });
-    } catch {
-      disposeInvalidExtensionContext();
     }
   }
 
@@ -5678,7 +5626,6 @@ import {
     const filteredGroups = filteredMarkerGroups(markerGroups);
     const { groups: visibleGroups, earlierUserGroupCount } = limitedMarkerGroups(filteredGroups);
 
-    showPendingReleaseNotice();
     const root = getRoot();
     updatePageTheme(root);
     getReleaseNoticeOverlay(root);
@@ -6488,14 +6435,6 @@ import {
     document.documentElement.setAttribute(DEBUG_ATTR, "loaded:0");
     state.config = await loadConfig();
     state.ratingDismissedUntil = await readRatingDismissedUntil();
-    const lastSeenReleaseVersion = await readReleaseNoticeVersion();
-    if (isTopLevelFrame()) {
-      state.releaseNotes = releaseNotesForUpdate(lastSeenReleaseVersion, extensionMetadata.releaseVersion);
-      state.releaseNoticePending = state.releaseNotes.length > 0;
-      state.isReleaseNoticeOpen = false;
-      state.releaseNoticeFocusPending = false;
-      state.shouldMarkReleaseNoticeRead = false;
-    }
     watchConfigChanges();
     registerWindowBridge();
     state.routeKey = currentRouteKey();

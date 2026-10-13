@@ -1,20 +1,12 @@
-import { matchingPolarisTab, restorePopupWindowUpdate } from "./window-lifecycle.js";
 import { snapshotDeliveryResult } from "./snapshot-delivery.js";
 
-const WINDOW_STORAGE_KEY = "polaris-window-id";
-const WINDOW_TAB_STORAGE_KEY = "polaris-window-tab-id";
 const SOURCE_WINDOW_STORAGE_KEY = "polaris-source-window-id";
 const SOURCE_TAB_STORAGE_KEY = "polaris-source-tab-id";
-const DEFAULT_WINDOW = {
-  type: "popup",
-  width: 420,
-  height: 760,
-  focused: true,
-  url: "polaris-home.html"
-};
 
-let polarisWindowId = null;
-let polarisWindowTabId = null;
+void chrome.storage.local.remove(["polaris-window-id", "polaris-window-tab-id"]).catch((error) => {
+  console.warn("[Polaris] Legacy window state could not be cleared.", error);
+});
+
 let lastNormalWindowId = null;
 let currentTabId = null;
 let latestSnapshot = null;
@@ -48,18 +40,9 @@ function isSupportedCandidateUrl(url) {
   }
 }
 
-function isPolarisTab(tab) {
-  if (!tab || tab.id === undefined) {
-    return false;
-  }
-  if (tab.id === polarisWindowTabId) {
-    return true;
-  }
-  return tab.url === chrome.runtime.getURL("polaris-home.html");
-}
-
 function isNormalSourceTab(tab) {
-  return Boolean(tab?.id !== undefined && tab.windowId !== polarisWindowId && !isPolarisTab(tab));
+  const extensionUrl = chrome.runtime.getURL("");
+  return Boolean(tab?.id !== undefined && !tab.url?.startsWith(extensionUrl) && !tab.pendingUrl?.startsWith(extensionUrl));
 }
 
 async function publishEmptySnapshot(tabId, supportedRoute = false) {
@@ -97,57 +80,9 @@ async function readStoredNumber(key) {
   return Number.isInteger(value) && value >= 0 ? value : null;
 }
 
-async function writeWindowState(windowId, tabId) {
-  polarisWindowId = windowId;
-  polarisWindowTabId = tabId;
-  await chrome.storage.local.set({
-    [WINDOW_STORAGE_KEY]: windowId,
-    [WINDOW_TAB_STORAGE_KEY]: tabId
-  });
-}
-
-async function forgetWindowState() {
-  polarisWindowId = null;
-  polarisWindowTabId = null;
-  await chrome.storage.local.remove([WINDOW_STORAGE_KEY, WINDOW_TAB_STORAGE_KEY]);
-}
-
-async function restoreWindowState() {
-  if (polarisWindowId === null) {
-    polarisWindowId = await readStoredNumber(WINDOW_STORAGE_KEY);
-  }
-  if (polarisWindowTabId === null) {
-    polarisWindowTabId = await readStoredNumber(WINDOW_TAB_STORAGE_KEY);
-  }
-  if (lastNormalWindowId === null) {
-    lastNormalWindowId = await readStoredNumber(SOURCE_WINDOW_STORAGE_KEY);
-  }
-  if (currentTabId === null) {
-    currentTabId = await readStoredNumber(SOURCE_TAB_STORAGE_KEY);
-  }
-}
-
-async function existingPolarisWindow() {
-  await restoreWindowState();
-  if (polarisWindowId === null) {
-    return null;
-  }
-  try {
-    const existing = await chrome.windows.get(polarisWindowId, { populate: true });
-    const windowUrl = chrome.runtime.getURL("polaris-home.html");
-    const matchingTab = matchingPolarisTab(existing, windowUrl, polarisWindowTabId);
-    if (!matchingTab) {
-      await forgetWindowState();
-      return null;
-    }
-    if (matchingTab.id !== polarisWindowTabId) {
-      await writeWindowState(existing.id, matchingTab.id);
-    }
-    return existing;
-  } catch {
-    await forgetWindowState();
-    return null;
-  }
+async function restoreSourceState() {
+  if (lastNormalWindowId === null) lastNormalWindowId = await readStoredNumber(SOURCE_WINDOW_STORAGE_KEY);
+  if (currentTabId === null) currentTabId = await readStoredNumber(SOURCE_TAB_STORAGE_KEY);
 }
 
 async function rememberNormalTab(tab) {
@@ -163,7 +98,7 @@ async function rememberNormalTab(tab) {
 }
 
 async function activeNormalTab() {
-  await restoreWindowState();
+  await restoreSourceState();
   if (lastNormalWindowId !== null) {
     const tabs = await chrome.tabs.query({ active: true, windowId: lastNormalWindowId });
     const activeTab = tabs.find(isNormalSourceTab);
@@ -355,7 +290,7 @@ async function forwardCommand(message) {
 }
 
 async function isCurrentSourceTab(tab) {
-  if (!tab?.id || tab.windowId === polarisWindowId) {
+  if (!isNormalSourceTab(tab)) {
     return false;
   }
   if (tab.id === currentTabId) {
@@ -389,79 +324,6 @@ async function persistWindowConfigCommand(message) {
   await chrome.storage.sync.set({ [key]: { ...current, ...patch } });
 }
 
-async function openOrFocusWindow(tab) {
-  await rememberNormalTab(tab);
-  const sourceWindowId = tab?.windowId ?? lastNormalWindowId;
-  const sourceTabId = tab?.id ?? currentTabId;
-  const existing = await existingPolarisWindow();
-  if (existing?.id !== undefined) {
-    let restored = false;
-    try {
-      await chrome.windows.update(existing.id, restorePopupWindowUpdate());
-      restored = true;
-    } catch {
-      await forgetWindowState();
-    }
-    if (restored) {
-      try {
-        await requestContentState();
-      } catch {
-        // A transient source-tab failure must not create a duplicate popup.
-      }
-      return;
-    }
-  }
-
-  const created = await chrome.windows.create({
-    ...DEFAULT_WINDOW,
-    url: chrome.runtime.getURL("polaris-home.html")
-  });
-  const windowTab = created?.tabs?.[0];
-  if (created?.id !== undefined && windowTab?.id !== undefined) {
-    await writeWindowState(created.id, windowTab.id);
-  }
-  // Creating and focusing the popup emits an activation event before the
-  // window IDs above are known. Restore the tab that triggered the action so
-  // the ready handshake cannot accidentally target the popup itself.
-  if (sourceWindowId !== null && sourceWindowId !== undefined) {
-    lastNormalWindowId = sourceWindowId;
-    currentTabId = sourceTabId ?? null;
-    await chrome.storage.local.set({
-      [SOURCE_WINDOW_STORAGE_KEY]: lastNormalWindowId,
-      [SOURCE_TAB_STORAGE_KEY]: currentTabId
-    });
-  }
-  await requestContentState(tab);
-}
-
-async function rememberWindowReadyState(message, sender) {
-  if (message.windowType === "sidepanel") {
-    polarisWindowId = null;
-    polarisWindowTabId = null;
-    await chrome.storage.local.remove([WINDOW_STORAGE_KEY, WINDOW_TAB_STORAGE_KEY]);
-    return;
-  }
-  const readyWindowId = Number.isInteger(message.windowId) ? message.windowId : sender.tab?.windowId;
-  const readyTabId = Number.isInteger(message.windowTabId) ? message.windowTabId : sender.tab?.id;
-  if (readyWindowId === undefined || readyTabId === undefined) {
-    return;
-  }
-  const isPopup = message.windowType === undefined || message.windowType === "popup";
-  if (isPopup) {
-    polarisWindowId = readyWindowId;
-    polarisWindowTabId = readyTabId;
-    await chrome.storage.local.set({
-      [WINDOW_STORAGE_KEY]: polarisWindowId,
-      [WINDOW_TAB_STORAGE_KEY]: polarisWindowTabId
-    });
-    return;
-  }
-  polarisWindowId = null;
-  polarisWindowTabId = readyTabId;
-  await chrome.storage.local.remove(WINDOW_STORAGE_KEY);
-  await chrome.storage.local.set({ [WINDOW_TAB_STORAGE_KEY]: polarisWindowTabId });
-}
-
 function replyToSnapshotDelivery(sendResponse, payload) {
   if (typeof sendResponse !== "function") {
     return;
@@ -483,7 +345,6 @@ async function forwardContentSnapshot(message, sender, sendResponse) {
         console.warn("[Polaris] Page sections were not forwarded to the side panel because this tab is not the current source tab.", {
           tabId: sender.tab?.id ?? null,
           currentTabId,
-          polarisWindowId,
           markerCount,
           headingCount
         });
@@ -517,16 +378,12 @@ async function forwardContentSnapshot(message, sender, sendResponse) {
 }
 
 function configureAction() {
-  if (typeof chrome.sidePanel?.setPanelBehavior === "function") {
-    void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {
-      chrome.action.onClicked.addListener((tab) => {
-        void openOrFocusWindow(tab);
-      });
-    });
+  if (typeof chrome.sidePanel?.setPanelBehavior !== "function") {
+    console.warn("[Polaris] This browser does not support the Side Panel API.");
     return;
   }
-  chrome.action.onClicked.addListener((tab) => {
-    void openOrFocusWindow(tab);
+  void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch((error) => {
+    console.warn("[Polaris] The sidepanel action could not be configured.", error);
   });
 }
 
@@ -538,9 +395,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "POLARIS_WINDOW_READY") {
-    void rememberWindowReadyState(message, sender)
-      .then(() => requestContentState())
-      .catch(() => {});
+    if (message.windowType === "sidepanel") void requestContentState().catch(() => {});
     return;
   }
 
@@ -592,9 +447,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 chrome.tabs.onActivated.addListener((activeInfo) => {
-  if (activeInfo.windowId === polarisWindowId) {
-    return;
-  }
   void chrome.tabs.get(activeInfo.tabId).then((tab) => {
     void rememberNormalTab(tab);
     void requestContentState(tab);
@@ -602,7 +454,7 @@ chrome.tabs.onActivated.addListener((activeInfo) => {
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (tab.windowId === polarisWindowId || tabId !== currentTabId && !tab.active) {
+  if (tabId !== currentTabId && !tab.active) {
     return;
   }
   if (changeInfo.url || changeInfo.status === "loading" || changeInfo.status === "complete") {
@@ -612,23 +464,14 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 });
 
 chrome.windows.onFocusChanged.addListener((windowId) => {
-  if (windowId === polarisWindowId || windowId === chrome.windows.WINDOW_ID_NONE) {
+  if (windowId === chrome.windows.WINDOW_ID_NONE) {
     return;
   }
   lastNormalWindowId = windowId;
   void requestContentState();
 });
 
-chrome.windows.onRemoved.addListener((windowId) => {
-  if (windowId === polarisWindowId) {
-    void forgetWindowState();
-  }
-});
-
 chrome.tabs.onRemoved.addListener((tabId) => {
-  if (tabId === polarisWindowTabId) {
-    void forgetWindowState();
-  }
   if (tabId === currentTabId) {
     currentTabId = null;
     latestSnapshot = null;
