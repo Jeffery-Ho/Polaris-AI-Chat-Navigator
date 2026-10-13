@@ -1593,7 +1593,7 @@ import {
       const issue = document.createElement("a");
       issue.className = "gpt-paragraph-nav__release-notice-action is-icon";
       issue.setAttribute("aria-label", t("releaseNotice.issueAction"));
-      issue.href = "https://github.com/Jeffery-Ho/Polaris-for-Web/issues";
+      issue.href = "https://github.com/Jeffery-Ho/Polaris-AI-Chat-Navigator/issues";
       issue.rel = "noreferrer";
       issue.target = "_blank";
       issue.title = t("releaseNotice.issueAction");
@@ -1934,7 +1934,7 @@ import {
           }
           const error = runtimeLastError();
           if (error) {
-            console.warn("[Polaris for Web] rating dismissal read failed", error);
+            console.warn("[Polaris: AI Chat Navigator] rating dismissal read failed", error);
             resolve(0);
             return;
           }
@@ -1965,7 +1965,7 @@ import {
         }
         const error = runtimeLastError();
         if (error) {
-          console.warn("[Polaris for Web] rating dismissal write failed", error);
+          console.warn("[Polaris: AI Chat Navigator] rating dismissal write failed", error);
         }
       });
     } catch {
@@ -1996,7 +1996,7 @@ import {
           }
           const error = runtimeLastError();
           if (error) {
-            console.warn("[Polaris for Web] release notice read failed", error);
+            console.warn("[Polaris: AI Chat Navigator] release notice read failed", error);
             resolve(null);
             return;
           }
@@ -2023,7 +2023,7 @@ import {
         }
         const error = runtimeLastError();
         if (error) {
-          console.warn("[Polaris for Web] release notice write failed", error);
+          console.warn("[Polaris: AI Chat Navigator] release notice write failed", error);
         }
       });
     } catch {
@@ -2055,7 +2055,7 @@ import {
           }
         const error = runtimeLastError();
         if (error) {
-          console.warn("[Polaris for Web] config sync read failed", error);
+          console.warn("[Polaris: AI Chat Navigator] config sync read failed", error);
           resolve(null);
           return;
         }
@@ -2090,7 +2090,7 @@ import {
           }
         const error = runtimeLastError();
         if (error) {
-          console.warn("[Polaris for Web] config sync write failed", error);
+          console.warn("[Polaris: AI Chat Navigator] config sync write failed", error);
         }
         resolve();
         });
@@ -2229,7 +2229,7 @@ import {
       fields: CONFIG_FIELDS.map((field) => ({ ...field, value: state.config[field.key] })),
       iconUrl: extensionMetadata.iconUrl,
       issueLabel: t("contact.issue"),
-      issueUrl: "https://github.com/Jeffery-Ho/Polaris-for-Web/issues",
+      issueUrl: "https://github.com/Jeffery-Ho/Polaris-AI-Chat-Navigator/issues",
       xLabel: t("contact.x"),
       xUrl: X_PROFILE_URL,
       markerLevels: MARKER_LEVEL_OPTIONS
@@ -2754,7 +2754,9 @@ import {
     if (treeResult) treeResult.push(...collectSidepanelChapters(snapshot.assistantContainers, buildWindowChapterOutline(boundHeadings), {
       baseUrl: location.href,
       fullTextTitle: t("chapters.fullText"),
-      userMessages: isChatGPTPage() ? snapshot.markerGroups.flatMap((group) => group.user ? [group.user] : []) : []
+      userMessages: isChatGPTPage() || isDoubaoPage() || isDeepSeekPage() || isQianwenPage()
+        ? snapshot.markerGroups.flatMap((group) => group.user ? [group.user] : []) : [],
+      assistantToUser: snapshot.assistantToUser
     }));
     if (!boundHeadings.length) {
       return snapshot.assistantContainers.length
@@ -4400,7 +4402,7 @@ import {
       usableHeadings: headings.length,
       conversationLength: Math.round(metrics.length)
     });
-    console.info("[Polaris for Web] scan", {
+    console.info("[Polaris: AI Chat Navigator] scan", {
       assistantContainers: containers.length,
       usableHeadings: headings.length,
       conversationLength: Math.round(metrics.length),
@@ -5638,6 +5640,7 @@ import {
       hasConversation,
       headings: renderHeadings,
       markerGroups,
+      assistantToUser: conversation?.assistantToUser,
       metrics
     };
   }
@@ -6499,7 +6502,7 @@ import {
     try {
       await cleanupLegacyMakerSnapshots({ storage: chrome.storage.local });
     } catch (error) {
-      console.warn("[Polaris for Web] Legacy Maker snapshot cleanup unavailable", error);
+      console.warn("[Polaris: AI Chat Navigator] Legacy Maker snapshot cleanup unavailable", error);
     }
     watchRouteChanges();
     state.pageThemeWatcher = createPageThemeWatcher({
@@ -6551,7 +6554,7 @@ import {
     document.addEventListener("click", handleDocumentClick);
     registerDiagnosticErrorListeners();
     recordDiagnosticEvent("extension_loaded");
-    console.info("[Polaris for Web] loaded");
+    console.info("[Polaris: AI Chat Navigator] loaded");
   }
 
   if (document.readyState === "loading") {

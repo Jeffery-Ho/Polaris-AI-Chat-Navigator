@@ -928,7 +928,7 @@ import { didWindowConversationChange } from "./window-source-state.js";
     const config = snapshot.config || {};
     const displaySection = element("section", "settings-section");
     displaySection.appendChild(element("h2", "settings-section-title", locale === "zh" ? "列表显示" : "List display"));
-    [["maxVisible", locale === "zh" ? "最大 Maker 数量" : "Maximum markers", 1, 80], ["maxVisibleUserGroups", locale === "zh" ? "用户分组上限" : "User group limit", 1, 80], ["foldThreshold", locale === "zh" ? "折叠阈值" : "Fold threshold", 2, 80], ["tooltipMaxWidth", locale === "zh" ? "提示宽度" : "Tooltip width", 160, 720]].forEach(([key, label, min, max]) => {
+    [["maxVisibleUserGroups", locale === "zh" ? "用户分组上限" : "User group limit", 1, 80], ["foldThreshold", locale === "zh" ? "折叠阈值" : "Fold threshold", 2, 80]].forEach(([key, label, min, max]) => {
       const wrapper = element("label", "settings-range");
       const line = element("span", "settings-range-line");
       line.append(element("span", "settings-label", label), element("output", "settings-value", String(config[key] ?? min)));
@@ -993,7 +993,7 @@ import { didWindowConversationChange } from "./window-source-state.js";
     });
     helpSection.appendChild(footer);
     const links = element("div", "settings-links");
-    [[locale === "zh" ? "更新说明" : "Release notes", "https://github.com/Jeffery-Ho/Polaris-for-Web/blob/main/changelog.md"], [locale === "zh" ? "反馈" : "Feedback", "https://github.com/Jeffery-Ho/Polaris-for-Web/issues"]].forEach(([label, url]) => {
+    [[locale === "zh" ? "更新说明" : "Release notes", "https://github.com/Jeffery-Ho/Polaris-AI-Chat-Navigator/blob/main/changelog.md"], [locale === "zh" ? "反馈" : "Feedback", "https://github.com/Jeffery-Ho/Polaris-AI-Chat-Navigator/issues"]].forEach(([label, url]) => {
       const link = element("a", "settings-link", label);
       link.href = url;
       link.target = "_blank";

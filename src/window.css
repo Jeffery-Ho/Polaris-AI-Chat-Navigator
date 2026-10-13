@@ -347,7 +347,7 @@ button { color: inherit; }
 
 .maker-card-ai {
   align-self: flex-start;
-  width: 88%;
+  width: 100%;
   background: var(--polaris-bg-subtle);
   border-color: transparent;
 }

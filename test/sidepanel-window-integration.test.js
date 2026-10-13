@@ -3,14 +3,14 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { JSDOM } from "jsdom";
 
-async function boot(windowType = "sidepanel", { transitionApi = false, openChapters = true, deliverChapters = true, stallAnimationFrames = false } = {}) {
+async function boot(windowType = "sidepanel", { locale = "zh", transitionApi = false, openChapters = true, deliverChapters = true, stallAnimationFrames = false } = {}) {
   const dom = new JSDOM(`<html data-window-type="${windowType}"><body><div id="polaris-window"></div></body></html>`, { url: "https://extension.test/sidepanel.html", runScripts: "outside-only", pretendToBeVisual: true });
   const win = dom.window;
   win.matchMedia = () => ({ matches: false, addEventListener() {} });
   win.scrollTo = () => {};
   if (stallAnimationFrames) win.requestAnimationFrame = () => 1;
   win.setInterval = () => 0;
-  win.PolarisI18n = { locale: "zh", t: (key) => key };
+  win.PolarisI18n = { locale, t: (key) => key };
   const listeners = []; const commands = [];
   const transitions = [];
   if (transitionApi) win.document.startViewTransition = (update) => {
@@ -31,7 +31,7 @@ async function boot(windowType = "sidepanel", { transitionApi = false, openChapt
   const snapshot = { hasConversation: true, supportedRoute: true, routeKey: "https://chatgpt.com/c/one", platform: "chatgpt", config: {}, headings: [], markerItems: [{ key: "ai-second", type: "ai", markerKey: "second", title: "second", preview: "second" }], activeMarkerKey: "second" };
   const chapters = ["first", "second"].map((key) => ({ markerKey: key, sourceKey: key, title: key, parentKey: "", contents: [{ type: "block", text: `${key} body`, html: `<p>${key} body</p>` }], blocks: [{ tagName: "p", text: `${key} body` }] }));
   send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot });
-  if (openChapters) [...win.document.querySelectorAll(".window-tab")].find((button) => button.textContent === "章节").click();
+  if (openChapters) [...win.document.querySelectorAll(".window-tab")].find((button) => button.textContent === (locale === "zh" ? "章节" : "Chapters")).click();
   if (deliverChapters) send({ type: "POLARIS_WINDOW_CHAPTERS", tabId: 7, routeKey: snapshot.routeKey, treeChapters: chapters, chapters });
   return { dom, win, send, commands, snapshot, chapters, transitions };
 }
@@ -83,3 +83,30 @@ test("standalone continues using the original directory and chapter actions", as
   assert.equal(s.win.document.querySelector(".chapter-tree-reader"), null);
   s.dom.window.close();
 });
+
+for (const windowType of ["sidepanel", "standalone"]) {
+  for (const locale of ["zh", "en"]) {
+    test(`${windowType} ${locale} settings keep working group controls and omit page-only display controls`, async () => {
+      const s = await boot(windowType, { locale, openChapters: false });
+      try {
+        const config = { maxVisible: 30, maxVisibleUserGroups: 50, foldThreshold: 20, tooltipMaxWidth: 360 };
+        s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...s.snapshot, config } });
+        s.win.document.querySelector(".window-settings-button").click();
+        const ranges = [...s.win.document.querySelectorAll('.settings-panel input[type="range"]')];
+        const labels = [...s.win.document.querySelectorAll(".settings-range .settings-label")].map((label) => label.textContent);
+        assert.deepEqual(labels, locale === "zh" ? ["用户分组上限", "折叠阈值"] : ["User group limit", "Fold threshold"]);
+        assert.deepEqual(ranges.map((input) => input.value), ["50", "20"]);
+        for (const [index, key, value] of [[0, "maxVisibleUserGroups", 27], [1, "foldThreshold", 12]]) {
+          ranges[index].value = String(value);
+          ranges[index].dispatchEvent(new s.win.Event("input", { bubbles: true }));
+          assert.equal(ranges[index].closest("label").querySelector("output").textContent, String(value));
+          const command = JSON.parse(JSON.stringify(s.commands.at(-1)));
+          assert.deepEqual(command, { type: "POLARIS_WINDOW_COMMAND", command: "update-config", patch: { [key]: value } });
+        }
+        assert.equal(s.win.document.querySelectorAll('.settings-types input[type="checkbox"]').length, 7);
+      } finally {
+        s.dom.window.close();
+      }
+    });
+  }
+}

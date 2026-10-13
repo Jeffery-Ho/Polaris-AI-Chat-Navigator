@@ -1,8 +1,9 @@
 import { appendSanitizedChapterContent } from "./chapter-markdown.js";
 
 // Split source DOM ranges, never deduplicate text: repeated sentences are content.
-export function collectSidepanelChapters(containers, outline, { baseUrl, fullTextTitle = "Full text", userMessages = [] } = {}) {
+export function collectSidepanelChapters(containers, outline, { baseUrl, fullTextTitle = "Full text", userMessages = [], assistantToUser = null } = {}) {
   const result = [];
+  const userNodes = new Map();
   const entries = [
     ...containers.map((container, containerIndex) => ({ element: container, container, containerIndex })),
     ...userMessages.map((user) => ({ element: user.element, user }))
@@ -15,9 +16,11 @@ export function collectSidepanelChapters(containers, outline, { baseUrl, fullTex
   entries.forEach(({ container, containerIndex, user }) => {
     if (user) {
       userNode = { markerKey: user.markerKey, sourceKey: user.markerKey, parentKey: "", title: user.title, contents: [] };
+      userNodes.set(user.element, userNode);
       result.push(userNode);
       return;
     }
+    if (assistantToUser) userNode = userNodes.get(assistantToUser.get(container)) || null;
     const doc = container.ownerDocument;
     const headings = outline.filter((entry) => entry.containerKey === `assistant-${containerIndex}`);
     const byKey = new Map();

@@ -1,7 +1,7 @@
 (() => {
   const messages = Object.freeze({
     en: Object.freeze({
-      "navigation.rootLabel": "Polaris for Web navigation",
+      "navigation.rootLabel": "Polaris: AI Chat Navigator navigation",
       "controls.label": "Polaris controls",
       "controls.minimize": "Minimize controls",
       "controls.maximize": "Expand controls",
@@ -82,7 +82,7 @@
       "userMarker.replyNotLoaded": "This reply has not loaded yet. Scroll the conversation to load it, then try again."
     }),
     zh: Object.freeze({
-      "navigation.rootLabel": "Polaris for Web 段落导航",
+      "navigation.rootLabel": "Polaris: AI Chat Navigator 段落导航",
       "controls.label": "Polaris 控制面板",
       "controls.minimize": "最小化控制面板",
       "controls.maximize": "展开控制面板",

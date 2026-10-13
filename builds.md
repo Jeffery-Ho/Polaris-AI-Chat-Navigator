@@ -10,6 +10,48 @@
 - Version update type must be declared by the user before recording a build.
 - After each build is recorded, confirm the build number and version with the user.
 
+## 274
+
+- Date: 2026-10-13
+- Version: 0.67.7
+- Summary: Aligns local project branding and repository links with Polaris: AI Chat Navigator.
+- Notes: Updates the extension name, package name, page titles, navigation labels, documentation, privacy policy, copyright label, and diagnostic console prefix. Feedback, release-note, and privacy links use the renamed Polaris-AI-Chat-Navigator repository. Keeps the existing route-event and preference identifiers compatible. Updated the current version to `0.67.7(274)`.
+
+## 273
+
+- Date: 2026-10-13
+- Version: 0.67.6
+- Summary: Removes obsolete page-only display settings from the Polaris window.
+- Notes: Removes Maximum markers and Tooltip width from both sidepanel and standalone settings, while retaining the active User group limit and Fold threshold controls. Preserves stored preferences and synchronizes the README settings list. Updated the current version to `0.67.6(273)`.
+
+## 272
+
+- Date: 2026-10-13
+- Version: 0.67.5
+- Summary: Restores Qwen user prompts as chapter roots instead of Full text placeholders.
+- Notes: Includes recognized Qwen user messages in chapter extraction, keeping answer introductions and headings under their source prompt. Preserves repeated and unanswered prompts, multiple answer bodies, and Full text for orphan replies. Updated the current version to `0.67.5(272)`.
+
+## 271
+
+- Date: 2026-10-13
+- Version: 0.67.4
+- Summary: Restores DeepSeek user prompts as chapter roots instead of Full text placeholders.
+- Notes: Passes mounted user messages and explicit reply ownership from the DeepSeek conversation scan to chapter extraction. Keeps answer introductions and headings under their source prompt, preserves repeated and unanswered prompts, and leaves replies across virtual-list gaps ungrouped. Updated the current version to `0.67.4(271)`.
+
+## 270
+
+- Date: 2026-10-13
+- Version: 0.67.3
+- Summary: Restores Doubao user prompts as sidepanel chapter roots.
+- Notes: Passes recognized Doubao user messages into the chapter tree instead of dropping them at the ChatGPT-only gate. Groups answer introductions and headings under their source prompt, keeps repeated prompts and unanswered turns separate, and preserves Full text for orphan replies. Updated the current version to `0.67.3(270)`.
+
+## 269
+
+- Date: 2026-10-13
+- Version: 0.67.2
+- Summary: Aligns AI Maker card width with the search text field.
+- Notes: Removes the 88% width constraint so AI Maker cards use the full available navigation width and resize with the sidepanel or standalone window. Updated the current version to `0.67.2(269)`.
+
 ## 268
 
 - Date: 2026-10-13

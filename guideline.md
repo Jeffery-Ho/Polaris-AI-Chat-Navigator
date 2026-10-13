@@ -1,4 +1,4 @@
-# Polaris for Web Guidelines
+# Polaris: AI Chat Navigator Guidelines
 
 ## Heading Marker Rule
 

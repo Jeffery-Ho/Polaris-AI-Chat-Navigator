@@ -1,8 +1,8 @@
-# Polaris for Web
+# Polaris: AI Chat Navigator
 
 A browser extension that adds section navigation to AI-generated web responses.
 
-Polaris for Web automatically detects headings and list titles in AI responses and displays them in a movable standalone window. Click a Maker to jump directly to the corresponding section—ideal for reading long answers, reports, step-by-step guides, and research results.
+Polaris: AI Chat Navigator automatically detects headings and list titles in AI responses and displays them in a movable standalone window. Click a Maker to jump directly to the corresponding section—ideal for reading long answers, reports, step-by-step guides, and research results.
 
 ## Development
 
@@ -37,7 +37,7 @@ Do not load the repository root. The root is source, not an extension package. `
 
 Manus navigation reads only mounted message DOM inside the conversation list. All AI text replies are grouped by their user turn; task status, tool controls, suggestions, and upgrade cards are excluded.
 
-DeepSeek navigation reads only mounted messages inside its virtual list. Final-answer Markdown is grouped with the preceding mounted user message when virtual item keys are consecutive; thinking content, disclaimers, controls, and unrelated page content are excluded. Missing user messages remain ungrouped, and Makers follow the inner conversation scroller.
+DeepSeek navigation reads only mounted messages inside its virtual list. Final-answer Markdown is grouped with the preceding mounted user message when virtual item keys are consecutive; thinking content, disclaimers, controls, and unrelated page content are excluded. Chapters use the user prompt as the root title and keep answer introductions and subchapters under that prompt. Missing user messages and gaps remain ungrouped, and Makers follow the inner conversation scroller.
 
 ## Marker Rules
 
@@ -82,10 +82,8 @@ DeepSeek navigation reads only mounted messages inside its virtual list. Final-a
 
 Open **Settings** from the Polaris window to adjust:
 
-- Maximum number of visible markers
 - User group limit
 - Fold group size
-- Tooltip width
 - H1, H2, H3, H4, bold-text, unordered-list, and ordered-list marker visibility for the current platform
 
 Preferences are saved to `chrome.storage.sync`.
@@ -108,7 +106,7 @@ The Diagnostics section keeps a bounded session-only event log in the current ta
 
 ## Privacy
 
-Polaris for Web processes only currently mounted AI response content locally in your browser and does not transmit it to the developer or third-party servers. It does not retain Maker conversation history across page refreshes, routes, or DOM removal. Diagnostic export is user-initiated: the extension keeps only a bounded, redacted current-tab session log, downloads it locally, and opens a `mailto:` draft only when requested; it does not upload the log or attach it automatically. The separate support page only loads optional Google Analytics and Aliyun SLS after the visitor explicitly consents, and never sends AI conversation content or extension settings. See the [Privacy Policy](https://jeffery-ho.github.io/Polaris-for-Web/privacy-policy.html) for details.
+Polaris: AI Chat Navigator processes only currently mounted AI response content locally in your browser and does not transmit it to the developer or third-party servers. It does not retain Maker conversation history across page refreshes, routes, or DOM removal. Diagnostic export is user-initiated: the extension keeps only a bounded, redacted current-tab session log, downloads it locally, and opens a `mailto:` draft only when requested; it does not upload the log or attach it automatically. The separate support page only loads optional Google Analytics and Aliyun SLS after the visitor explicitly consents, and never sends AI conversation content or extension settings. See the [Privacy Policy](https://jeffery-ho.github.io/Polaris-AI-Chat-Navigator/privacy-policy.html) for details.
 
 ## Support
 
@@ -120,7 +118,7 @@ Do not commit `dist/` or load `dist.zip` as the extension. The release workflow 
 
 ## Version
 
-Current version: `0.67.1(268)`
+Current version: `0.67.7(274)`
 
 ## License
 
