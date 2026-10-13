@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { createSidepanelChapterReader } from "../src/sidepanel-chapter-reader.js";
+import { collectSidepanelChapters } from "../src/sidepanel-chapter-content.js";
 const nodes = [
   { markerKey: "a", sourceKey: "a", parentKey: "", title: "甲", contents: [{ type: "block", text: "引言", html: "<p>引言</p>" }, { type: "child", key: "b" }] },
   { markerKey: "b", sourceKey: "b", parentKey: "a", title: "子章", contents: [{ type: "block", text: "正文", html: "<p>正文</p>" }] },
@@ -23,6 +24,25 @@ function setup(overrides = {}) {
   return { dom, document, reader, update, click, copied, located };
 }
 const settle = () => new Promise((resolve) => setTimeout(resolve, 25));
+test("ChatGPT user prompt renders, expands its answer, copies and locates the user source", async () => {
+  const source = new JSDOM('<main><div id="user">可以在模拟器里面安装系统相册么</div><article><p>iOS Simulator 自带系统照片 App。</p></article></main>');
+  const user = source.window.document.getElementById("user");
+  const chapters = collectSidepanelChapters([source.window.document.querySelector("article")], [], {
+    userMessages: [{ element: user, markerKey: "user", title: user.textContent }]
+  });
+  const s = setup();
+  s.update({ nodes: chapters });
+  assert.equal(s.reader.element.querySelector(".chapter-node-title").textContent, user.textContent);
+  assert.ok(!s.reader.element.textContent.includes("Full text"));
+  s.click(user.textContent);
+  assert.match(s.reader.element.textContent, /iOS Simulator 自带系统照片 App。/);
+  s.document.querySelector('.chapter-node-dot[data-key="user"]').click();
+  s.click("复制本章"); await settle();
+  assert.equal(s.copied[0], "可以在模拟器里面安装系统相册么\n\niOS Simulator 自带系统照片 App。");
+  s.click("定位原文"); await settle();
+  assert.deepEqual(s.located, ["user"]);
+  source.window.close(); s.dom.window.close();
+});
 test("bullet menu does not navigate source; title expands inline; focus and return work", async () => {
   const s = setup();
   s.document.querySelector('.chapter-node-dot[data-key="b"]').click();

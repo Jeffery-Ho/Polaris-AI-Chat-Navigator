@@ -35,7 +35,7 @@ function createEvent() {
   };
 }
 
-async function runAction({ storedWindow, getError = null, updateError = null, syncGetError = null, sidePanel = false, contentScriptFailures = 0, scripting = false, cssError = null, scriptError = null, contentScripts = packagedContentScripts, settleMs = 0 }) {
+async function runAction({ storedWindow, getError = null, updateError = null, syncGetError = null, sidePanel = false, contentScriptFailures = 0, contentResponse, scripting = false, cssError = null, scriptError = null, contentScripts = packagedContentScripts, settleMs = 0 }) {
   const windowUrl = "chrome-extension://test/polaris-home.html";
   const sourceTab = { id: 42, windowId: 9, active: true, url: "https://chatgpt.com/c/test" };
   const local = {
@@ -45,6 +45,7 @@ async function runAction({ storedWindow, getError = null, updateError = null, sy
     "polaris-source-tab-id": sourceTab.id
   };
   const action = createEvent();
+  const runtimeMessage = createEvent();
   const calls = { creates: [], updates: [], contentRequests: [], runtimeMessages: [], sidePanelBehaviors: [], cssInjections: [], scriptInjections: [], warnings: [] };
   let contentRequestAttempts = 0;
   const noOpEvent = () => createEvent();
@@ -69,7 +70,7 @@ async function runAction({ storedWindow, getError = null, updateError = null, sy
       },
       getURL(path) { return `chrome-extension://test/${path}`; },
       async sendMessage(message) { calls.runtimeMessages.push(message); },
-      onMessage: noOpEvent()
+      onMessage: runtimeMessage
     },
     storage: {
       local: {
@@ -117,6 +118,7 @@ async function runAction({ storedWindow, getError = null, updateError = null, sy
           contentRequestAttempts += 1;
           throw new Error("content script unavailable");
         }
+        return contentResponse;
       },
       async update() {},
       async get() { return sourceTab; },
@@ -142,8 +144,25 @@ async function runAction({ storedWindow, getError = null, updateError = null, sy
   });
   action.emit(sourceTab);
   await new Promise((resolve) => setTimeout(resolve, settleMs));
+  calls.command = (message) => new Promise((resolve) => runtimeMessage.emit(message, {}, resolve));
   return calls;
 }
+
+test("章节来源定位将 content script 的成功响应返回侧栏", async () => {
+  const calls = await runAction({ storedWindow: null, contentResponse: { ok: true } });
+  const response = await calls.command({ type: "POLARIS_WINDOW_COMMAND", command: "jump-to-chapter", markerKey: "user-1", expectedTabId: 42, expectResult: true });
+  assert.equal(response.ok, true);
+  assert.equal(calls.contentRequests.at(-1).message.markerKey, "user-1");
+});
+
+test("章节来源定位保留失败结果并拒绝已切换的来源标签页", async () => {
+  const calls = await runAction({ storedWindow: null, contentResponse: { ok: false } });
+  const command = { type: "POLARIS_WINDOW_COMMAND", command: "jump-to-chapter", markerKey: "user-1", expectedTabId: 42, expectResult: true };
+  assert.equal((await calls.command(command)).ok, false);
+  const requests = calls.contentRequests.length;
+  assert.equal((await calls.command({ ...command, expectedTabId: 99 })).ok, false);
+  assert.equal(calls.contentRequests.length, requests);
+});
 
 async function runWindowReady() {
   const windowUrl = "chrome-extension://test/polaris-home.html";

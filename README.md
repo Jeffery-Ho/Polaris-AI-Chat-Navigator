@@ -120,7 +120,7 @@ Do not commit `dist/` or load `dist.zip` as the extension. The release workflow 
 
 ## Version
 
-Current version: `0.67.0(267)`
+Current version: `0.67.1(268)`
 
 ## License
 

@@ -303,8 +303,8 @@ async function injectContentScript(tabId) {
 
 async function sendContentMessage(tabId, message, { injectIfMissing = false } = {}) {
   try {
-    await chrome.tabs.sendMessage(tabId, message);
-    return true;
+    const response = await chrome.tabs.sendMessage(tabId, message);
+    return message.expectResult ? response : true;
   } catch {
     if (!injectIfMissing || !(await injectContentScript(tabId))) {
       return false;
@@ -316,8 +316,8 @@ async function sendContentMessage(tabId, message, { injectIfMissing = false } = 
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     try {
-      await chrome.tabs.sendMessage(tabId, message);
-      return true;
+      const response = await chrome.tabs.sendMessage(tabId, message);
+      return message.expectResult ? response : true;
     } catch {
       // The injected content script may still be finishing its startup.
     }

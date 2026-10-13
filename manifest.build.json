@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Polaris: AI Chat Navigator — Smart Headings & Quick Jump",
-  "version": "0.67.0",
-  "version_name": "0.67.0(267)",
+  "version": "0.67.1",
+  "version_name": "0.67.1(268)",
   "description": "Show heading markers for supported AI web answers and jump to headings from the right edge.",
   "icons": {
     "16": "icons/gpt-voyager-icon-16.png",

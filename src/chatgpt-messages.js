@@ -6,7 +6,7 @@ import {
 export const CHATGPT_LEGACY_ASSISTANT_SELECTOR = '[data-message-author-role="assistant"], [data-message-role="assistant"]';
 export const CHATGPT_LEGACY_USER_SELECTOR = '[data-message-author-role="user"], [data-message-role="user"]';
 export const CHATGPT_USER_TURN_SELECTOR = '[data-testid^="conversation-turn-"]';
-export const CHATGPT_USER_SELECTOR = `${CHATGPT_LEGACY_USER_SELECTOR}, ${CHATGPT_USER_TURN_SELECTOR}`;
+export const CHATGPT_USER_SELECTOR = `${CHATGPT_LEGACY_USER_SELECTOR}, ${CHATGPT_USER_TURN_SELECTOR}, [class~="group/user-message"]`;
 export const CHATGPT_PROSE_SELECTOR = ".markdown, .prose";
 
 function attributeFor(node, name) {
@@ -125,6 +125,9 @@ export function stripChatGptUserRolePrefix(text) {
 export function isChatGptUserTurnNode(node) {
   const role = chatGptAuthorRole(node);
   if (role === "user") {
+    return true;
+  }
+  if (!role && hasClassToken(node?.className, "group/user-message")) {
     return true;
   }
   const testId = attributeFor(node, "data-testid");

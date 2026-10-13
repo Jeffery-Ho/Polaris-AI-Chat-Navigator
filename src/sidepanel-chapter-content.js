@@ -1,9 +1,23 @@
 import { appendSanitizedChapterContent } from "./chapter-markdown.js";
 
 // Split source DOM ranges, never deduplicate text: repeated sentences are content.
-export function collectSidepanelChapters(containers, outline, { baseUrl, fullTextTitle = "Full text" } = {}) {
+export function collectSidepanelChapters(containers, outline, { baseUrl, fullTextTitle = "Full text", userMessages = [] } = {}) {
   const result = [];
-  containers.forEach((container, containerIndex) => {
+  const entries = [
+    ...containers.map((container, containerIndex) => ({ element: container, container, containerIndex })),
+    ...userMessages.map((user) => ({ element: user.element, user }))
+  ];
+  if (userMessages.length) entries.sort((left, right) => {
+    const position = left.element.compareDocumentPosition(right.element);
+    return position & 4 ? -1 : position & 2 ? 1 : 0;
+  });
+  let userNode = null;
+  entries.forEach(({ container, containerIndex, user }) => {
+    if (user) {
+      userNode = { markerKey: user.markerKey, sourceKey: user.markerKey, parentKey: "", title: user.title, contents: [] };
+      result.push(userNode);
+      return;
+    }
     const doc = container.ownerDocument;
     const headings = outline.filter((entry) => entry.containerKey === `assistant-${containerIndex}`);
     const byKey = new Map();
@@ -68,12 +82,18 @@ export function collectSidepanelChapters(containers, outline, { baseUrl, fullTex
     let cursor = edge();
     const appendGap = (end, suffix) => {
       const block = slice(cursor, end);
-      if (block) result.push({ markerKey: `body:${containerIndex}:${suffix}`, sourceKey: "", parentKey: "", title: fullTextTitle, contents: [block], synthetic: true });
+      if (!block) return;
+      if (userNode) userNode.contents.push(block);
+      else result.push({ markerKey: `body:${containerIndex}:${suffix}`, sourceKey: "", parentKey: "", title: fullTextTitle, contents: [block], synthetic: true });
     };
     for (const heading of roots) {
       const node = byKey.get(heading.markerKey);
       const range = bounds.get(node.markerKey);
       appendGap(range.start, node.markerKey);
+      if (userNode) {
+        node.parentKey = userNode.markerKey;
+        userNode.contents.push({ type: "child", key: node.markerKey });
+      }
       fill(node, range.body, range.end);
       const append = (current) => {
         result.push(current);

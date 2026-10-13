@@ -2751,7 +2751,11 @@ import {
           : null;
       })
       .filter(Boolean);
-    if (treeResult) treeResult.push(...collectSidepanelChapters(snapshot.assistantContainers, buildWindowChapterOutline(boundHeadings), { baseUrl: location.href, fullTextTitle: t("chapters.fullText") }));
+    if (treeResult) treeResult.push(...collectSidepanelChapters(snapshot.assistantContainers, buildWindowChapterOutline(boundHeadings), {
+      baseUrl: location.href,
+      fullTextTitle: t("chapters.fullText"),
+      userMessages: isChatGPTPage() ? snapshot.markerGroups.flatMap((group) => group.user ? [group.user] : []) : []
+    }));
     if (!boundHeadings.length) {
       return snapshot.assistantContainers.length
         ? [fallbackExplosionSection(collectExplosionBlocks(snapshot.assistantContainers))]
@@ -5559,6 +5563,10 @@ import {
         state.activeMarkerKey = markerKey;
         updateActiveMarker();
         publishWindowSnapshot();
+        return { ok: true };
+      }
+      const user = state.markerGroups.find((group) => group.user?.markerKey === markerKey)?.user;
+      if (user?.element?.isConnected && jumpToMarker(user, "smooth")) {
         return { ok: true };
       }
       return { ok: false };

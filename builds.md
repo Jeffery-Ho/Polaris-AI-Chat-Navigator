@@ -10,6 +10,13 @@
 - Version update type must be declared by the user before recording a build.
 - After each build is recorded, confirm the build number and version with the user.
 
+## 268
+
+- Date: 2026-10-13
+- Version: 0.67.1
+- Summary: Restores ChatGPT user messages as sidepanel chapter roots instead of Full text placeholders.
+- Notes: Recognizes current ChatGPT user bubbles without legacy role or conversation-turn attributes. Groups answer introductions, headings, and successive answer bodies under their source prompt, preserves repeated prompts, and keeps unowned answer content available. Supports locating user sources and preserves content-command acknowledgements to avoid false source-location failures. Updated the current version to `0.67.1(268)`.
+
 ## 267
 
 - Date: 2026-10-09

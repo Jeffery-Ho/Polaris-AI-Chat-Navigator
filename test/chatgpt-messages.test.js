@@ -1,13 +1,26 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { JSDOM } from "jsdom";
 
 import {
   collectChatGptConversation,
+  CHATGPT_USER_SELECTOR,
+  isChatGptUserTurnNode,
   stripChatGptUserRolePrefix
 } from "../src/chatgpt-messages.js";
 
 const contentSource = readFileSync(new URL("../src/content.js", import.meta.url), "utf8");
+
+test("ChatGPT recognizes current user bubbles without legacy roles or conversation-turn attributes", () => {
+  const doc = new JSDOM('<main><div data-content-search-turn-key="fallback-turn-0"><div class="block-BQZwFn"><h4 class="sr-only m-0 select-none">You said:</h4><div class="group/user-message flex flex-col items-end gap-2">可以在模拟器里面安装系统相册么</div></div><div class="block-BQZwFn"><h4 class="sr-only">ChatGPT said:</h4><div class="MarkdownRoot-rZKhxa"><p>可以，但要区分两件事：</p></div></div></div></main>').window.document;
+  const users = [...doc.querySelectorAll(CHATGPT_USER_SELECTOR)].filter(isChatGptUserTurnNode);
+  assert.equal(users.length, 1);
+  assert.equal(users[0].textContent, "可以在模拟器里面安装系统相册么");
+  const conversation = collectChatGptConversation(doc.querySelector("main"));
+  assert.deepEqual(conversation.userMessages.map((message) => message.text), ["可以在模拟器里面安装系统相册么"]);
+  assert.equal(conversation.assistantMessages.length, 1);
+});
 
 function el(tag, className, children = [], text = "", attrs = {}) {
   return { tag, className, children, text, attrs };
