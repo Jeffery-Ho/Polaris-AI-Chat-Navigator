@@ -23,7 +23,7 @@ test("Gemini 使用语义消息选择器和独立平台配置", () => {
   assert.match(contentSource, /gemini: \[1, 2, 3\]/);
   assert.match(contentSource, /const GEMINI_ASSISTANT_MESSAGE_SELECTOR = "model-response message-content";/);
   assert.match(contentSource, /const GEMINI_USER_MESSAGE_SELECTOR = "user-query";/);
-  assert.match(contentSource, /const GEMINI_USER_TEXT_SELECTOR = "\.query-content, \.query-text-line, \.query-text";/);
+  assert.match(contentSource, /const GEMINI_USER_TEXT_SELECTOR = "\.query-text-line, \.query-text, \.query-content";/);
   assert.match(platform, /isGeminiPage\(\).*?return "gemini"/s);
   assert.match(assistantSelectors, /isGeminiPage\(\).*?GEMINI_ASSISTANT_MESSAGE_SELECTOR/s);
   assert.match(userSelectors, /isGeminiPage\(\).*?GEMINI_USER_MESSAGE_SELECTOR/s);

@@ -21,8 +21,8 @@ test("Grok 使用语义消息选择器和独立平台配置", () => {
   assert.match(contentSource, /function isGrokPage\(\) \{\s*return window\.location\.hostname === "grok\.com";/);
   assert.match(contentSource, /\["chatgpt", "claude", "gemini", "grok", "doubao"/);
   assert.match(contentSource, /grok: \[1, 2, 3\]/);
-  assert.match(contentSource, /const GROK_ASSISTANT_MESSAGE_SELECTOR = "main \[data-testid=\\"assistant-message\\"\] \.response-content-markdown\.markdown";/);
-  assert.match(contentSource, /const GROK_USER_MESSAGE_SELECTOR = "main \[data-testid=\\"user-message\\"\]";/);
+  assert.match(contentSource, /const GROK_ASSISTANT_MESSAGE_SELECTOR = "\[data-testid=\\"assistant-message\\"\] \.response-content-markdown\.markdown";/);
+  assert.match(contentSource, /const GROK_USER_MESSAGE_SELECTOR = "\[data-testid=\\"user-message\\"\]";/);
   assert.match(platform, /isGrokPage\(\).*?return "grok"/s);
   assert.match(assistantSelectors, /isGrokPage\(\).*?GROK_ASSISTANT_MESSAGE_SELECTOR/s);
   assert.match(userSelectors, /isGrokPage\(\).*?GROK_USER_MESSAGE_SELECTOR/s);

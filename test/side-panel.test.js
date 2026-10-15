@@ -2,10 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const [buildManifest, viteConfig, sidePanelHtml, windowSource] = await Promise.all([
+const [buildManifest, distManifest, sidePanelHtml, windowSource] = await Promise.all([
   readFile(new URL("../manifest.build.json", import.meta.url), "utf8").then(JSON.parse),
-  readFile(new URL("../vite.config.js", import.meta.url), "utf8"),
-  readFile(new URL("../sidepanel.html", import.meta.url), "utf8"),
+  readFile(new URL("../dist/manifest.json", import.meta.url), "utf8").then(JSON.parse),
+  readFile(new URL("../entrypoints/sidepanel.html", import.meta.url), "utf8"),
   readFile(new URL("../src/window.js", import.meta.url), "utf8")
 ]);
 
@@ -22,6 +22,6 @@ test("side panel reuses the Polaris window UI entry", () => {
   assert.match(windowSource, /windowType: "sidepanel"/);
 });
 
-test("Vite builds the side panel as an extension page", () => {
-  assert.match(viteConfig, /sidepanel:\s*"sidepanel\.html"/);
+test("WXT builds the side panel as an extension page", () => {
+  assert.deepEqual(distManifest.side_panel, { default_path: "sidepanel.html" });
 });

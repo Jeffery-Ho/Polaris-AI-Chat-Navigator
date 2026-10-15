@@ -83,23 +83,22 @@ test("prepare installs git hooks only outside CI", () => {
   assert.equal(shouldInstallGitHooks({ GITHUB_ACTIONS: "true" }), false);
 });
 
-test("dev watch writes to dist and hooks stay out of the release workflow", async () => {
-  const [pkg, viteConfig, workflow, gitignore, devWatch] = await Promise.all([
-    readFile(new URL("../package.json", import.meta.url), "utf8"),
-    readFile(new URL("../vite.config.js", import.meta.url), "utf8"),
+test("WXT development is isolated and hooks keep production dist current", async () => {
+  const [pkg, workflow, gitignore, prepare] = await Promise.all([
+    readFile(new URL("../package.json", import.meta.url), "utf8").then(JSON.parse),
     readFile(new URL("../.github/workflows/release.yml", import.meta.url), "utf8"),
     readFile(new URL("../.gitignore", import.meta.url), "utf8"),
-    readFile(new URL("../scripts/dev-watch.js", import.meta.url), "utf8")
+    readFile(new URL("../scripts/prepare.js", import.meta.url), "utf8")
   ]);
-  assert.match(pkg, /"dev": "node scripts\/dev-watch\.js"/);
-  assert.match(devWatch, /"vite", "bin", "vite\.js"/);
-  assert.match(devWatch, /\[viteBin, "build"\]/);
-  assert.doesNotMatch(devWatch, /--watch/);
-  assert.match(pkg, /"prepare": "node scripts\/prepare\.js"/);
-  assert.match(viteConfig, /outDir:\s*"dist"/);
+  assert.equal(pkg.scripts.dev, "wxt");
+  assert.equal(pkg.scripts.build, "wxt build");
+  assert.equal(pkg.scripts.prepare, "node scripts/prepare.js");
+  assert.match(prepare, /runWxt\("prepare"\)/);
+  assert.match(prepare, /if \(shouldInstallGitHooks\(\)\) runWxt\("build"\)/);
   assert.match(gitignore, /^dist\/$/m);
+  assert.match(gitignore, /^\.output\/$/m);
   assert.match(workflow, /pnpm install --frozen-lockfile/);
-  assert.match(workflow, /run: pnpm build/);
+  assert.ok(workflow.indexOf("run: pnpm build") < workflow.indexOf("run: pnpm test"));
   assert.doesNotMatch(workflow, /githooks|refresh-extension|core\.hooksPath/);
 });
 

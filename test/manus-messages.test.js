@@ -164,7 +164,7 @@ test("Manus integration uses its scoped adapter, associations, defaults and scro
   assert.match(source, /DEFAULT_UNORDERED_LIST_BY_PLATFORM[\s\S]*?manus: true/);
   assert.match(source, /DEFAULT_ENABLED_ORDERED_LIST_BY_PLATFORM[\s\S]*?manus: false/);
   assert.match(source, /DEFAULT_ENABLED_STRONG_BY_PLATFORM[\s\S]*?manus: true/);
-  assert.match(source, /document\.addEventListener\("scroll", handleManusConversationScroll, \{ capture: true, passive: true \}\)/);
+  assert.match(source, /lifecycle\.listen\(document, "scroll", handleManusConversationScroll, \{ capture: true, passive: true \}\)/);
   assert.match(source, /document\.removeEventListener\("scroll", handleManusConversationScroll, true\)/);
   assert.match(source, /isInsideNavigationRoot\(event\.target\)[\s\S]*?isManusConversationScrollTarget\(event\.target\)/);
   assert.match(background, /"manus\.im"/);

@@ -90,7 +90,7 @@ export function createSidepanelReleaseNotice({ document, chrome, locale, t }) {
         dismissCurrentDialog = null;
       }
       const focus = returnFocus?.isConnected && returnFocus !== document.body
-        ? returnFocus : document.querySelector(".settings-release-notes, .window-settings-button");
+        ? returnFocus : document.querySelector(".settings-release-notes, .window-settings-back, .window-settings-button");
       focus?.focus({ preventScroll: true });
       if (markRead) {
         lastKnownVersion = manifest.version;

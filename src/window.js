@@ -1,4 +1,4 @@
-import "./i18n.js";
+import { initializeI18n } from "./i18n.js";
 import { createSidepanelChapterReader } from "./sidepanel-chapter-reader.js";
 import { matchesSearch } from "./window-search.js";
 import { bindSearchInput } from "./search-input.js";
@@ -7,12 +7,15 @@ import { createMarkerListReconciler } from "./marker-list-reconciler.js";
 import { createMarkerStreamingIndicator } from "./marker-motion-suppression.js";
 import { createSidepanelReleaseNotice } from "./sidepanel-release-notice.js";
 import { didWindowConversationChange } from "./window-source-state.js";
+import { releaseNotesForUpdate } from "./release-notes.js";
 
 (() => {
+  initializeI18n();
   const SYSTEM_THEME_QUERY = "(prefers-color-scheme: dark)";
   const root = document.getElementById("polaris-window");
   const i18n = globalThis.PolarisI18n || { locale: "en", t: (key) => key };
   const { locale, t } = i18n;
+  const settingsDestinations = ["preferences", "help", "feedback", "updates", "about"];
   const supportedPlatforms = [
     { key: "chatgpt", label: "ChatGPT", favicon: "icons/platform-chatgpt.png" },
     { key: "claude", label: "Claude", favicon: "icons/platform-claude.png" },
@@ -30,6 +33,9 @@ import { didWindowConversationChange } from "./window-source-state.js";
     snapshot: null,
     activeTab: "navigation",
     previousContentTab: "navigation",
+    settingsPage: "menu",
+    settingsScrollByPage: new Map(),
+    settingsReturnPage: "",
     returnScrollY: 0,
     returnFocusTarget: "",
     markerQuery: "",
@@ -222,6 +228,7 @@ import { didWindowConversationChange } from "./window-source-state.js";
         }
       : null;
     const focusedTab = document.activeElement?.dataset?.windowTab || "";
+    const focusedSettingsControl = document.activeElement?.dataset?.settingsFocus || "";
     document.querySelector(".image-preview")?.remove();
     applyTheme(snapshot);
     syncSourceRetry(state.snapshot);
@@ -233,6 +240,9 @@ import { didWindowConversationChange } from "./window-source-state.js";
       oldHeader.replaceWith(header);
     } else root.replaceChildren(header, body);
     if (focusedTab) header.querySelector(`[data-window-tab="${focusedTab}"]`)?.focus({ preventScroll: true });
+    if (focusedSettingsControl && state.activeTab === "settings") {
+      root.querySelector(`[data-settings-focus="${focusedSettingsControl}"]`)?.focus({ preventScroll: true });
+    }
     if (activeSearch && state.activeTab !== "settings") {
       focusSearchInput(activeSearch);
     }
@@ -249,9 +259,14 @@ import { didWindowConversationChange } from "./window-source-state.js";
 
   function rememberViewState() {
     state.returnScrollY = window.scrollY;
-    if (document.activeElement?.matches?.(".window-search input")) {
+    const focused = document.activeElement;
+    if (focused?.matches?.(".window-search input")) {
       state.returnFocusTarget = "search";
-    } else if (!state.returnFocusTarget && document.activeElement?.matches?.(".window-settings-button")) {
+    } else if (focused?.matches?.(".maker-card[data-marker-render-key]")) {
+      state.returnFocusTarget = { selector: ".maker-card[data-marker-render-key]", key: focused.dataset.markerRenderKey, attribute: "markerRenderKey" };
+    } else if (focused?.matches?.(".chapter-node-title[data-key], .chapter-node-dot[data-key]")) {
+      state.returnFocusTarget = { selector: `.${focused.classList[0]}[data-key]`, key: focused.dataset.key, attribute: "key" };
+    } else if (!state.returnFocusTarget && focused?.matches?.(".window-settings-button")) {
       state.returnFocusTarget = "settings";
     }
   }
@@ -263,6 +278,9 @@ import { didWindowConversationChange } from "./window-source-state.js";
         focusSearchInput();
       } else if (state.returnFocusTarget === "settings") {
         document.querySelector(".window-settings-button")?.focus({ preventScroll: true });
+      } else if (typeof state.returnFocusTarget === "object") {
+        const { selector, key, attribute } = state.returnFocusTarget;
+        [...root.querySelectorAll(selector)].find((node) => node.dataset[attribute] === key)?.focus({ preventScroll: true });
       }
       state.returnFocusTarget = "";
     });
@@ -273,6 +291,9 @@ import { didWindowConversationChange } from "./window-source-state.js";
     rememberViewState();
     state.previousContentTab = state.activeTab;
     state.activeTab = "settings";
+    state.settingsPage = "menu";
+    state.settingsScrollByPage.clear();
+    state.settingsReturnPage = "";
     render();
     window.scrollTo({ top: 0, behavior: "auto" });
     window.requestAnimationFrame(() => {
@@ -287,17 +308,38 @@ import { didWindowConversationChange } from "./window-source-state.js";
     restoreViewState();
   }
 
+  function openSettingsPage(page) {
+    if (page !== "menu" && !settingsDestinations.includes(page)) return;
+    state.settingsScrollByPage.set(state.settingsPage, window.scrollY);
+    if (page !== "menu") state.settingsReturnPage = page;
+    state.settingsPage = page;
+    render();
+    window.scrollTo({ top: state.settingsScrollByPage.get(page) || 0, behavior: "auto" });
+    window.requestAnimationFrame(() => {
+      const target = page === "menu"
+        ? root.querySelector(`[data-settings-destination="${state.settingsReturnPage}"]`)
+        : root.querySelector(".window-settings-back");
+      target?.focus({ preventScroll: true });
+    });
+  }
+
+  function backFromSettings() {
+    if (state.settingsPage !== "menu") openSettingsPage("menu");
+    else closeSettings();
+  }
+
   function renderHeader(snapshot) {
     const header = element("header", "window-header");
     if (state.activeTab === "settings") {
       const settingsNav = element("div", "window-settings-nav");
       const back = element("button", "window-settings-back");
       back.type = "button";
-      back.setAttribute("aria-label", locale === "zh" ? "返回" : "Back");
-      back.title = locale === "zh" ? "返回" : "Back";
+      back.dataset.settingsFocus = "back";
+      back.setAttribute("aria-label", state.settingsPage === "menu" ? t("settings.backToContent") : t("settings.backToMenu"));
+      back.title = back.getAttribute("aria-label");
       back.appendChild(createBackIcon());
-      back.addEventListener("click", closeSettings);
-      settingsNav.append(back, element("h1", "window-settings-nav-title", locale === "zh" ? "设置" : "Settings"));
+      back.addEventListener("click", backFromSettings);
+      settingsNav.append(back, element("h1", "window-settings-nav-title", t(`settings.page.${state.settingsPage}`)));
       header.appendChild(settingsNav);
       return header;
     }
@@ -340,12 +382,13 @@ import { didWindowConversationChange } from "./window-source-state.js";
     identity.append(meta, settingsButton);
     header.append(identity);
 
-    const search = element("label", "window-search");
+    const search = element("div", "window-search");
     const isChapterSearch = state.activeTab === "chapters";
     search.setAttribute("aria-label", isChapterSearch
       ? (locale === "zh" ? "搜索章节" : "Search chapters")
       : (locale === "zh" ? "搜索 Maker" : "Search Makers"));
     const input = document.createElement("input");
+    input.setAttribute("aria-label", search.getAttribute("aria-label"));
     input.type = "text";
     input.inputMode = "text";
     input.autocomplete = "off";
@@ -356,8 +399,27 @@ import { didWindowConversationChange } from "./window-source-state.js";
       ? (locale === "zh" ? "搜索章节" : "Search chapters")
       : (locale === "zh" ? "搜索 Maker" : "Search Makers");
     input.value = state.activeTab === "chapters" ? state.chapterQuery : state.markerQuery;
+    const clear = element("button", "clear-search");
+    clear.type = "button";
+    clear.title = locale === "zh" ? "清除搜索" : "Clear search";
+    clear.setAttribute("aria-label", clear.title);
+    clear.hidden = !input.value;
+    const clearIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    clearIcon.setAttribute("viewBox", "0 0 24 24");
+    clearIcon.setAttribute("aria-hidden", "true");
+    const clearPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    clearPath.setAttribute("d", "M6 6l12 12M18 6L6 18");
+    clearIcon.appendChild(clearPath);
+    clear.appendChild(clearIcon);
+    clear.addEventListener("click", () => {
+      if (isChapterSearch) state.chapterQuery = "";
+      else state.markerQuery = "";
+      render();
+      focusSearchInput();
+    });
     bindSearchInput(input, {
       onInput: (value) => {
+        clear.hidden = !value;
         if (state.activeTab === "chapters") state.chapterQuery = value;
         else state.markerQuery = value;
       },
@@ -366,7 +428,7 @@ import { didWindowConversationChange } from "./window-source-state.js";
         focusSearchInput();
       }
     });
-    search.append(input);
+    search.append(input, clear);
     header.append(search);
 
     const tabs = element("nav", "window-tabs");
@@ -386,21 +448,13 @@ import { didWindowConversationChange } from "./window-source-state.js";
     return header;
   }
 
-  function renderSearchEmpty(query, onClear) {
+  function renderSearchEmpty(query) {
     const empty = element("div", "empty-search");
     empty.appendChild(element(
       "p",
       "empty-search-copy",
       locale === "zh" ? `没有匹配“${query}”的结果` : `No results for “${query}”`
     ));
-    const clear = element("button", "secondary-button clear-search", locale === "zh" ? "清除搜索" : "Clear search");
-    clear.type = "button";
-    clear.addEventListener("click", () => {
-      onClear();
-      render();
-      focusSearchInput();
-    });
-    empty.appendChild(clear);
     return empty;
   }
 
@@ -411,11 +465,19 @@ import { didWindowConversationChange } from "./window-source-state.js";
     body.dataset.activeTab = state.activeTab;
     body.classList.toggle("is-mode-transition", state.isChangingMode);
     if (state.activeTab === "settings") {
-      body.replaceChildren(renderSettings(snapshot));
+      const panel = renderSettings(snapshot, body.querySelector(":scope > .settings-panel"));
+      if (body.firstElementChild !== panel) body.replaceChildren(panel);
       return body;
     }
     if (state.activeTab === "chapters") {
-      const panel = renderChapters(snapshot);
+      const needsConversation = isLoading || snapshot.loading || !snapshot.hasConversation;
+      if (needsConversation) chapterReader.suspend();
+      const panel = needsConversation
+        ? renderNavigation(snapshot, {
+            isLoading,
+            existingPanel: canReuseBody ? body.querySelector(":scope > .navigation-panel") : null
+          })
+        : renderChapters(snapshot);
       if (body.firstElementChild !== panel) body.replaceChildren(panel);
       return body;
     }
@@ -431,21 +493,29 @@ import { didWindowConversationChange } from "./window-source-state.js";
     const panel = existingPanel instanceof HTMLElement
       ? existingPanel
       : element("div", "navigation-panel");
-    if (isLoading || snapshot.loading) {
+    const awaitingConversation = !snapshot.hasConversation
+      && (snapshot.supportedRoute || activePlatform(snapshot));
+    if (isLoading || snapshot.loading || awaitingConversation) {
       windowMarkerListReconciler.reset();
       markerStreamingIndicator.reset();
-      const loading = element("div", "empty-state");
-      loading.append(element("h1", "empty-title", locale === "zh" ? "正在读取会话" : "Reading conversation"));
-      loading.append(element("p", "empty-copy", locale === "zh" ? "正在检查当前标签页是否为支持的 AI 会话。" : "Checking the current tab for a supported AI conversation."));
-      panel.replaceChildren(loading);
+      const isReading = Boolean(isLoading || snapshot.loading
+        || (snapshot.supportedRoute && isPotentialConversationRoute(snapshot.routeKey)));
+      const loading = panel.querySelector(":scope > .conversation-skeleton") || renderConversationSkeleton();
+      loading.classList.toggle("is-reading", isReading);
+      const copy = isReading
+        ? (locale === "zh" ? "正在读取会话…" : "Reading conversation…")
+        : (locale === "zh" ? "等待会话…" : "Waiting for a conversation…");
+      const status = loading.querySelector(".conversation-skeleton-status");
+      if (status.textContent !== copy) status.textContent = copy;
+      if (panel.firstElementChild !== loading) panel.replaceChildren(loading);
       return panel;
     }
     if (!snapshot.supportedRoute || !snapshot.hasConversation) {
       windowMarkerListReconciler.reset();
       markerStreamingIndicator.reset();
       const empty = element("div", "empty-state");
-      empty.append(element("h1", "empty-title", locale === "zh" ? "这里还没有对话" : "No conversation here"));
-      empty.append(element("p", "empty-copy", locale === "zh" ? "打开支持的 AI 对话后，Maker 会出现在这里。" : "Open a supported AI conversation to see its Makers here."));
+      empty.append(element("h1", "empty-title", locale === "zh" ? "打开支持的 AI 对话" : "Open a supported AI conversation"));
+      empty.append(element("p", "empty-copy", locale === "zh" ? "Maker 会自动显示在这里。" : "Makers will appear here automatically."));
       const platforms = element("div", "platform-stack");
       platforms.setAttribute("role", "list");
       platforms.setAttribute("aria-label", locale === "zh" ? "支持的平台" : "Supported platforms");
@@ -468,7 +538,7 @@ import { didWindowConversationChange } from "./window-source-state.js";
       windowMarkerListReconciler.reset();
       markerStreamingIndicator.reset();
       if (state.markerQuery.trim()) {
-        panel.replaceChildren(renderSearchEmpty(state.markerQuery, () => { state.markerQuery = ""; }));
+        panel.replaceChildren(renderSearchEmpty(state.markerQuery));
       } else {
         const empty = element("div", "empty-state empty-state-compact");
         empty.appendChild(element("p", "empty-copy", locale === "zh" ? "当前对话还没有 Maker。" : "No Makers in this conversation yet."));
@@ -500,6 +570,35 @@ import { didWindowConversationChange } from "./window-source-state.js";
       markerStreamingIndicator.pulse(streamingMarker);
     }
     return panel;
+  }
+
+  function renderConversationSkeleton() {
+    const loading = element("div", "conversation-skeleton");
+    const status = element("p", "conversation-skeleton-status");
+    status.setAttribute("role", "status");
+    const list = element("div", "conversation-skeleton-list");
+    list.setAttribute("aria-hidden", "true");
+    [58, 57, 56, 54, 51].forEach((width, index) => {
+      const row = element("div", "conversation-skeleton-row");
+      const copy = element("div", "conversation-skeleton-copy");
+      copy.style.width = `${width}%`;
+      copy.append(element("span", "conversation-skeleton-line"));
+      if (index < 2) copy.append(element("span", "conversation-skeleton-line conversation-skeleton-detail"));
+      row.append(element("span", "conversation-skeleton-icon"), copy);
+      list.append(row);
+    });
+    loading.append(status, list);
+    return loading;
+  }
+
+  function isPotentialConversationRoute(routeKey) {
+    if (!routeKey) return false;
+    try {
+      const path = new URL(routeKey).pathname.replace(/\/+$/, "") || "/";
+      return !["/", "/new", "/app", "/chat", "/ai_chat"].includes(path);
+    } catch {
+      return false;
+    }
   }
 
   function filterItems(items, query) {
@@ -573,20 +672,19 @@ import { didWindowConversationChange } from "./window-source-state.js";
     button.dataset.groupKey = item.groupKey || "";
     button.dataset.foldKey = item.foldKey || "";
     button.setAttribute("aria-label", item.ariaLabel || item.title || item.preview || "Maker");
-    const primaryText = item.type === "fold"
-      ? (item.preview || item.title || "")
-      : (item.title || item.preview || "");
+    if (item.type === "fold") button.setAttribute("aria-expanded", String(Boolean(item.isExpanded)));
+    const primaryText = item.title || item.preview || "";
     const title = button.querySelector(":scope .maker-title");
     if (item.type !== "user" || !title.textContent) {
       title.textContent = primaryText;
     }
     let remainder = button.querySelector(":scope .maker-remainder");
-    if (item.type === "fold" && item.remainder) {
+    if (item.type === "fold") {
       if (!(remainder instanceof HTMLElement)) {
         remainder = element("span", "maker-remainder");
-        button.querySelector(":scope .maker-copy").appendChild(remainder);
+        button.appendChild(remainder);
       }
-      remainder.textContent = item.remainder;
+      remainder.textContent = t("fold.more");
     } else {
       remainder?.remove();
     }
@@ -607,10 +705,11 @@ import { didWindowConversationChange } from "./window-source-state.js";
       button.append(loader);
     }
     button.append(copy);
-    if (item.type === "user") {
+    if (item.type === "user" || item.type === "fold") {
       const chevron = element("span", "maker-chevron");
       chevron.setAttribute("aria-hidden", "true");
-      button.append(chevron);
+      if (item.type === "fold") button.prepend(chevron);
+      else button.append(chevron);
     }
     button.addEventListener("click", () => {
       const itemType = button.dataset.itemType;
@@ -633,7 +732,57 @@ import { didWindowConversationChange } from "./window-source-state.js";
     });
   }
 
-  function renderSettings(snapshot) {
+  function renderSettings(snapshot, existingPanel) {
+    if (existingPanel?.dataset.settingsPage === state.settingsPage) {
+      if (state.settingsPage === "preferences") syncSettingsPreferences(existingPanel, snapshot);
+      return existingPanel;
+    }
+    const panel = state.settingsPage === "preferences" ? renderSettingsPreferences(snapshot) : element("div", "settings-panel");
+    panel.dataset.settingsPage = state.settingsPage;
+    if (state.settingsPage === "menu") {
+      const menu = element("nav", "settings-section settings-menu settings-home-menu");
+      menu.setAttribute("aria-label", t("settings.page.menu"));
+      for (const page of settingsDestinations) {
+        const row = element("button", "settings-menu-row");
+        row.type = "button";
+        row.dataset.settingsDestination = page;
+        row.dataset.settingsFocus = `page-${page}`;
+        row.append(createSettingsMenuIcon(page), element("span", "settings-menu-label", t(`settings.page.${page}`)));
+        row.addEventListener("click", () => openSettingsPage(page));
+        menu.appendChild(row);
+      }
+      menu.appendChild(settingsExternalLink(t("settings.privacy"), "https://jeffery-ho.github.io/Polaris-AI-Chat-Navigator/privacy-policy.html", "privacy", createSettingsMenuIcon("privacy")));
+      panel.appendChild(menu);
+    } else if (state.settingsPage === "help") renderSettingsHelp(panel);
+    else if (state.settingsPage === "feedback") renderSettingsFeedback(panel);
+    else if (state.settingsPage === "updates") renderSettingsUpdates(panel);
+    else if (state.settingsPage === "about") renderSettingsAbout(panel);
+    return panel;
+  }
+
+  function createSettingsMenuIcon(page) {
+    // Preferences and updates use Lucide paths from Iconify; see icons/LICENSE-lucide.txt.
+    const paths = {
+      preferences: ["M10 5H3m9 14H3M14 3v4m2 10v4m5-9h-9m9 7h-5m5-14h-7m-6 5v4m0-2H3"],
+      help: ["M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18", "M9.5 9a2.5 2.5 0 0 1 5 0c0 2-2.5 2.5-2.5 4 M12 17h.01"],
+      feedback: ["M4 5h16v12H8l-4 3V5Z"],
+      updates: ["M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594zM20 2v4m2-2h-4", "M6 20a2 2 0 1 0-4 0a2 2 0 1 0 4 0Z"],
+      about: ["M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18", "M12 11v5 M12 8h.01"],
+      privacy: ["M12 2 4 5v6c0 5 3.4 8.7 8 11 4.6-2.3 8-6 8-11V5l-8-3Z", "M9 12l2 2 4-4"]
+    };
+    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    icon.classList.add("settings-menu-icon");
+    icon.setAttribute("viewBox", "0 0 24 24");
+    icon.setAttribute("aria-hidden", "true");
+    for (const d of paths[page]) {
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", d);
+      icon.appendChild(path);
+    }
+    return icon;
+  }
+
+  function renderSettingsPreferences(snapshot) {
     const panel = element("div", "settings-panel");
     const config = snapshot.config || {};
     const displaySection = element("section", "settings-section");
@@ -644,6 +793,9 @@ import { didWindowConversationChange } from "./window-source-state.js";
       line.append(element("span", "settings-label", label), element("output", "settings-value", String(config[key] ?? min)));
       const input = document.createElement("input");
       input.type = "range";
+      input.dataset.configKey = key;
+      input.dataset.settingsFocus = key;
+      input.setAttribute("aria-label", label);
       input.min = String(min);
       input.max = String(max);
       input.value = String(config[key] ?? min);
@@ -662,8 +814,10 @@ import { didWindowConversationChange } from "./window-source-state.js";
       input.type = "checkbox";
       const platform = snapshot.platform || "default";
       const configKey = key === "strong" ? "enabledStrongByPlatform" : key === "orderedList" ? "enabledOrderedListByPlatform" : "enabledUnorderedListByPlatform";
+      input.dataset.configKey = configKey;
+      input.dataset.settingsFocus = key;
       input.checked = Boolean(config[configKey]?.[platform]);
-      input.addEventListener("change", () => send({ command: "update-config", patch: { [configKey]: { [platform]: input.checked } } }));
+      input.addEventListener("change", () => send({ command: "update-config", patch: { [configKey]: { [state.snapshot?.platform || "default"]: input.checked } } }));
       checkbox.append(input, element("span", "settings-check-label", label));
       types.appendChild(checkbox);
     });
@@ -679,44 +833,212 @@ import { didWindowConversationChange } from "./window-source-state.js";
       const input = document.createElement("input");
       input.type = "checkbox";
       input.checked = selectedLevels.includes(level);
+      input.value = String(level);
+      input.dataset.headingLevel = String(level);
+      input.dataset.settingsFocus = `heading-${level}`;
       input.disabled = input.checked && selectedLevels.length <= 1;
       input.addEventListener("change", () => {
-        const nextLevels = selectedLevels.filter((selected) => selected !== level);
-        if (input.checked) nextLevels.push(level);
-        nextLevels.sort((first, second) => first - second);
-        send({ command: "update-config", patch: { enabledLevelsByPlatform: { [platform]: nextLevels } } });
+        const nextLevels = [...levels.querySelectorAll("input:checked")].map((control) => Number(control.value));
+        if (!nextLevels.length) { input.checked = true; return; }
+        levels.querySelectorAll("input").forEach((control) => { control.disabled = control.checked && nextLevels.length === 1; });
+        send({ command: "update-config", patch: { enabledLevelsByPlatform: { [state.snapshot?.platform || "default"]: nextLevels } } });
       });
       checkbox.append(input, element("span", "settings-check-label", `H${level}`));
       levels.appendChild(checkbox);
     });
     recognitionSection.appendChild(levels);
     panel.appendChild(recognitionSection);
-    const helpSection = element("section", "settings-section");
-    helpSection.appendChild(element("h2", "settings-section-title", locale === "zh" ? "帮助与诊断" : "Help and diagnostics"));
-    helpSection.appendChild(element("p", "settings-supported", locale === "zh" ? "支持 ChatGPT、Claude、Gemini、Grok、Doubao、Kimi、Qwen、Yuanbao、点点 AI 和 Manus。" : "Supports ChatGPT, Claude, Gemini, Grok, Doubao, Kimi, Qwen, Yuanbao, Diandian AI, and Manus."));
-    const footer = element("div", "settings-footer");
-    [[locale === "zh" ? "恢复默认" : "Reset", "reset-config"], [locale === "zh" ? "下载诊断" : "Download diagnostics", "download-diagnostics"], [locale === "zh" ? "发送诊断" : "Send diagnostics", "send-diagnostics"]].forEach(([label, command]) => {
-      const button = element("button", "secondary-button", label);
-      button.type = "button";
-      button.addEventListener("click", () => send({ command }));
-      footer.appendChild(button);
-    });
-    helpSection.appendChild(footer);
-    const links = element("div", "settings-links");
-    const releaseNotes = element("button", "settings-link settings-release-notes", t("settings.releaseNotes"));
-    releaseNotes.type = "button";
-    releaseNotes.addEventListener("click", () => releaseNotice.open());
-    const feedback = element("a", "settings-link", locale === "zh" ? "反馈" : "Feedback");
-    feedback.href = "https://github.com/Jeffery-Ho/Polaris-AI-Chat-Navigator/issues";
-    feedback.target = "_blank";
-    feedback.rel = "noreferrer";
-    links.append(releaseNotes, feedback);
-    helpSection.appendChild(links);
-    const note = snapshot.releaseNotes?.[0];
-    if (note) helpSection.appendChild(element("p", "settings-release-note", `${note.version}: ${note.summary || note.title || ""}`));
-    helpSection.appendChild(element("p", "settings-version", snapshot.version || chrome.runtime.getManifest().version_name || chrome.runtime.getManifest().version));
-    panel.appendChild(helpSection);
+    const actions = element("div", "settings-footer");
+    actions.appendChild(settingsCommandButton(t("settings.preferences.reset"), "reset-config"));
+    recognitionSection.appendChild(actions);
     return panel;
+  }
+
+  function settingsCommandButton(label, command) {
+    const button = element("button", "secondary-button", label);
+    button.type = "button";
+    button.dataset.settingsFocus = command;
+    button.addEventListener("click", () => send({ command }));
+    return button;
+  }
+
+  function syncSettingsPreferences(panel, snapshot) {
+    const config = snapshot.config || {};
+    const platform = snapshot.platform || "default";
+    panel.querySelectorAll('input[type="range"]').forEach((input) => {
+      input.value = String(config[input.dataset.configKey] ?? input.min);
+      input.closest("label").querySelector("output").textContent = input.value;
+    });
+    panel.querySelectorAll('input[type="checkbox"][data-config-key]').forEach((input) => {
+      input.checked = Boolean(config[input.dataset.configKey]?.[platform]);
+    });
+    const selectedLevels = config.enabledLevelsByPlatform?.[platform] || [1, 2, 3];
+    panel.querySelectorAll("[data-heading-level]").forEach((input) => {
+      input.checked = selectedLevels.includes(Number(input.dataset.headingLevel));
+      input.disabled = input.checked && selectedLevels.length === 1;
+    });
+  }
+
+  function renderSettingsHelp(panel) {
+    const section = element("section", "settings-section");
+    section.appendChild(element("h2", "settings-section-title", t("settings.help.stepsTitle")));
+    const steps = element("ol", "settings-diagnostic-steps");
+    for (const [index, imageName] of ["reproduce", "download", "attach", "send"].entries()) {
+      const step = element("li", "settings-diagnostic-step");
+      step.appendChild(element("p", "settings-step-text", t(`settings.help.step${index + 1}`)));
+      const image = element("img", "settings-step-image");
+      image.src = chrome.runtime.getURL(`icons/diagnostics-${imageName}.png`);
+      image.alt = "";
+      image.width = 640;
+      image.height = 240;
+      step.appendChild(image);
+      steps.appendChild(step);
+    }
+    section.appendChild(steps);
+    const actions = element("div", "settings-footer settings-diagnostic-actions");
+    const status = element("p", "settings-diagnostic-status");
+    status.setAttribute("role", "status");
+    async function runDiagnostic(command) {
+      try {
+        const result = await chrome.runtime.sendMessage({
+          type: "POLARIS_WINDOW_COMMAND", command, expectResult: true,
+          expectedTabId: state.sourceTabId, expectedRouteKey: state.routeKey
+        });
+        const successKey = command === "send-diagnostics"
+          ? "settings.diagnostics.sendSuccess" : "settings.diagnostics.downloadSuccess";
+        status.textContent = result?.diagnosticStatus || t(result?.ok ? successKey : "settings.diagnostics.failure");
+      } catch {
+        status.textContent = t("settings.diagnostics.failure");
+      }
+    }
+    const sendButton = element("button", "settings-diagnostic-primary", t("settings.help.send"));
+    sendButton.type = "button";
+    sendButton.dataset.settingsFocus = "send-diagnostics";
+    sendButton.addEventListener("click", () => { void runDiagnostic("send-diagnostics"); });
+    const downloadButton = element("button", "secondary-button", t("settings.help.download"));
+    downloadButton.type = "button";
+    downloadButton.dataset.settingsFocus = "download-diagnostics";
+    downloadButton.addEventListener("click", () => { void runDiagnostic("download-diagnostics"); });
+    actions.append(sendButton, downloadButton);
+    section.appendChild(actions);
+    section.appendChild(status);
+    const fallback = element("p", "settings-diagnostic-fallback", `${t("settings.help.emailFallback")} `);
+    const email = element("a", "settings-email", "jefferyho.build@gmail.com");
+    email.href = "mailto:jefferyho.build@gmail.com";
+    email.dataset.settingsFocus = "diagnostic-email";
+    fallback.appendChild(email);
+    section.appendChild(fallback);
+    panel.appendChild(section);
+  }
+
+  function settingsExternalLink(label, href, focusKey, leadingIcon = null) {
+    const link = element("a", "settings-menu-row settings-external-link", leadingIcon ? "" : label);
+    link.href = href;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.dataset.settingsFocus = focusKey;
+    const icon = createBackIcon();
+    icon.classList.add("settings-external-icon");
+    icon.querySelector("path").setAttribute("d", "M15 3h6v6m0-6-9 9M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5");
+    if (leadingIcon) link.append(leadingIcon, element("span", "settings-menu-label", label));
+    link.appendChild(icon);
+    return link;
+  }
+
+  function settingsSocialIcon(brand) {
+    const icon = element("span", `settings-social-icon settings-social-${brand}`);
+    icon.setAttribute("aria-hidden", "true");
+    icon.style.setProperty("--settings-social-icon", `url("${chrome.runtime.getURL(`icons/social-${brand}.svg`)}")`);
+    return icon;
+  }
+
+  function renderSettingsFeedback(panel) {
+    const section = element("section", "settings-section settings-menu");
+    section.append(
+      settingsExternalLink(t("settings.feedback.github"), "https://github.com/Jeffery-Ho/Polaris-AI-Chat-Navigator/issues", "feedback-github"),
+      settingsExternalLink(t("settings.feedback.email"), "mailto:jefferyho.build@gmail.com", "feedback-email")
+    );
+    panel.appendChild(section);
+    const links = element("nav", "settings-feedback-icons");
+    links.setAttribute("aria-label", t("contact.label"));
+    for (const [brand, href] of [
+      ["x", "https://x.com/JefferyHo_"],
+      ["xiaohongshu", "https://xhslink.com/m/3wXO9kRBrLO"]
+    ]) {
+      const label = t(`settings.feedback.${brand}`);
+      const link = element("a", "settings-feedback-icon-link");
+      link.href = href;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.title = label;
+      link.setAttribute("aria-label", label);
+      link.dataset.settingsFocus = `feedback-${brand}`;
+      link.appendChild(settingsSocialIcon(brand));
+      links.appendChild(link);
+    }
+    panel.appendChild(links);
+  }
+
+  function renderSettingsUpdates(panel) {
+    const manifest = chrome.runtime.getManifest();
+    for (const note of releaseNotesForUpdate(null, manifest.version, 1)) {
+      const localized = note[locale] || note.en;
+      const section = element("section", "settings-section settings-update-note");
+      section.appendChild(element("h2", "settings-section-title", `${note.version} · ${localized.title}`));
+      const changes = element("ul", "settings-update-changes");
+      for (const change of localized.changes) changes.appendChild(element("li", "", change));
+      section.appendChild(changes);
+      panel.appendChild(section);
+    }
+  }
+
+  function renderSettingsAbout(panel) {
+    const identity = element("section", "settings-section settings-about-identity");
+    const icon = element("img", "settings-app-icon");
+    icon.src = chrome.runtime.getURL("icons/gpt-voyager-icon-96.png");
+    icon.alt = "";
+    icon.width = 40;
+    icon.height = 40;
+    const manifest = chrome.runtime.getManifest();
+    identity.append(icon, element("h2", "settings-app-name", "Polaris"), element("p", "settings-app-version", manifest.version_name || manifest.version));
+    panel.appendChild(identity);
+    const credit = element("p", "settings-about-copy");
+    const [creditStart, creditEnd] = t("settings.about.developerCredit").split("{heart}");
+    const heart = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    heart.classList.add("settings-about-heart");
+    heart.setAttribute("viewBox", "0 0 24 24");
+    heart.setAttribute("role", "img");
+    heart.setAttribute("aria-label", t("settings.about.love"));
+    const heartPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    heartPath.setAttribute("d", "M12 21s-7-4.35-9.5-8.5C.38 8.93 2.71 5 6.5 5c2.08 0 4.04 1.08 5.5 2.72C13.46 6.08 15.42 5 17.5 5c3.79 0 6.12 3.93 4 7.5C19 16.65 12 21 12 21Z");
+    heart.appendChild(heartPath);
+    credit.append(creditStart, heart, creditEnd);
+    const story = element("section", "settings-about-story");
+    story.append(
+      element("h2", "settings-about-heading settings-about-headline", t("settings.about.headline")),
+      element("p", "settings-about-copy", t("settings.about.description1")),
+      element("h2", "settings-about-heading", t("settings.about.developer")),
+      credit,
+      element("h2", "settings-about-heading", t("settings.about.thanks")),
+      element("p", "settings-about-copy", t("settings.about.thanksCopy")),
+      element("p", "settings-about-copy settings-about-thanks-names", "011, Bunny, Kina, Bahar, Kalaso, 大气球")
+    );
+    panel.appendChild(story);
+    const platforms = element("section", "settings-section");
+    platforms.appendChild(element("h2", "settings-section-title", t("settings.about.platforms")));
+    const list = element("ul", "settings-platforms");
+    for (const { label, favicon } of supportedPlatforms) {
+      const item = element("li", "settings-platform");
+      const image = element("img", "settings-platform-icon");
+      image.src = chrome.runtime.getURL(favicon);
+      image.alt = "";
+      image.width = 20;
+      image.height = 20;
+      item.append(image, element("span", "", label));
+      list.appendChild(item);
+    }
+    platforms.appendChild(list);
+    panel.appendChild(platforms);
   }
 
   function renderImagePreview() {
@@ -819,7 +1141,7 @@ import { didWindowConversationChange } from "./window-source-state.js";
         state.imageUrls = [];
         render();
       } else if (state.activeTab === "settings") {
-        closeSettings();
+        backFromSettings();
       }
     }
     if (!event.metaKey && !event.ctrlKey && !event.altKey && state.imageUrls.length && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {

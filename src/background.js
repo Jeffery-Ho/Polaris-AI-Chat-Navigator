@@ -1,5 +1,6 @@
 import { snapshotDeliveryResult } from "./snapshot-delivery.js";
 
+export function initializeBackground() {
 const SOURCE_WINDOW_STORAGE_KEY = "polaris-source-window-id";
 const SOURCE_TAB_STORAGE_KEY = "polaris-source-tab-id";
 
@@ -286,7 +287,7 @@ async function forwardCommand(message) {
       // The tab may have closed between the send and the focus request.
     }
   }
-  return { ok: true };
+  return message.expectResult && result?.diagnosticStatus ? result : { ok: true };
 }
 
 async function isCurrentSourceTab(tab) {
@@ -479,3 +480,5 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     void chrome.storage.local.remove(SOURCE_TAB_STORAGE_KEY);
   }
 });
+
+}

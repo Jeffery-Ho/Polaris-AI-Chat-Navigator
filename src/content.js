@@ -1,3 +1,4 @@
+import { createContentLifecycle } from "./content-lifecycle.js";
 import { mountSettingsPanel } from "./settings-panel.jsx";
 import { cleanupLegacyMakerSnapshots } from "./legacy-maker-snapshot-cleanup.js";
 import { doubaoMessageRoleFromClassNames } from "./doubao-message-role.js";
@@ -105,7 +106,7 @@ import {
   routeFallbackLogMessage
 } from "./snapshot-delivery.js";
 
-(() => {
+export function initializeContent() {
   const CONTENT_SCRIPT_INSTANCE_KEY = "__POLARIS_CONTENT_SCRIPT_ACTIVE__";
 
   function polarisI18n() {
@@ -126,6 +127,7 @@ import {
     return;
   }
   globalThis[CONTENT_SCRIPT_INSTANCE_KEY] = true;
+  const lifecycle = createContentLifecycle(window);
 
   const { locale, t } = polarisI18n();
   const ROOT_ID = "gpt-paragraph-nav";
@@ -157,12 +159,13 @@ import {
   const GEMINI_ASSISTANT_MESSAGE_SELECTOR = "model-response message-content";
   const GEMINI_USER_MESSAGE_SELECTOR = "user-query";
   const GEMINI_USER_MESSAGE_FALLBACK_SELECTOR = "user-query-content, .user-query-content, .user-query-container";
-  const GEMINI_USER_TEXT_SELECTOR = ".query-content, .query-text-line, .query-text";
+  // Prefer the query body: query-content also includes a screen-reader copy.
+  const GEMINI_USER_TEXT_SELECTOR = ".query-text-line, .query-text, .query-content";
   const USER_MESSAGE_IMAGE_ATTRIBUTE_FILTER = ["src", "srcset", "data-src", "data-original", "data-url"];
   const USER_MESSAGE_AVATAR_SELECTOR = '[class*="avatar" i], [class*="profile" i], [data-testid*="avatar" i]';
   const GEMINI_USER_ROLE_PREFIX_PATTERN = /^\s*(?:You said|你说|你話|你话)\s*[:：]?\s*/i;
-  const GROK_ASSISTANT_MESSAGE_SELECTOR = "main [data-testid=\"assistant-message\"] .response-content-markdown.markdown";
-  const GROK_USER_MESSAGE_SELECTOR = "main [data-testid=\"user-message\"]";
+  const GROK_ASSISTANT_MESSAGE_SELECTOR = "[data-testid=\"assistant-message\"] .response-content-markdown.markdown";
+  const GROK_USER_MESSAGE_SELECTOR = "[data-testid=\"user-message\"]";
   const DOUBAO_ASSISTANT_MESSAGE_SELECTOR = [
     ".receive-message-box",
     ".receive-message-content-block",
@@ -214,6 +217,7 @@ import {
     '[data-conv-speaker="human"]',
     ".agent-chat__list__item--user"
   ].join(", ");
+  const XIAOHONGSHU_ASSISTANT_MESSAGE_SELECTOR = ".ai-message .xhs-ai-md-container";
   const XIAOHONGSHU_ASSISTANT_MARKDOWN_SELECTOR = [
     ".markdown-styles-diandian-main-v3",
     ".markdown-styles-diandian-main-v2",
@@ -477,8 +481,8 @@ import {
   const markerListScrollPersistence = createMarkerListScrollPersistence({
     durationMs: MARKER_LIST_SCROLL_PERSIST_MS,
     now: () => performance.now(),
-    requestFrame: (callback) => window.requestAnimationFrame(callback),
-    cancelFrame: (frameId) => window.cancelAnimationFrame(frameId),
+    requestFrame: (callback) => lifecycle.requestAnimationFrame(callback),
+    cancelFrame: (frameId) => lifecycle.cancelAnimationFrame(frameId),
     keepActiveMarkerVisible() {
       const marker = getActiveMarker();
       if (!(marker instanceof HTMLElement) || state.isCollapsed) {
@@ -497,7 +501,7 @@ import {
 
   function isExtensionContextValid() {
     try {
-      return typeof chrome !== "undefined" && Boolean(chrome.runtime && chrome.runtime.id);
+      return !state.isExtensionContextInvalidated && typeof chrome !== "undefined" && Boolean(chrome.runtime && chrome.runtime.id);
     } catch {
       return false;
     }
@@ -615,8 +619,8 @@ import {
     if (!isTopLevelFrame()) {
       return;
     }
-    window.addEventListener("error", handleDiagnosticError);
-    window.addEventListener("unhandledrejection", handleDiagnosticUnhandledRejection);
+    lifecycle.listen(window, "error", handleDiagnosticError);
+    lifecycle.listen(window, "unhandledrejection", handleDiagnosticUnhandledRejection);
   }
 
   function exportDiagnosticLog(operation = "download") {
@@ -640,6 +644,7 @@ import {
       ? t("settings.diagnostics.downloadSuccess")
       : t("settings.diagnostics.failure");
     render();
+    return { ok: downloaded, diagnosticStatus: state.diagnosticStatus };
   }
 
   function handleSendDiagnostics() {
@@ -647,7 +652,7 @@ import {
     if (!downloaded) {
       state.diagnosticStatus = t("settings.diagnostics.failure");
       render();
-      return;
+      return { ok: false, diagnosticStatus: state.diagnosticStatus };
     }
 
     const mailOpened = openDiagnosticEmail({
@@ -660,6 +665,7 @@ import {
       ? t("settings.diagnostics.sendSuccess")
       : t("settings.diagnostics.mailFailure");
     render();
+    return { ok: true, diagnosticStatus: state.diagnosticStatus };
   }
 
   function disposeInvalidExtensionContext() {
@@ -668,7 +674,9 @@ import {
     }
 
     state.isExtensionContextInvalidated = true;
-    window.clearTimeout(state.scheduled);
+    lifecycle.dispose();
+    delete globalThis[CONTENT_SCRIPT_INSTANCE_KEY];
+    lifecycle.clearTimeout(state.scheduled);
     state.scheduledRenderSuppressesMarkerMotion = false;
     markerMotionSuppressor.reset();
     markerStreamingIndicator.reset();
@@ -676,14 +684,16 @@ import {
     markerListReconciler.reset();
     markerListActiveTracker.reset();
     markerListScrollPersistence.reset();
-    window.clearTimeout(state.markerNoticeTimer);
-    window.clearTimeout(state.windowSnapshotTimer);
+    lifecycle.clearTimeout(state.markerNoticeTimer);
+    lifecycle.clearTimeout(state.windowSnapshotTimer);
     state.observer?.disconnect();
     document.removeEventListener("scroll", handleManusConversationScroll, true);
     document.removeEventListener("scroll", handleDeepSeekConversationScroll, true);
     state.pageThemeWatcher?.dispose();
     state.pageThemeWatcher = null;
     state.liquidGlassObserver?.disconnect();
+    window.dispatchEvent(new Event("polaris-for-web-route-dispose"));
+    document.querySelector("script[data-polaris-route-bridge]")?.remove();
     closeExplosionOverlay();
     closeImagePreviewOverlay();
     state.isReleaseNoticeOpen = false;
@@ -1164,7 +1174,7 @@ import {
       });
 
       controls.appendChild(capsule);
-      requestAnimationFrame(() => {
+      lifecycle.requestAnimationFrame(() => {
         indicator.style.transition = "";
       });
     }
@@ -1477,7 +1487,7 @@ import {
     const overlay = getImagePreviewOverlay();
     syncImagePreviewOverlay(overlay);
     const closeButton = overlay.querySelector(".gpt-paragraph-nav__image-preview-close");
-    requestAnimationFrame(() => {
+    lifecycle.requestAnimationFrame(() => {
       if (state.isImagePreviewOpen && closeButton instanceof HTMLButtonElement) {
         closeButton.focus();
       }
@@ -1667,7 +1677,7 @@ import {
       state.releaseNoticeFocusPending = false;
       const acknowledge = overlay.querySelector(".gpt-paragraph-nav__release-notice-action.is-primary");
       if (acknowledge instanceof HTMLButtonElement) {
-        requestAnimationFrame(() => acknowledge.focus());
+        lifecycle.requestAnimationFrame(() => acknowledge.focus());
       }
     }
   }
@@ -2082,7 +2092,7 @@ import {
       return;
     }
 
-    chrome.storage.onChanged.addListener((changes, areaName) => {
+    lifecycle.listenChrome(chrome.storage.onChanged, (changes, areaName) => {
       if (areaName !== "sync" || !changes[CONFIG_STORAGE_KEY]) {
         return;
       }
@@ -2702,7 +2712,7 @@ import {
     if (treeResult) treeResult.push(...collectSidepanelChapters(snapshot.assistantContainers, buildWindowChapterOutline(boundHeadings), {
       baseUrl: location.href,
       fullTextTitle: t("chapters.fullText"),
-      userMessages: isChatGPTPage() || isDoubaoPage() || isDeepSeekPage() || isQianwenPage()
+      userMessages: isChatGPTPage() || isDoubaoPage() || isDeepSeekPage() || isQianwenPage() || isGeminiPage() || isGrokPage() || isXiaohongshuPage()
         ? snapshot.markerGroups.flatMap((group) => group.user ? [group.user] : []) : [],
       assistantToUser: snapshot.assistantToUser
     }));
@@ -3020,7 +3030,7 @@ import {
 
     syncExplosionOverlay(overlay);
     resetExplosionBodyScroll(overlay);
-    requestAnimationFrame(() => {
+    lifecycle.requestAnimationFrame(() => {
       const activeChip = overlay.querySelector(".gpt-paragraph-nav__explosion-chip.is-active");
       activeChip?.scrollIntoView({ block: "nearest", inline: "nearest" });
     });
@@ -3094,7 +3104,7 @@ import {
     lockPageScroll();
     const overlay = getExplosionOverlay();
     syncExplosionOverlay(overlay);
-    requestAnimationFrame(() => {
+    lifecycle.requestAnimationFrame(() => {
       resetExplosionBodyScroll(overlay);
     });
   }
@@ -3135,7 +3145,7 @@ import {
       state.activeMarkerKey = section.markerKey;
     }
     closeExplosionOverlay();
-    requestAnimationFrame(() => {
+    lifecycle.requestAnimationFrame(() => {
       const activeMarker = syncActiveMarker();
       updateFloatingActiveMarker(activeMarker);
       jumpToHeading({ element: source });
@@ -3163,10 +3173,11 @@ import {
     if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
       try {
         await navigator.clipboard.writeText(text);
-        return true;
+        return isExtensionContextValid();
       } catch {}
     }
 
+    if (!isExtensionContextValid()) return false;
     const textarea = document.createElement("textarea");
     textarea.value = text;
     textarea.setAttribute("readonly", "");
@@ -3199,6 +3210,7 @@ import {
   }
 
   function showCopyToast(message) {
+    if (!isExtensionContextValid()) return;
     const overlay = document.querySelector(`#${ROOT_ID} .gpt-paragraph-nav__explosion-overlay`);
     if (!(overlay instanceof HTMLElement)) {
       return;
@@ -3209,10 +3221,10 @@ import {
     toast.className = "gpt-paragraph-nav__copy-toast";
     toast.textContent = message;
     overlay.appendChild(toast);
-    requestAnimationFrame(() => toast.classList.add("is-visible"));
-    window.setTimeout(() => {
+    lifecycle.requestAnimationFrame(() => toast.classList.add("is-visible"));
+    lifecycle.setTimeout(() => {
       toast.classList.remove("is-visible");
-      window.setTimeout(() => toast.remove(), 180);
+      lifecycle.setTimeout(() => toast.remove(), 180);
     }, 1400);
   }
 
@@ -3416,6 +3428,7 @@ import {
 
     if (isXiaohongshuPage()) {
       return withHashedMarkdownSelectors([
+        XIAOHONGSHU_ASSISTANT_MESSAGE_SELECTOR,
         XIAOHONGSHU_ASSISTANT_MARKDOWN_SELECTOR,
         XIAOHONGSHU_ASSISTANT_FALLBACK_SELECTOR,
         ASSISTANT_MESSAGE_SELECTOR
@@ -3538,12 +3551,16 @@ import {
     if (isChatGPTPage()) {
       return getChatGptAssistantContainers(scanContext);
     }
+    const userSelector = isGrokPage() || isXiaohongshuPage()
+      ? getUserContainerSelectors().join(", ")
+      : "";
     let matched = 0;
     for (const selector of getAssistantContainerSelectors()) {
       const nodes = Array.from(document.querySelectorAll(selector))
         .filter((node) => node instanceof HTMLElement
           && !isInsideNavigationRoot(node)
-          && !isUserInputContext(node));
+          && !isUserInputContext(node)
+          && (!userSelector || (!node.closest(userSelector) && !node.querySelector(userSelector))));
       matched += nodes.length;
       const visibleNodes = nodes.filter((node) => isVisible(node, scanContext));
       const containers = selector === HASHED_MARKDOWN_ROOT_SELECTOR
@@ -4803,11 +4820,11 @@ import {
     notice.setAttribute("aria-live", "polite");
     notice.textContent = message;
     root.appendChild(notice);
-    requestAnimationFrame(() => notice.classList.add("is-visible"));
-    window.clearTimeout(state.markerNoticeTimer);
-    state.markerNoticeTimer = window.setTimeout(() => {
+    lifecycle.requestAnimationFrame(() => notice.classList.add("is-visible"));
+    lifecycle.clearTimeout(state.markerNoticeTimer);
+    state.markerNoticeTimer = lifecycle.setTimeout(() => {
       notice.classList.remove("is-visible");
-      window.setTimeout(() => notice.remove(), 180);
+      lifecycle.setTimeout(() => notice.remove(), 180);
     }, 2200);
   }
 
@@ -5359,8 +5376,8 @@ import {
     }
     const reportDelivery = reportNextSnapshotDelivery;
     reportNextSnapshotDelivery = false;
-    window.clearTimeout(state.windowSnapshotTimer);
-    state.windowSnapshotTimer = window.setTimeout(() => {
+    lifecycle.clearTimeout(state.windowSnapshotTimer);
+    state.windowSnapshotTimer = lifecycle.setTimeout(() => {
       state.windowSnapshotTimer = 0;
       const snapshot = windowSnapshot();
       const message = {
@@ -5456,6 +5473,7 @@ import {
       const group = state.markerGroups.find((item) => item.key === String(message.groupKey || ""));
       void standaloneWindowImageUrlsForSources(group?.user?.imageUrls?.slice(0, 8) || [])
         .then((imageUrls) => {
+          if (!isExtensionContextValid()) return;
           sendRuntimeMessage(chrome, {
             type: "POLARIS_WINDOW_IMAGE",
             imageUrls
@@ -5475,12 +5493,10 @@ import {
       return;
     }
     if (message.command === "download-diagnostics") {
-      handleDownloadDiagnostics();
-      return;
+      return handleDownloadDiagnostics();
     }
     if (message.command === "send-diagnostics") {
-      handleSendDiagnostics();
-      return;
+      return handleSendDiagnostics();
     }
     if (message.command === "toggle-user-group") {
       const groupKey = String(message.groupKey || "");
@@ -5527,7 +5543,7 @@ import {
     if (!isTopLevelFrame() || !isExtensionContextValid()) {
       return;
     }
-    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    lifecycle.listenChrome(chrome.runtime.onMessage, (message, _sender, sendResponse) => {
       if (message?.type === "POLARIS_WINDOW_REQUEST_STATE") {
         if (!state.awaitingRouteDom && state.markerSourceContainers.length === 0) {
           render();
@@ -5718,7 +5734,7 @@ import {
     syncLiquidGlassElements(root);
 
     if (didChangeMarkerList || snapshot === null) {
-      requestAnimationFrame(() => {
+      lifecycle.requestAnimationFrame(() => {
         state.collapsedListHeight = list.offsetHeight;
       });
     }
@@ -5729,8 +5745,8 @@ import {
 
   function scheduleRender({ suppressMarkerMotion = false } = {}) {
     state.scheduledRenderSuppressesMarkerMotion ||= suppressMarkerMotion;
-    window.clearTimeout(state.scheduled);
-    state.scheduled = window.setTimeout(() => {
+    lifecycle.clearTimeout(state.scheduled);
+    state.scheduled = lifecycle.setTimeout(() => {
       state.scheduled = 0;
       const shouldSuppressMarkerMotion = state.scheduledRenderSuppressesMarkerMotion;
       state.scheduledRenderSuppressesMarkerMotion = false;
@@ -5739,7 +5755,7 @@ import {
   }
 
   function resetRouteState() {
-    window.clearTimeout(state.scheduled);
+    lifecycle.clearTimeout(state.scheduled);
     state.scheduledRenderSuppressesMarkerMotion = false;
     markerMotionSuppressor.reset();
     markerStreamingIndicator.reset();
@@ -5748,12 +5764,12 @@ import {
     markerListActiveTracker.reset();
     markerListScrollPersistence.reset();
     runtimeMarkerKeySequence.reset();
-    window.clearTimeout(state.markerNoticeTimer);
+    lifecycle.clearTimeout(state.markerNoticeTimer);
     state.markerNoticeTimer = 0;
     cancelPointerDrag("route-change");
     document.documentElement.classList.remove("gpt-paragraph-nav--dragging");
     state.suppressNextClick = false;
-    window.clearTimeout(state.suppressNextClickTimer);
+    lifecycle.clearTimeout(state.suppressNextClickTimer);
     state.suppressNextClickTimer = 0;
     state.headings = [];
     state.markerGroups = [];
@@ -5800,8 +5816,8 @@ import {
   let routeDomFallbackTimer = 0;
 
   function scheduleRouteDomFallback() {
-    window.clearTimeout(routeDomFallbackTimer);
-    routeDomFallbackTimer = window.setTimeout(() => {
+    lifecycle.clearTimeout(routeDomFallbackTimer);
+    routeDomFallbackTimer = lifecycle.setTimeout(() => {
       routeDomFallbackTimer = 0;
       if (!state.awaitingRouteDom) {
         return;
@@ -5838,7 +5854,7 @@ import {
       return;
     }
 
-    window.addEventListener(ROUTE_CHANGE_EVENT, handleRouteChange);
+    lifecycle.listen(window, ROUTE_CHANGE_EVENT, handleRouteChange);
     if (document.querySelector("script[data-polaris-route-bridge]")) {
       return;
     }
@@ -5886,7 +5902,7 @@ import {
       return;
     }
     chapterContentRevision += 1;
-    window.clearTimeout(routeDomFallbackTimer);
+    lifecycle.clearTimeout(routeDomFallbackTimer);
     routeDomFallbackTimer = 0;
     state.awaitingRouteDom = false;
     markerRenderStateMachine.request();
@@ -5995,7 +6011,7 @@ import {
     if (state.floatingScheduled) {
       return;
     }
-    state.floatingScheduled = window.requestAnimationFrame(() => {
+    state.floatingScheduled = lifecycle.requestAnimationFrame(() => {
       state.floatingScheduled = 0;
       updateFloatingActiveMarker(markerListActiveTracker.current());
     });
@@ -6017,7 +6033,7 @@ import {
     if (state.scrollScheduled) {
       return;
     }
-    state.scrollScheduled = window.requestAnimationFrame(() => {
+    state.scrollScheduled = lifecycle.requestAnimationFrame(() => {
       state.scrollScheduled = 0;
       updateActiveMarker();
     });
@@ -6050,8 +6066,8 @@ import {
 
   function suppressNextClick() {
     state.suppressNextClick = true;
-    window.clearTimeout(state.suppressNextClickTimer);
-    state.suppressNextClickTimer = window.setTimeout(() => {
+    lifecycle.clearTimeout(state.suppressNextClickTimer);
+    state.suppressNextClickTimer = lifecycle.setTimeout(() => {
       state.suppressNextClick = false;
       state.suppressNextClickTimer = 0;
     }, 0);
@@ -6063,7 +6079,7 @@ import {
     }
 
     state.suppressNextClick = false;
-    window.clearTimeout(state.suppressNextClickTimer);
+    lifecycle.clearTimeout(state.suppressNextClickTimer);
     state.suppressNextClickTimer = 0;
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -6433,8 +6449,11 @@ import {
     }
 
     document.documentElement.setAttribute(DEBUG_ATTR, "loaded:0");
-    state.config = await loadConfig();
+    const config = await loadConfig();
+    if (state.isExtensionContextInvalidated) return;
+    state.config = config;
     state.ratingDismissedUntil = await readRatingDismissedUntil();
+    if (state.isExtensionContextInvalidated) return;
     watchConfigChanges();
     registerWindowBridge();
     state.routeKey = currentRouteKey();
@@ -6443,6 +6462,7 @@ import {
     } catch (error) {
       console.warn("[Polaris: AI Chat Navigator] Legacy Maker snapshot cleanup unavailable", error);
     }
+    if (state.isExtensionContextInvalidated) return;
     watchRouteChanges();
     state.pageThemeWatcher = createPageThemeWatcher({
       document,
@@ -6472,33 +6492,34 @@ import {
       characterData: true
     });
 
-    window.addEventListener("scroll", scheduleScrollWork, { passive: true });
+    lifecycle.listen(window, "scroll", scheduleScrollWork, { passive: true });
     if (isManusPage()) {
-      document.addEventListener("scroll", handleManusConversationScroll, { capture: true, passive: true });
+      lifecycle.listen(document, "scroll", handleManusConversationScroll, { capture: true, passive: true });
     }
     if (isDeepSeekPage()) {
-      document.addEventListener("scroll", handleDeepSeekConversationScroll, { capture: true, passive: true });
+      lifecycle.listen(document, "scroll", handleDeepSeekConversationScroll, { capture: true, passive: true });
     }
-    window.addEventListener("pointerdown", handlePointerDown, { capture: true });
-    window.addEventListener("pointermove", handlePointerMove, { passive: false, capture: true });
-    window.addEventListener("pointerup", handlePointerUp, { capture: true });
-    window.addEventListener("pointercancel", handlePointerCancel, { capture: true });
-    window.addEventListener("lostpointercapture", handleLostPointerCapture, { capture: true });
-    window.addEventListener("blur", handleWindowBlur);
-    window.addEventListener("pagehide", handlePageHide);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    window.addEventListener("click", handlePointerDragClick, { capture: true });
-    window.addEventListener("resize", () => scheduleRender(), { passive: true });
-    window.addEventListener("keydown", handleKeydown, { capture: true });
-    document.addEventListener("click", handleDocumentClick);
+    lifecycle.listen(window, "pointerdown", handlePointerDown, { capture: true });
+    lifecycle.listen(window, "pointermove", handlePointerMove, { passive: false, capture: true });
+    lifecycle.listen(window, "pointerup", handlePointerUp, { capture: true });
+    lifecycle.listen(window, "pointercancel", handlePointerCancel, { capture: true });
+    lifecycle.listen(window, "lostpointercapture", handleLostPointerCapture, { capture: true });
+    lifecycle.listen(window, "blur", handleWindowBlur);
+    lifecycle.listen(window, "pagehide", handlePageHide);
+    lifecycle.listen(document, "visibilitychange", handleVisibilityChange);
+    lifecycle.listen(window, "click", handlePointerDragClick, { capture: true });
+    lifecycle.listen(window, "resize", () => scheduleRender(), { passive: true });
+    lifecycle.listen(window, "keydown", handleKeydown, { capture: true });
+    lifecycle.listen(document, "click", handleDocumentClick);
     registerDiagnosticErrorListeners();
     recordDiagnosticEvent("extension_loaded");
     console.info("[Polaris: AI Chat Navigator] loaded");
   }
 
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", start, { once: true });
+    lifecycle.listen(document, "DOMContentLoaded", start, { once: true });
   } else {
-    start();
+    void start();
   }
-})();
+  return disposeInvalidExtensionContext;
+}

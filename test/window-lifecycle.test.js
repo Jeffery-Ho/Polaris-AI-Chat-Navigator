@@ -15,7 +15,7 @@ const [backgroundSource, deliverySource] = await Promise.all([
 const executableBackgroundSource = backgroundSource.replace(
   'import { snapshotDeliveryResult } from "./snapshot-delivery.js";\n',
   deliverySource.replaceAll("export ", "")
-);
+).replace("export function initializeBackground", "function initializeBackground") + "\ninitializeBackground();";
 
 function createEvent() {
   let listener = null;
@@ -160,6 +160,13 @@ test("章节来源定位保留失败结果并拒绝已切换的来源标签页",
   const requests = calls.contentRequests.length;
   assert.equal((await calls.command({ ...command, expectedTabId: 99 })).ok, false);
   assert.equal(calls.contentRequests.length, requests);
+});
+
+test("诊断命令将内容页的导出状态返回侧栏", async () => {
+  const calls = await runAction({ storedWindow: null, contentResponse: { ok: true, diagnosticStatus: "Log downloaded." } });
+  const response = await calls.command({ type: "POLARIS_WINDOW_COMMAND", command: "download-diagnostics", expectedTabId: 42, expectResult: true });
+  assert.equal(response.diagnosticStatus, "Log downloaded.");
+  assert.equal(calls.contentRequests.at(-1).message.command, "download-diagnostics");
 });
 
 async function runSidePanelReady() {

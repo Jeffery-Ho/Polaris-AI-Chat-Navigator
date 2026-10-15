@@ -1,5 +1,27 @@
 const RELEASE_NOTES = Object.freeze([
   {
+    version: "0.72.0",
+    en: {
+      title: "More ways to get in touch",
+      changes: ["Feedback now includes personal X and Xiaohongshu profiles as horizontal icon shortcuts, while GitHub Issues and developer email keep their text entries. Profile links open in a new tab."]
+    },
+    zh: {
+      title: "更多联系入口",
+      changes: ["反馈页新增 X 与小红书个人主页的横排图标入口，GitHub Issues 和开发者邮件保留文字入口。个人主页链接在新标签页打开。"]
+    }
+  },
+  {
+    version: "0.70.0",
+    en: {
+      title: "Settings organized into dedicated pages",
+      changes: ["Settings now opens separate icon cards for Preferences, Help and diagnostics, Feedback, What's New, About, and Privacy Policy. Illustrated diagnostic steps explain how to attach logs manually; About introduces Polaris and shows supported platform icons. Returning preserves the previous reading position and search focus."]
+    },
+    zh: {
+      title: "设置分层为独立页面",
+      changes: ["设置现在提供偏好设置、帮助与诊断、反馈、更新内容、关于和隐私政策六张独立图标卡片。日志步骤配图说明手动添加附件；关于页介绍 Polaris 并展示支持平台图标。逐级返回时保留原阅读位置和搜索焦点。"]
+    }
+  },
+  {
     version: "0.68.0",
     en: {
       title: "A single sidepanel experience",

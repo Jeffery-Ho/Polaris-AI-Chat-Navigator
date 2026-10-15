@@ -37,11 +37,11 @@ jobs:
       - name: Check source
         run: pnpm check
 
-      - name: Run tests
-        run: pnpm test
-
       - name: Build extension
         run: pnpm build
+
+      - name: Run tests
+        run: pnpm test
 
       - name: Validate build metadata
         id: metadata

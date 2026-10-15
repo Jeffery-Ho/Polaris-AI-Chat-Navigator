@@ -57,9 +57,9 @@ export function validateExtensionPackage(root = process.cwd()) {
     throw new Error(`dist/manifest.json references files missing from dist/: ${missing.join(", ")}`);
   }
 
-  const backgroundPath = path.join(root, "dist", "assets", "background.js");
+  const backgroundPath = path.join(root, "dist", built.background?.service_worker || "");
   if (!existsSync(backgroundPath)) {
-    throw new Error("Built background bundle dist/assets/background.js is missing.");
+    throw new Error("Built background service worker is missing.");
   }
   const background = readFileSync(backgroundPath, "utf8");
   if (!background.includes("getManifest") || !background.includes("executeScript")) {

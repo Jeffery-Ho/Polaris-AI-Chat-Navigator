@@ -22,9 +22,9 @@ function installGitHooks() {
   }
 }
 
-function buildExtension() {
-  const viteBin = path.join(root, "node_modules", "vite", "bin", "vite.js");
-  const build = spawnSync(process.execPath, [viteBin, "build"], {
+function runWxt(command) {
+  const wxtBin = path.join(root, "node_modules", "wxt", "bin", "wxt.mjs");
+  const build = spawnSync(process.execPath, [wxtBin, command], {
     cwd: root,
     stdio: "inherit"
   });
@@ -35,6 +35,7 @@ function buildExtension() {
 
 const entry = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : "";
 if (entry === import.meta.url) {
+  runWxt("prepare");
   installGitHooks();
-  buildExtension();
+  if (shouldInstallGitHooks()) runWxt("build");
 }

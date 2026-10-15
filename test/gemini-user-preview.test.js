@@ -17,7 +17,7 @@ test("Gemini 用户 Marker 从查询正文提取文本，不包含角色前缀",
   const markerSource = functionSource("makeUserMarkerItem", "assistantContainerForHeading");
 
   assert.match(contentSource, /const GEMINI_USER_MESSAGE_SELECTOR = "user-query";/);
-  assert.match(contentSource, /const GEMINI_USER_TEXT_SELECTOR = "\.query-content, \.query-text-line, \.query-text";/);
+  assert.match(contentSource, /const GEMINI_USER_TEXT_SELECTOR = "\.query-text-line, \.query-text, \.query-content";/);
   assert.match(contentSource, /GEMINI_USER_ROLE_PREFIX_PATTERN = \/\^\\s\*\(\?:You said\|你说\|你話\|你话\)/);
   assert.match(textSource, /isGeminiPage\(\).*?GEMINI_USER_TEXT_SELECTOR/s);
   assert.match(textSource, /GEMINI_USER_TEXT_SELECTOR\.split\(", "\)/);

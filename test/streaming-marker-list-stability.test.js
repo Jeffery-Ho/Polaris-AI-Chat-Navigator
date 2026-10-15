@@ -84,7 +84,7 @@ test("Maker 卡片 wheel 使用列表原生滚动并取消自动定位", () => {
 });
 
 test("不再注册全局 wheel 或维护自定义滚动动画", () => {
-  assert.doesNotMatch(contentSource, /window\.addEventListener\("wheel"/);
+  assert.doesNotMatch(contentSource, /lifecycle\.listen\(window, "wheel"/);
   assert.doesNotMatch(contentSource, /handleMarkerListWheel|markerListWheelHitWidth|animateMarkerListScroll/);
   assert.doesNotMatch(contentSource, /markerListScrollAnimation|markerListScrollTarget/);
 });

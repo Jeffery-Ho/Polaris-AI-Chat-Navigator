@@ -20,10 +20,10 @@ test("拖动使用指针捕获并覆盖异常结束、路由移除与窄视口�
 
   assert.match(pointerDown, /capturePointerForDrag\(drag, event\.pointerId\)/);
   assert.match(pointerMove, /POINTER_DRAG_THRESHOLD/);
-  assert.match(contentSource, /window\.addEventListener\("lostpointercapture", handleLostPointerCapture/);
-  assert.match(contentSource, /window\.addEventListener\("blur", handleWindowBlur/);
-  assert.match(contentSource, /document\.addEventListener\("visibilitychange", handleVisibilityChange/);
-  assert.match(contentSource, /window\.addEventListener\("pagehide", handlePageHide/);
+  assert.match(contentSource, /lifecycle\.listen\(window, "lostpointercapture", handleLostPointerCapture/);
+  assert.match(contentSource, /lifecycle\.listen\(window, "blur", handleWindowBlur/);
+  assert.match(contentSource, /lifecycle\.listen\(document, "visibilitychange", handleVisibilityChange/);
+  assert.match(contentSource, /lifecycle\.listen\(window, "pagehide", handlePageHide/);
   assert.match(routeReset, /cancelPointerDrag\("route-change"\)/);
   assert.match(removeRoot, /cancelPointerDrag\("navigation-root-removed"\)/);
   assert.match(contentSource, /Math\.max\(0, Math\.min\(position\.top, maxTop\)\)/);

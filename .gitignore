@@ -3,6 +3,9 @@ node_modules/
 
 # Built extension package. pnpm install and the git hooks recreate it.
 dist/
+.output/
+.wxt/
+web-ext.config.*
 
 # Local working notes.
 Doc/

@@ -17,9 +17,13 @@ pnpm install
 
 After that, `dist/` stays current without a manual build. Switching branches, merging, pulling, and rebasing run `pnpm build`, and run `pnpm install` only when `pnpm-lock.yaml` changed. Click **refresh** on the Polaris card in `chrome://extensions` to load the new files. A checkout of individual files does not rebuild. If a rebuild fails, git still finishes and prints a `[Polaris]` warning; run `pnpm build`, then click refresh.
 
-While editing, `pnpm dev` rebuilds `dist/` after each save. Click refresh in `chrome://extensions` after that rebuild finishes.
+While editing, run `pnpm dev` to start WXT with an isolated Chromium development window and automatic extension reload. Development files live in `.output/chrome-mv3-dev/` and do not replace `dist/`. Chrome/Chromium must be installed; use an ignored `web-ext.config.js` to select a custom binary. The development profile is separate from your everyday browser profile.
 
-Do not load the repository root. The root is source, not an extension package. `manifest.build.json` is the only manifest source. A root `manifest.json` must not be added back.
+Run `pnpm build` to generate the production extension in `dist/` for Dia or Chrome, then refresh the extension and conversation tabs. Run `pnpm check` and `pnpm test` after building; package tests read `dist/`.
+
+The project uses WXT 0.21.4, JavaScript, pnpm, and Node.js 22 or newer. `entrypoints/` contains the WXT background, content script, and sidepanel inputs; reusable behavior stays in `src/`. WXT generates entrypoint paths from `wxt.config.js` while `manifest.build.json` supplies product metadata, permissions, supported sites, and versions. Static icons and the route bridge retain their existing extension URLs.
+
+Do not load the repository root. The root is source, not an extension package. `manifest.build.json` is the product manifest source; WXT generates entrypoint paths. A root `manifest.json` must not be added back.
 
 Polaris requires Chrome 114 or a compatible browser with the Side Panel API. Standalone windows and fallback popup windows are no longer supported.
 
@@ -55,7 +59,7 @@ DeepSeek navigation reads only mounted messages inside its virtual list. Final-a
 
 ## Features
 
-- Click the browser extension icon to open or focus one Dia inspired Polaris window. The window follows the active supported tab and contains navigation, Chapter View, and About & Settings.
+- Click the browser extension icon to open the Polaris browser sidepanel. It follows the active supported tab and contains navigation, Chapter View, and Settings.
 - Maker navigation is generated only from currently mounted user and AI response DOM. A route change removes the previous list immediately; only a later non-Polaris page mutation can populate the new list. DOM removal also removes its Makers, and a DOM remount receives new runtime keys.
 - Progressive Maker rendering begins during streaming output as soon as the first non-empty supported marker is available; fixed 120ms render batches reuse existing Maker nodes and update only changed items, preserving list scrolling, focus, hover, and manual collapse state. Wheel, trackpad, or list-drag input on a Maker or group card immediately takes control from temporary Active Maker positioning, so any Maker can remain outside the list viewport while streaming continues.
 - Click-to-jump navigation, active-section highlighting, and a scrollable marker queue.
@@ -64,7 +68,9 @@ DeepSeek navigation reads only mounted messages inside its virtual list. Final-a
 - Visible titles inside AI markers, user groups, and the floating active marker are left-aligned; user group capsules remain on the queue's right edge while AI markers and folded stacks remain on the left.
 - Platform-specific marker filters for H1, H2, H3, H4, bold text, unordered lists, and ordered lists.
 - Settings synchronization through `chrome.storage.sync`.
-- Settings preserve their internal scroll position during host-page refreshes, so long conversations do not interrupt access to Marker filters.
+- Settings opens six separate icon cards: **Preferences**, **Help and diagnostics**, **Feedback**, **What's New**, **About**, and **Privacy Policy**. The policy opens directly from Settings in a new tab. Back and Escape return through the menu, preserving the previous navigation or chapter view, search focus, and reading position. Preferences keep live controls during conversation updates.
+- **About** centers the 40px app icon, name, and actual version; adds a short product introduction, developer credit, and thanks; and lists all 11 supported platforms with their bundled icons.
+- **Feedback** keeps GitHub Issues and developer email as text rows, with personal X and Xiaohongshu profiles in a separate horizontal icon row with hover hints and accessible labels. Profile links open in a new tab.
 - Light and dark adaptive glass styling, with lightweight blur and saturation on Maker cards and the floating Active Maker while controls and search retain the full displacement effect.
 - Native browser scrolling on Maker, user-group, and fold cards, without custom wheel animation or a transparent extended hit area.
 - Fuzzy title search for both the navigation marker queue and Chapter View, with `Cmd/Ctrl+F` focusing the current search box.
@@ -72,7 +78,7 @@ DeepSeek navigation reads only mounted messages inside its virtual list. Final-a
 - Currently mounted user maker groups show the latest 20 groups by default, with search covering those mounted groups. Every group starts expanded, including the latest, previous, and newly streamed groups; an explicit click can manually collapse its contents.
 - An active Maker does not change its stack or user group state. Manual collapse keeps the Maker selected, and dragging more than 4px from any Maker or group card scrolls the list without triggering that card's click action.
 - Pointer dragging captures the active pointer and recovers after window blur, page hiding, lost capture, route changes, or a narrow-viewport boundary; an interrupted control drag rolls back its unsaved position.
-- About & Settings provides redacted, current-tab diagnostic log export. **Send diagnostic log** downloads the JSON and opens a pre-addressed email; attach the downloaded file manually. **Download only** saves the file without opening email.
+- **Help and diagnostics** provides four illustrated steps for sending a redacted, current-tab diagnostic log. **Send diagnostics** downloads the JSON and opens a pre-addressed email; attach the downloaded file manually. **Download diagnostics** saves the file without opening email.
 - **Chapter View**, which organizes AI response content by marker section for convenient reading and copying on every supported platform.
 - A heart-shaped support entry at the right edge of the About & Settings header, opening the same-origin [Polaris support entry](https://jeffery-ho.github.io/polaris-landing/entry/extension/) in a new tab. The entry preserves the fixed `polaris_extension` source without relying on UTM parameters; the landing page loads optional GA4 and SLS analytics only after the visitor explicitly consents.
 - Update notes place the same heart-shaped support entry as the leftmost feedback action, opening the support page in a new tab.
@@ -82,7 +88,7 @@ DeepSeek navigation reads only mounted messages inside its virtual list. Final-a
 
 ## Settings
 
-Feature-version upgrades show update notes inside the sidepanel when you open it. Dismissing the dialog marks that feature version as read; patch upgrades do not show it again. Select **What's new** in Settings to review the current notes anytime.
+Feature-version upgrades show update notes inside the sidepanel when you open it. Dismissing the dialog marks that feature version as read; patch upgrades do not show it again. Select **What's New** in Settings to read the current feature-version notes on their own page.
 
 Open **Settings** from the Polaris sidepanel to adjust:
 
@@ -117,7 +123,7 @@ Do not commit `dist/` or load `dist.zip` as the extension. The release workflow 
 
 ## Version
 
-Current version: `0.68.0(275)`
+Current version: `0.72.7(291)`
 
 ## License
 

@@ -12,7 +12,7 @@ async function writePackage(root, { rootManifest = false, builtManifest, backgro
   const manifest = builtManifest || {
     version: "0.0.1",
     version_name: "0.0.1(1)",
-    background: { service_worker: "service-worker-loader.js" },
+    background: { service_worker: "background.js" },
     icons: { "16": "icons/icon.png" },
     content_scripts: [{ js: ["assets/i18n.js", "src/content.js"], css: ["src/styles.css"] }]
   };
@@ -21,8 +21,7 @@ async function writePackage(root, { rootManifest = false, builtManifest, backgro
   await mkdir(path.join(root, "dist", "src"), { recursive: true });
   await writeFile(path.join(root, "manifest.build.json"), JSON.stringify(manifest));
   await writeFile(path.join(root, "dist", "manifest.json"), JSON.stringify(manifest));
-  await writeFile(path.join(root, "dist", "service-worker-loader.js"), "import './assets/background.js';\n");
-  await writeFile(path.join(root, "dist", "assets", "background.js"), background);
+  await writeFile(path.join(root, "dist", "background.js"), background);
   await writeFile(path.join(root, "dist", "assets", "i18n.js"), "");
   await writeFile(path.join(root, "dist", "src", "content.js"), "");
   await writeFile(path.join(root, "dist", "src", "styles.css"), "");

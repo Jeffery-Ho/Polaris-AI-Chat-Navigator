@@ -10,6 +10,118 @@
 - Version update type must be declared by the user before recording a build.
 - After each build is recorded, confirm the build number and version with the user.
 
+## 291
+
+- Date: 2026-10-14
+- Version: 0.72.7
+- Summary: Restores Grok and Diandian user prompts as chapter titles.
+- Notes: Includes both platforms in user chapter grouping, supports Grok message roles without a main wrapper, and prefers Diandian's dedicated AI Markdown body over mixed conversation wrappers. Rejects user-owned and mixed fallback containers so pending prompts are not mistaken for answers. Preserves repeated prompts, nested chapters, legacy layouts, supported Diandian domains, source keys, and Full text for orphan replies. Adds behavioral regression coverage through production extraction and grouping.
+
+## 290
+
+- Date: 2026-10-14
+- Version: 0.72.6
+- Summary: Prevents duplicated Gemini user prompt text.
+- Notes: Reads query text lines and the query body before the outer query-content container, which also contains an accessibility copy of the prompt. Applies to both Navigation and Chapters, preserves intentional repeated lines and separate identical prompts, and adds regression coverage for accessibility headings and prompts without line wrappers.
+
+## 289
+
+- Date: 2026-10-14
+- Version: 0.72.5
+- Summary: Restores Gemini user prompts as chapter titles.
+- Notes: Includes Gemini user markers in the sidepanel chapter tree so answer introductions, headings, and bodies stay under their prompt. Preserves repeated prompts, multiline query text, pending turns, source navigation keys, and Full text for replies without a mounted user source. Adds behavioral regression coverage through the production extraction and grouping functions, and makes the WXT site-match assertion independent of pattern ordering.
+
+## 288
+
+- Date: 2026-10-14
+- Version: 0.72.4
+- Summary: Restores Xiaohongshu's red background in Feedback.
+- Notes: Uses the red brand color for the Xiaohongshu circle while preserving its white wordmark, 32px size, alignment, and 44px click target. The X circle remains black.
+
+## 287
+
+- Date: 2026-10-14
+- Version: 0.72.3
+- Summary: Aligns Feedback social icons inside matching black circular backgrounds.
+- Notes: Uses 32px black circles with white brand marks, reduces the X mark to 16px, and centers the Xiaohongshu wordmark for balanced visual weight. Keeps the 44px click targets and GitHub/email text entries.
+
+## 286
+
+- Date: 2026-10-14
+- Version: 0.72.2
+- Summary: Restores text entries for GitHub Issues and developer email in Feedback.
+- Notes: Keeps the original two-row text group, with only X and Xiaohongshu shown as horizontal icon shortcuts below it. Preserves all destinations, hover hints, keyboard focus, and accessible labels, and removes unused GitHub and mail icon assets.
+
+## 285
+
+- Date: 2026-10-14
+- Version: 0.72.1
+- Summary: Replaces Feedback cards with a horizontal row of icon shortcuts.
+- Notes: Shows GitHub, email, X, and Xiaohongshu in one row without card backgrounds or borders. Keeps all destinations, accessible labels, hover hints, visible keyboard focus, and 44px click targets. Bundles the GitHub and mail SVGs locally.
+
+## 284
+
+- Date: 2026-10-14
+- Version: 0.72.0
+- Summary: Adds personal X and Xiaohongshu profile entries to Feedback.
+- Notes: Keeps GitHub Issues and developer email, and adds a separate profile group using locally bundled Simple Icons brand SVGs. Links open the existing X profile and the confirmed 杰_弗里 Xiaohongshu profile in new tabs; X adapts to the theme and Xiaohongshu uses its red brand color. Includes English and Chinese labels and update notes.
+
+## 283
+
+- Date: 2026-10-14
+- Version: 0.71.3
+- Summary: Replaces Preferences and What's New icons with Lucide icons found through Iconify MCP.
+- Notes: Uses sliders-horizontal for preferences and sparkles for new features, preserving the 20px terracotta line style. Bundles the SVG paths and Lucide license with the extension.
+
+## 282
+
+- Date: 2026-10-14
+- Version: 0.71.2
+- Summary: Refines About typography, developer credit, and acknowledgements.
+- Notes: Removes the secondary product paragraph, aligns the product headline with the section heading size, adds an accessible red heart to the localized developer credit, and updates the English and Chinese thanks copy with the supplied contributor names.
+
+## 281
+
+- Date: 2026-10-14
+- Version: 0.71.1
+- Summary: Moves search clearing into the input as an icon button.
+- Notes: Shows an accessible clear icon when a query is present, preserves focus after clearing both navigation and chapter searches, and removes the separate empty-result text button.
+
+## 280
+
+- Date: 2026-10-14
+- Version: 0.71.0
+- Summary: Migrates the extension build and development workflow to WXT.
+- Notes: Replaces CRXJS with explicit WXT entrypoints, isolates development output and ignores production artifacts during development, preserves the production dist package and static resource URLs, and cleans up content-script resources during reload. Guards pending image and clipboard completions from updating new instances. Updates CI package validation and records `0.71.0(280)`.
+
+## 279
+
+- Date: 2026-10-14
+- Version: 0.70.0
+- Summary: Organizes Settings into six icon cards and five dedicated pages.
+- Notes: Adds hierarchical Back and Escape navigation with reading-position and focus restoration. Keeps preference controls mounted during snapshot updates. Adds four bundled diagnostic illustrations, manual attachment instructions, dedicated feedback and current-version notes, a centered 40px app identity, About introduction and credits, all 11 platform icons, and a direct Privacy Policy link on the Settings menu. Preserves automatic feature-update notices. Updated the current version to `0.70.0(279)`.
+
+## 278
+
+- Date: 2026-10-14
+- Version: 0.69.1
+- Summary: Uses the same conversation empty state in Navigation and Chapters.
+- Notes: Shows the shared five-row skeleton in Chapters while a supported conversation is unavailable or loading, and the supported-platform guidance on unsupported pages. Preserves the distinct no-chapters message after a real conversation is read. Updated the current version to `0.69.1(278)`.
+
+## 277
+
+- Date: 2026-10-14
+- Version: 0.68.2
+- Summary: Shows a lightweight navigation skeleton while a supported conversation is being read.
+- Notes: Replaces the premature no-conversation state on supported platforms with a status line and five placeholder rows. Keeps the skeleton stable during retries, switches to real Makers when data arrives, and uses a static waiting state on new-chat routes. Refreshes unsupported-page guidance, preserves existing empty-Maker behavior, supports both themes, and respects reduced motion. Updated the current version to `0.68.2(277)`.
+
+## 276
+
+- Date: 2026-10-14
+- Version: 0.68.1
+- Summary: Clarifies folded navigation groups with lightweight section headings.
+- Notes: Removes group-card backgrounds and borders, adds a leading disclosure arrow, reduces heading type size, and uses the full title within the available width. Replaces the visible remainder count with a localized more capsule. Preserves whole-row expand/collapse behavior and exposes its state to assistive technology. Updated the current version to `0.68.1(276)`.
+
 ## 275
 
 - Date: 2026-10-13

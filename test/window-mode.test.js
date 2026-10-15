@@ -8,7 +8,7 @@ const [buildManifest, background, content, windowSource, sidePanelHtml, windowCs
   readFile(new URL("../src/background.js", import.meta.url), "utf8"),
   readFile(new URL("../src/content.js", import.meta.url), "utf8"),
   readFile(new URL("../src/window.js", import.meta.url), "utf8"),
-  readFile(new URL("../sidepanel.html", import.meta.url), "utf8"),
+  readFile(new URL("../entrypoints/sidepanel.html", import.meta.url), "utf8"),
   readFile(new URL("../src/window.css", import.meta.url), "utf8"),
   readFile(new URL("../src/search-input.js", import.meta.url), "utf8"),
   readFile(new URL("../src/tokens.css", import.meta.url), "utf8")
@@ -68,15 +68,15 @@ test("侧栏包含导航、章节、设置和无对话平台空状态", () => {
   assert.match(windowSource, /chrome\.tabs\?\.onUpdated/);
   assert.match(windowSource, /setInterval\(requestSourceState, 1200\)/);
   assert.match(windowSource, /const shouldRetry = !snapshot \|\| Boolean\(snapshot\.supportedRoute && !snapshot\.hasConversation\)/);
-  assert.match(windowSource, /if \(isLoading \|\| snapshot\.loading\)/);
+  assert.match(windowSource, /if \(isLoading \|\| snapshot\.loading \|\| awaitingConversation\)/);
   assert.match(windowSource, /Reading conversation/);
-  assert.match(windowSource, /No conversation here/);
+  assert.doesNotMatch(windowSource, /No conversation here/);
   assert.match(windowSource, /jump-to-marker/);
   assert.match(windowSource, /request-chapters/);
   assert.match(windowSource, /matchesSearch/);
   assert.match(windowSource, /input\.type = "text"/);
   assert.match(windowSource, /input\.lang = locale === "zh" \? "zh-CN" : "en"/);
-  assert.match(windowSource, /if \(item\.type === "user"\)/);
+  assert.match(windowSource, /if \(item\.type === "user" \|\| item\.type === "fold"\)/);
   assert.doesNotMatch(windowSource, /append\(copy, element\("span", "maker-chevron"/);
   assert.doesNotMatch(windowSource, /empty-symbol|platform-grid|platform-chip|iconLabel/);
   assert.match(windowSource, /platform-stack/);
@@ -108,7 +108,6 @@ test("Side Panel 使用窗口专属赤陶品牌层级", () => {
   assert.match(windowSource, /previousContentTab/);
   assert.match(windowSource, /restoreViewState/);
   assert.match(windowSource, /focusSearchInput\(activeSearch\)/);
-  assert.match(windowSource, /state\.activeTab === "settings"\) \{\s*closeSettings\(\)/);
   assert.match(windowSource, /settingsButton\.addEventListener\("pointerdown", \(\) => \{\s*if \(state\.activeTab !== "settings"\) rememberViewState\(\)/);
   assert.match(windowSource, /\["navigation",[\s\S]*?\["chapters",/);
   assert.doesNotMatch(windowSource, /\["settings", locale/);
