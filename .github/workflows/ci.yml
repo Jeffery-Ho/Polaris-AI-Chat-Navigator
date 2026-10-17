@@ -54,7 +54,7 @@ jobs:
       - name: Zip Edge extension
         run: pnpm zip:edge
 
-      # Errors fail the job. Warnings stay warnings (no --warnings-as-errors).
+      # Errors fail the job. Warnings do not.
       - name: Lint Firefox extension
         run: pnpm exec web-ext lint --source-dir .output/firefox-mv3 --no-input --no-config-discovery
 
