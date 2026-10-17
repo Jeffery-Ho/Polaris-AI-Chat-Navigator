@@ -104,6 +104,14 @@ async function bootPackagedContent({ delayConfig = false } = {}) {
   return { dom, win, runtime, storage, messages, errors, pendingConfigReads, flush, inject, invalidate };
 }
 
+// Packaged content keeps timers past the test body. Dispose and drain them
+// before JSDOM closes the window, or a late callback reads a null location.
+async function closePackagedContent(s) {
+  s.invalidate();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  s.dom.window.close();
+}
+
 test("production WXT entrypoint reloads with one UI and one set of Chrome listeners", async () => {
   const s = await bootPackagedContent();
   try {
@@ -132,7 +140,7 @@ test("production WXT entrypoint reloads with one UI and one set of Chrome listen
     assert.equal(s.win.document.querySelectorAll("#gpt-paragraph-nav").length, 1);
     assert.deepEqual(s.errors, []);
   } finally {
-    s.dom.window.close();
+    await closePackagedContent(s);
   }
 });
 
@@ -155,7 +163,7 @@ test("invalidation while storage is pending cannot revive an old content instanc
     assert.equal(s.win.document.querySelectorAll("#gpt-paragraph-nav").length, 1);
     assert.deepEqual(s.errors, []);
   } finally {
-    s.dom.window.close();
+    await closePackagedContent(s);
   }
 });
 
@@ -177,7 +185,7 @@ test("an image preview requested before invalidation cannot overwrite a new inst
     assert.equal(s.messages.filter((message) => message.type === "POLARIS_WINDOW_IMAGE").length, 1);
     assert.deepEqual(s.errors, []);
   } finally {
-    s.dom.window.close();
+    await closePackagedContent(s);
   }
 });
 
@@ -200,6 +208,6 @@ test("clipboard completion from an old instance cannot add a toast to a new over
     assert.equal(s.win.document.querySelectorAll(".gpt-paragraph-nav__copy-toast").length, 0);
     assert.deepEqual(s.errors, []);
   } finally {
-    s.dom.window.close();
+    await closePackagedContent(s);
   }
 });
