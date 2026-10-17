@@ -380,6 +380,15 @@ async function forwardContentSnapshot(message, sender, sendResponse) {
 
 function configureAction() {
   if (typeof chrome.sidePanel?.setPanelBehavior !== "function") {
+    // Firefox: the sidepanel page is a sidebar_action; toggle it from the user's click.
+    if (typeof chrome.sidebarAction?.toggle === "function") {
+      chrome.action.onClicked.addListener(() => {
+        void chrome.sidebarAction.toggle().catch((error) => {
+          console.warn("[Polaris] The sidebar could not be toggled.", error);
+        });
+      });
+      return;
+    }
     console.warn("[Polaris] This browser does not support the Side Panel API.");
     return;
   }

@@ -10,6 +10,13 @@
 - Version update type must be declared by the user before recording a build.
 - After each build is recorded, confirm the build number and version with the user.
 
+## 296
+
+- Date: 2026-10-17
+- Version: 0.73.4
+- Summary: Adds Firefox and Edge packaging and opens the Polaris sidebar in Firefox.
+- Notes: Adds `build:firefox`, `build:edge`, `zip`, `zip:firefox` and `zip:edge`; only the Chrome build still goes to `dist/`, other browsers use `.output/<browser>-mv3/`. The Firefox manifest uses `sidebar_action`, drops `sidePanel` and `minimum_chrome_version`, and declares gecko id `polaris@hos.dev` with Firefox 140 minimum. Without the Side Panel API the toolbar action toggles the sidebar. Firefox zips include an AMO sources archive. The Edge build is identical to `dist/`.
+
 ## 295
 
 - Date: 2026-10-17

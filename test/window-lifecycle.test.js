@@ -29,7 +29,7 @@ function createEvent() {
   };
 }
 
-async function runAction({ storedWindow, getError = null, updateError = null, syncGetError = null, sidePanel = false, behaviorError = null, contentScriptFailures = 0, contentResponse, scripting = false, cssError = null, scriptError = null, contentScripts = packagedContentScripts, settleMs = 0 }) {
+async function runAction({ storedWindow, getError = null, updateError = null, syncGetError = null, sidePanel = false, behaviorError = null, sidebarAction = false, toggleError = null, contentScriptFailures = 0, contentResponse, scripting = false, cssError = null, scriptError = null, contentScripts = packagedContentScripts, settleMs = 0 }) {
   const windowUrl = "chrome-extension://test/polaris-home.html";
   const sourceTab = { id: 42, windowId: 9, active: true, url: "https://chatgpt.com/c/test" };
   const local = {
@@ -42,13 +42,16 @@ async function runAction({ storedWindow, getError = null, updateError = null, sy
   local["existing-preference"] = { enabled: true };
   const action = createEvent();
   const runtimeMessage = createEvent();
-  const calls = { creates: [], updates: [], contentRequests: [], runtimeMessages: [], sidePanelBehaviors: [], cssInjections: [], scriptInjections: [], warnings: [] };
+  const calls = { creates: [], updates: [], contentRequests: [], runtimeMessages: [], sidePanelBehaviors: [], sidebarToggles: 0, cssInjections: [], scriptInjections: [], warnings: [] };
   let contentRequestAttempts = 0;
   const noOpEvent = () => createEvent();
   const chrome = {
     action: { onClicked: action },
     sidePanel: sidePanel ? {
       async setPanelBehavior(behavior) { calls.sidePanelBehaviors.push(behavior); if (behaviorError) throw behaviorError; }
+    } : undefined,
+    sidebarAction: sidebarAction ? {
+      async toggle() { calls.sidebarToggles += 1; if (toggleError) throw toggleError; }
     } : undefined,
     scripting: scripting ? {
       async insertCSS(details) {
@@ -230,6 +233,25 @@ async function runSidePanelReady() {
 test("Side Panel API 缺失时不再创建独立窗口", async () => {
   const calls = await runAction({ storedWindow: null, sidePanel: false });
   assert.equal(calls.creates.length, 0);
+});
+
+test("Firefox 缺少 Side Panel API 时，扩展图标切换 sidebar_action", async () => {
+  const calls = await runAction({ storedWindow: null, sidebarAction: true });
+  assert.equal(calls.sidebarToggles, 1);
+  assert.equal(calls.creates.length, 0);
+  assert.equal(calls.warnings.some((args) => String(args[0]).includes("does not support")), false);
+});
+
+test("Firefox 侧栏切换失败只记录警告", async () => {
+  const calls = await runAction({ sidebarAction: true, toggleError: new Error("blocked") });
+  assert.equal(calls.sidebarToggles, 1);
+  assert.equal(calls.warnings.some((args) => String(args[0]).includes("could not be toggled")), true);
+});
+
+test("同时支持 Side Panel API 时不注册 sidebar 切换", async () => {
+  const calls = await runAction({ sidePanel: true, sidebarAction: true });
+  assert.equal(calls.sidebarToggles, 0);
+  assert.equal(calls.sidePanelBehaviors.length, 1);
 });
 
 test("侧栏配置失败不会回退创建独立窗口", async () => {

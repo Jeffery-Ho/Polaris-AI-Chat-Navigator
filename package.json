@@ -8,6 +8,11 @@
   },
   "scripts": {
     "build": "wxt build",
+    "build:firefox": "wxt build -b firefox",
+    "build:edge": "wxt build -b edge",
+    "zip": "wxt zip",
+    "zip:firefox": "wxt zip -b firefox",
+    "zip:edge": "wxt zip -b edge",
     "dev": "wxt",
     "prepare": "node scripts/prepare.js",
     "check": "node scripts/check.js",

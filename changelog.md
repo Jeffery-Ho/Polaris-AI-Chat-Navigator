@@ -2,6 +2,10 @@
 
 ## 2026-10-17
 
+- 新增：支持打包 Firefox 与 Edge（`pnpm build:firefox`、`build:edge`、`zip`、`zip:firefox`、`zip:edge`）。Chrome 产物仍在 `dist/`，其他浏览器输出到 `.output/<browser>-mv3/`；Edge 产物与 `dist/` 一致。
+- 修复：Firefox 无 Side Panel API，改用 `sidebar_action`，点击工具栏图标切换侧栏；manifest 去除 Chromium 专属字段并声明 gecko id `polaris@hos.dev`，Firefox zip 附带 AMO 所需源码包。
+- 版本：更新到 `0.73.4(296)`。
+
 - 重构：完成 WXT 迁移收尾。图标与路由桥移入 `public/`，支持站点统一由 `src/supported-sites.js` 生成；sidepanel 改为目录入口，i18n 改为模块导出，`pnpm check` 自动遍历脚本。产物 manifest 除版本外不变。
 - 版本：更新到 `0.73.3(295)`。
 
