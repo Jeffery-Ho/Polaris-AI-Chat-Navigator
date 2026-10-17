@@ -1,4 +1,6 @@
 @import "./tokens.css";
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities) source(none);
 
 :root {
   --window-accent: #b85c3a;
@@ -236,6 +238,7 @@ button { color: inherit; }
 }
 
 .window-search {
+  position: relative;
   display: flex;
   align-items: center;
   margin: var(--polaris-space-3) 0 var(--polaris-space-2);
@@ -1133,4 +1136,49 @@ button { color: inherit; }
   content: ""; position: absolute; top: 0; bottom: 0;
   left: calc(var(--tree-depth, 0) * 12px + 35px);
   border-left: 1px solid var(--polaris-border); pointer-events: none;
+}
+
+.window-search-results {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 3;
+  max-height: min(360px, 50vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px;
+  border: 1px solid var(--polaris-border);
+  border-radius: var(--polaris-radius-md);
+  background: var(--polaris-bg-elevated);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 12%);
+}
+
+.window-search-result {
+  display: block;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--polaris-radius-sm);
+  background: transparent;
+  color: var(--polaris-text);
+  font: inherit;
+  text-align: start;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.window-search-result:hover,
+.window-search-result:focus-visible {
+  background: var(--polaris-accent-subtle);
+  color: var(--polaris-accent);
+  outline: 1px solid var(--polaris-focus);
+  outline-offset: -1px;
+}
+
+.maker-card[data-search-located="true"] {
+  border-color: var(--polaris-focus);
+  background: var(--polaris-accent-subtle);
+  outline: none;
+  @apply transition-colors duration-300 ease-out motion-reduce:transition-none;
 }

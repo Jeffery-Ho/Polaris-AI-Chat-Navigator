@@ -17,6 +17,27 @@
 - Summary: Completes the WXT migration with standard entrypoints, public assets, and a single supported-site list.
 - Notes: Moves icons and the route bridge into `public/`, removes the manual asset-copy hook, and derives content matches, host permissions, and resource matches from `src/supported-sites.js`. Turns the sidepanel into a directory entrypoint that calls `initializeSidepanel()`, replaces the `PolarisI18n` global with `createI18n()`, renames the JSX-free settings panel to `.js`, and makes `pnpm check` discover scripts automatically. The built manifest is unchanged apart from the version.
 
+## 294
+
+- Date: 2026-10-16
+- Version: 0.73.2
+- Summary: Smoothly scrolls search selections into view with a Tailwind color transition.
+- Notes: Uses native smooth scrolling and a 300ms target highlight transition. Respects reduced motion and retains the sticky-header offset. Integrates Tailwind through Vite without Preflight.
+
+## 293
+
+- Date: 2026-10-16
+- Version: 0.73.1
+- Summary: Preserves search result clicks during streaming updates and uses thin selection borders.
+- Notes: Reuses unchanged headers so snapshot refreshes cannot detach a pressed result. Marks the located Maker with a thin border and verifies exact placement below the sticky header.
+
+## 292
+
+- Date: 2026-10-16
+- Version: 0.73.0
+- Summary: Adds dropdown search results that locate Makers in the full navigation list.
+- Notes: Keeps the full list visible while searching; selecting a result clears the query, scrolls to and focuses the exact Maker without toggling groups. Supports keyboard selection, Escape dismissal, and empty results.
+
 ## 291
 
 - Date: 2026-10-14

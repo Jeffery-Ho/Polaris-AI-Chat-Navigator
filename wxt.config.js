@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { defineConfig } from "wxt";
+import tailwindcss from "@tailwindcss/vite";
 import sourceManifest from "./manifest.build.json" with { type: "json" };
 import { SUPPORTED_MATCHES } from "./src/supported-sites.js";
 
@@ -9,6 +10,7 @@ const { manifest_version, web_accessible_resources, ...manifest } = sourceManife
 
 export default defineConfig({
   imports: false,
+  vite: () => ({ plugins: [tailwindcss()] }),
   manifestVersion: 3,
   manifest: {
     ...manifest,

@@ -235,9 +235,10 @@ export function initializeSidepanel() {
     const header = renderHeader(snapshot);
     const oldHeader = root.querySelector(":scope > .window-header");
     if (existingBody === body && oldHeader) {
-      oldHeader.replaceWith(header);
+      // Keep pressed search results attached during unchanged streaming snapshots.
+      if (!oldHeader.isEqualNode(header)) oldHeader.replaceWith(header);
     } else root.replaceChildren(header, body);
-    if (focusedTab) header.querySelector(`[data-window-tab="${focusedTab}"]`)?.focus({ preventScroll: true });
+    if (focusedTab) root.querySelector(":scope > .window-header").querySelector(`[data-window-tab="${focusedTab}"]`)?.focus({ preventScroll: true });
     if (focusedSettingsControl && state.activeTab === "settings") {
       root.querySelector(`[data-settings-focus="${focusedSettingsControl}"]`)?.focus({ preventScroll: true });
     }
@@ -397,6 +398,7 @@ export function initializeSidepanel() {
       ? (locale === "zh" ? "搜索章节" : "Search chapters")
       : (locale === "zh" ? "搜索 Maker" : "Search Makers");
     input.value = state.activeTab === "chapters" ? state.chapterQuery : state.markerQuery;
+    search.dataset.query = input.value;
     const clear = element("button", "clear-search");
     clear.type = "button";
     clear.title = locale === "zh" ? "清除搜索" : "Clear search";
@@ -427,6 +429,58 @@ export function initializeSidepanel() {
       }
     });
     search.append(input, clear);
+    if (!isChapterSearch && state.markerQuery.trim()) {
+      const results = element("div", "window-search-results");
+      results.setAttribute("role", "list");
+      results.setAttribute("aria-label", locale === "zh" ? "搜索结果" : "Search results");
+      const items = filterItems(snapshot.markerItems || [], state.markerQuery)
+        .filter((item) => item.type !== "empty");
+      for (const item of items) {
+        const row = element("div", "window-search-result-row");
+        row.setAttribute("role", "listitem");
+        const option = element("button", "window-search-result", item.title || item.preview || "Maker");
+        option.type = "button";
+        option.dataset.markerRenderKey = item.key;
+        option.addEventListener("click", () => {
+          state.markerQuery = "";
+          render();
+          const target = Array.from(root.querySelectorAll(".maker-list > .maker-card"))
+            .find((card) => card.dataset.markerRenderKey === item.key);
+          if (!target) return;
+          root.querySelectorAll("[data-search-located]").forEach((card) => delete card.dataset.searchLocated);
+          target.dataset.searchLocated = "true";
+          target.focus({ preventScroll: true });
+          const headerBottom = root.querySelector(".window-header").getBoundingClientRect().bottom;
+          window.scrollTo({
+            top: Math.max(0, window.scrollY + target.getBoundingClientRect().top - headerBottom - 12),
+            behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth"
+          });
+        });
+        row.append(option);
+        results.append(row);
+      }
+      if (!items.length) results.append(renderSearchEmpty(state.markerQuery));
+      search.append(results);
+      search.addEventListener("keydown", (event) => {
+        if (event.isComposing) return;
+        const options = Array.from(results.querySelectorAll("button"));
+        const index = options.indexOf(document.activeElement);
+        if (event.key === "Escape") {
+          event.preventDefault();
+          state.markerQuery = "";
+          render();
+          focusSearchInput({ preventScroll: true });
+        } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          const next = event.key === "ArrowDown" ? index + 1 : index < 0 ? options.length - 1 : index - 1;
+          if (next < 0) input.focus({ preventScroll: true });
+          else options[Math.min(next, options.length - 1)]?.focus({ preventScroll: true });
+        } else if (event.key === "Enter" && event.target === input && !event.isComposing) {
+          event.preventDefault();
+          options[0]?.click();
+        }
+      });
+    }
     header.append(search);
 
     const tabs = element("nav", "window-tabs");
@@ -531,17 +585,13 @@ export function initializeSidepanel() {
       return panel;
     }
 
-    const items = filterItems(snapshot.markerItems || [], state.markerQuery);
+    const items = snapshot.markerItems || [];
     if (!items.length) {
       windowMarkerListReconciler.reset();
       markerStreamingIndicator.reset();
-      if (state.markerQuery.trim()) {
-        panel.replaceChildren(renderSearchEmpty(state.markerQuery));
-      } else {
-        const empty = element("div", "empty-state empty-state-compact");
-        empty.appendChild(element("p", "empty-copy", locale === "zh" ? "当前对话还没有 Maker。" : "No Makers in this conversation yet."));
-        panel.replaceChildren(empty);
-      }
+      const empty = element("div", "empty-state empty-state-compact");
+      empty.appendChild(element("p", "empty-copy", locale === "zh" ? "当前对话还没有 Maker。" : "No Makers in this conversation yet."));
+      panel.replaceChildren(empty);
       return panel;
     }
     const existingList = panel.querySelector(":scope > .maker-list");

@@ -3,13 +3,14 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { JSDOM } from "jsdom";
 
-async function boot(windowType = "sidepanel", { locale = "zh", transitionApi = false, openChapters = true, deliverChapters = true, stallAnimationFrames = false } = {}) {
+async function boot(windowType = "sidepanel", { locale = "zh", transitionApi = false, openChapters = true, deliverChapters = true, stallAnimationFrames = false, reducedMotion = false } = {}) {
   const dom = new JSDOM(`<html data-window-type="${windowType}"><body><div id="polaris-window"></div></body></html>`, { url: "https://extension.test/sidepanel.html", runScripts: "outside-only", pretendToBeVisual: true });
   const win = dom.window;
-  win.matchMedia = () => ({ matches: false, addEventListener() {} });
+  win.matchMedia = (query) => ({ matches: reducedMotion && query === "(prefers-reduced-motion: reduce)", addEventListener() {} });
   let scrollY = 0;
   Object.defineProperty(win, "scrollY", { get: () => scrollY });
-  win.scrollTo = ({ top = 0 }) => { scrollY = top; };
+  const scrollRequests = [];
+  win.scrollTo = (options) => { scrollRequests.push(options); scrollY = options.top || 0; };
   win.HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
   win.HTMLDialogElement.prototype.close = function () { this.removeAttribute("open"); this.dispatchEvent(new win.Event("close")); };
   if (stallAnimationFrames) win.requestAnimationFrame = () => 1;
@@ -41,7 +42,7 @@ async function boot(windowType = "sidepanel", { locale = "zh", transitionApi = f
   send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot });
   if (openChapters) [...win.document.querySelectorAll(".window-tab")].find((button) => button.textContent === (locale === "zh" ? "章节" : "Chapters")).click();
   if (deliverChapters) send({ type: "POLARIS_WINDOW_CHAPTERS", tabId: 7, routeKey: snapshot.routeKey, treeChapters: chapters, chapters });
-  return { dom, win, send, commands, snapshot, chapters, transitions };
+  return { dom, win, send, commands, snapshot, chapters, transitions, scrollRequests };
 }
 test("sidepanel message integration opens active chapter and rejects old conversation results", async () => {
   const s = await boot();
@@ -331,5 +332,89 @@ test("unsupported pages keep platform guidance instead of an indefinite reading 
     assert.equal(s.win.document.querySelector(".conversation-skeleton"), null);
     assert.ok(s.win.document.querySelector(".platform-stack"));
     assert.equal(s.win.document.querySelector(".empty-title").textContent, "打开支持的 AI 对话");
+  } finally { s.dom.window.close(); }
+});
+
+test("maker search keeps the full list and locates the exact result without toggling it", async () => {
+  const s = await boot("sidepanel", { openChapters: false });
+  try {
+    const items = [
+      { key: "user-first", type: "user", groupKey: "first", title: "创作者风格" },
+      { key: "ai-middle", type: "ai", markerKey: "middle", title: "其他内容" },
+      { key: "ai-last", type: "ai", markerKey: "last", title: "创作者风格" }
+    ];
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...s.snapshot, markerItems: items } });
+    const cards = [...s.win.document.querySelectorAll(".maker-card")];
+    const search = s.win.document.querySelector(".window-search input");
+    search.value = "创作者";
+    search.dispatchEvent(new s.win.Event("input"));
+    assert.deepEqual([...s.win.document.querySelectorAll(".maker-card")], cards);
+    const results = s.win.document.querySelectorAll(".window-search-result");
+    assert.equal(results.length, 2);
+    cards[2].getBoundingClientRect = () => ({ top: 800 });
+    const originalRect = s.win.HTMLElement.prototype.getBoundingClientRect;
+    s.win.HTMLElement.prototype.getBoundingClientRect = function () {
+      return this.matches(".window-header") ? { bottom: 160 } : originalRect.call(this);
+    };
+    const commandCount = s.commands.length;
+    results[1].click();
+    assert.equal(s.win.document.querySelector(".window-search input").value, "");
+    assert.equal(s.win.document.querySelector(".window-search-results"), null);
+    assert.equal(s.win.document.activeElement, cards[2]);
+    assert.equal(s.win.scrollY, 628, "target lands 12px below the sticky header");
+    assert.equal(s.scrollRequests.at(-1).behavior, "smooth");
+    assert.equal(s.commands.length, commandCount);
+  } finally { s.dom.window.close(); }
+});
+
+test("maker search supports empty results, keyboard selection and escape", async () => {
+  const s = await boot("sidepanel", { openChapters: false });
+  try {
+    const searchFor = (query) => {
+      const input = s.win.document.querySelector(".window-search input");
+      input.value = query;
+      input.dispatchEvent(new s.win.Event("input"));
+      return s.win.document.querySelector(".window-search input");
+    };
+    let input = searchFor("不存在");
+    assert.ok(s.win.document.querySelector(".window-search-results .empty-search"));
+    assert.equal(s.win.document.querySelectorAll(".maker-card").length, 1);
+    input.dispatchEvent(new s.win.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    assert.equal(s.win.document.querySelector(".window-search-results"), null);
+    input = searchFor("second");
+    input.dispatchEvent(new s.win.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    assert.ok(s.win.document.activeElement.matches(".window-search-result"));
+    s.win.document.activeElement.click();
+    assert.ok(s.win.document.activeElement.matches(".maker-card"));
+  } finally { s.dom.window.close(); }
+});
+
+test("search result survives a snapshot between pointer down and click", async () => {
+  const s = await boot("sidepanel", { openChapters: false });
+  try {
+    const input = s.win.document.querySelector(".window-search input");
+    input.value = "second";
+    input.dispatchEvent(new s.win.Event("input"));
+    const result = s.win.document.querySelector(".window-search-result");
+    result.dispatchEvent(new s.win.MouseEvent("mousedown", { bubbles: true }));
+    result.focus();
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...s.snapshot, revision: 2 } });
+    assert.equal(result.isConnected, true, "refresh must not remove the pressed result");
+    result.click();
+    assert.equal(s.win.document.querySelector(".window-search-results"), null);
+    assert.ok(s.win.document.activeElement.matches('.maker-card[data-search-located="true"]'));
+  } finally { s.dom.window.close(); }
+});
+
+
+test("search location respects reduced motion", async () => {
+  const s = await boot("sidepanel", { openChapters: false, reducedMotion: true });
+  try {
+    const input = s.win.document.querySelector(".window-search input");
+    input.value = "second";
+    input.dispatchEvent(new s.win.Event("input"));
+    s.win.document.querySelector(".window-search-result").click();
+    assert.equal(s.scrollRequests.at(-1).behavior, "instant");
+    assert.ok(s.win.document.activeElement.matches('.maker-card[data-search-located="true"]'));
   } finally { s.dom.window.close(); }
 });
