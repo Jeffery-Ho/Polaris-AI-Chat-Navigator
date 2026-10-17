@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const contentSource = await readFile(new URL("../src/content.js", import.meta.url), "utf8");
-const settingsPanelSource = await readFile(new URL("../src/settings-panel.jsx", import.meta.url), "utf8");
+const settingsPanelSource = await readFile(new URL("../src/settings-panel.js", import.meta.url), "utf8");
 const settingsStyles = await readFile(new URL("../src/settings-panel.css", import.meta.url), "utf8");
 
 test("设置面板 Header 提供赞赏入口", () => {

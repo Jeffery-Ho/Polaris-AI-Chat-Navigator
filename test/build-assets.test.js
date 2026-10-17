@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile, access } from "node:fs/promises";
+import { SUPPORTED_MATCHES } from "../src/supported-sites.js";
 
 const [sourceManifest, distManifest] = await Promise.all([
   readFile(new URL("../manifest.build.json", import.meta.url), "utf8").then(JSON.parse),
@@ -16,21 +17,22 @@ test("WXT produces self-contained content scripts without volatile loaders", asy
     const source = await readFile(new URL(`../dist/${file}`, import.meta.url), "utf8");
     assert.doesNotMatch(source, /\bimport\s*\(|\bimport\s+.+\s+from\s/);
     assert.doesNotMatch(source, /@vite\/client|localhost:3000|127\.0\.0\.1:3000/);
-    assert.ok(source.includes("PolarisI18n"));
+    assert.ok(source.includes("Navigation"));
+    assert.equal(source.includes("PolarisI18n"), false);
     assert.ok(source.includes("__POLARIS_CONTENT_SCRIPT_ACTIVE__"));
   }
 });
 
 test("production manifest preserves permissions, supported sites, and script timing", () => {
   assert.deepEqual([...distManifest.permissions].sort(), [...sourceManifest.permissions].sort());
-  assert.deepEqual(distManifest.host_permissions, sourceManifest.host_permissions);
+  assert.deepEqual(distManifest.host_permissions, SUPPORTED_MATCHES);
+  assert.deepEqual(distManifest.web_accessible_resources.map((entry) => entry.matches), [SUPPORTED_MATCHES]);
   assert.equal(distManifest.minimum_chrome_version, "114");
   assert.equal(distManifest.content_scripts.length, 1);
   const built = distManifest.content_scripts[0];
-  const source = sourceManifest.content_scripts[0];
-  assert.deepEqual([...built.matches].sort(), [...source.matches].sort());
-  assert.equal(built.all_frames, source.all_frames);
-  assert.equal(built.run_at, source.run_at);
+  assert.deepEqual([...built.matches].sort(), [...SUPPORTED_MATCHES].sort());
+  assert.equal(built.all_frames, true);
+  assert.equal(built.run_at, "document_idle");
   assert.ok(built.css.length > 0);
   assert.equal(distManifest.background.type, "module");
 });

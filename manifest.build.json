@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "minimum_chrome_version": "114",
   "name": "Polaris: AI Chat Navigator",
-  "version": "0.72.7",
-  "version_name": "0.72.7(291)",
+  "version": "0.73.3",
+  "version_name": "0.73.3(295)",
   "description": "Show heading markers for supported AI web answers and jump to headings from the right edge.",
   "icons": {
     "16": "icons/gpt-voyager-icon-16.png",
@@ -20,33 +20,6 @@
   "action": {
     "default_title": "Open Polaris"
   },
-  "side_panel": {
-    "default_path": "sidepanel.html"
-  },
-  "background": {
-    "service_worker": "src/background.js",
-    "type": "module"
-  },
-  "host_permissions": [
-    "https://chatgpt.com/*",
-    "https://chat.openai.com/*",
-    "https://claude.ai/*",
-    "https://gemini.google.com/*",
-    "https://grok.com/*",
-    "https://manus.im/*",
-    "https://chat.deepseek.com/*",
-    "https://www.doubao.com/*",
-    "https://www.kimi.com/*",
-    "https://kimi.com/*",
-    "https://www.qianwen.com/*",
-    "https://qianwen.com/*",
-    "https://yb.tencent.com/*",
-    "https://yuanbao.tencent.com/*",
-    "https://diandian.xiaohongshu.com/*",
-    "https://www.xiaohongshu.com/*",
-    "https://www.askdiandian.com/*",
-    "https://www.diandianlife.top/*"
-  ],
   "web_accessible_resources": [
     {
       "resources": [
@@ -68,60 +41,7 @@
         "icons/diagnostics-download.png",
         "icons/diagnostics-attach.png",
         "icons/diagnostics-send.png"
-      ],
-      "matches": [
-        "https://chatgpt.com/*",
-        "https://chat.openai.com/*",
-        "https://claude.ai/*",
-        "https://gemini.google.com/*",
-        "https://grok.com/*",
-        "https://manus.im/*",
-        "https://chat.deepseek.com/*",
-        "https://www.doubao.com/*",
-        "https://www.kimi.com/*",
-        "https://kimi.com/*",
-        "https://www.qianwen.com/*",
-        "https://qianwen.com/*",
-        "https://yb.tencent.com/*",
-        "https://yuanbao.tencent.com/*",
-        "https://diandian.xiaohongshu.com/*",
-        "https://www.xiaohongshu.com/*",
-        "https://www.askdiandian.com/*",
-        "https://www.diandianlife.top/*"
       ]
-    }
-  ],
-  "content_scripts": [
-    {
-      "matches": [
-        "https://chatgpt.com/*",
-        "https://chat.openai.com/*",
-        "https://claude.ai/*",
-        "https://gemini.google.com/*",
-        "https://grok.com/*",
-        "https://manus.im/*",
-        "https://chat.deepseek.com/*",
-        "https://www.doubao.com/*",
-        "https://www.kimi.com/*",
-        "https://kimi.com/*",
-        "https://www.qianwen.com/*",
-        "https://qianwen.com/*",
-        "https://yb.tencent.com/*",
-        "https://yuanbao.tencent.com/*",
-        "https://diandian.xiaohongshu.com/*",
-        "https://www.xiaohongshu.com/*",
-        "https://www.askdiandian.com/*",
-        "https://www.diandianlife.top/*"
-      ],
-      "js": [
-        "src/i18n.js",
-        "src/content.js"
-      ],
-      "css": [
-        "src/styles.css"
-      ],
-      "all_frames": true,
-      "run_at": "document_idle"
     }
   ]
 }

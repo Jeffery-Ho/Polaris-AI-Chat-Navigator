@@ -21,7 +21,7 @@ While editing, run `pnpm dev` to start WXT with an isolated Chromium development
 
 Run `pnpm build` to generate the production extension in `dist/` for Dia or Chrome, then refresh the extension and conversation tabs. Run `pnpm check` and `pnpm test` after building; package tests read `dist/`.
 
-The project uses WXT 0.21.4, JavaScript, pnpm, and Node.js 22 or newer. `entrypoints/` contains the WXT background, content script, and sidepanel inputs; reusable behavior stays in `src/`. WXT generates entrypoint paths from `wxt.config.js` while `manifest.build.json` supplies product metadata, permissions, supported sites, and versions. Static icons and the route bridge retain their existing extension URLs.
+The project uses WXT 0.21.4, JavaScript, pnpm, and Node.js 22 or newer. `entrypoints/` contains the WXT background, content script, and `sidepanel/` inputs; each calls an initializer in `src/`, where reusable behavior stays. WXT generates entrypoint paths from `wxt.config.js`. `manifest.build.json` supplies product metadata, permissions, web-accessible resources, and versions, and `src/supported-sites.js` is the single list of supported sites for content script matches, host permissions, and resource matches. Static icons and the route bridge live in `public/` and keep their existing extension URLs. `pnpm check` syntax-checks every script under `src/`, `public/src/`, `scripts/`, and `entrypoints/`.
 
 Do not load the repository root. The root is source, not an extension package. `manifest.build.json` is the product manifest source; WXT generates entrypoint paths. A root `manifest.json` must not be added back.
 

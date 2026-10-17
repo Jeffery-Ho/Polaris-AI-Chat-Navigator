@@ -8,7 +8,7 @@ const [buildManifest, background, content, windowSource, sidePanelHtml, windowCs
   readFile(new URL("../src/background.js", import.meta.url), "utf8"),
   readFile(new URL("../src/content.js", import.meta.url), "utf8"),
   readFile(new URL("../src/window.js", import.meta.url), "utf8"),
-  readFile(new URL("../entrypoints/sidepanel.html", import.meta.url), "utf8"),
+  readFile(new URL("../entrypoints/sidepanel/index.html", import.meta.url), "utf8"),
   readFile(new URL("../src/window.css", import.meta.url), "utf8"),
   readFile(new URL("../src/search-input.js", import.meta.url), "utf8"),
   readFile(new URL("../src/tokens.css", import.meta.url), "utf8")
@@ -17,9 +17,6 @@ const [buildManifest, background, content, windowSource, sidePanelHtml, windowCs
 test("manifest.build.json 声明 Polaris 窗口和系统 side panel 入口", () => {
   assert.deepEqual(buildManifest.permissions, ["storage", "tabs", "sidePanel", "scripting"]);
   assert.equal(buildManifest.action.default_title, "Open Polaris");
-  assert.deepEqual(buildManifest.side_panel, { default_path: "sidepanel.html" });
-  assert.equal(buildManifest.background.service_worker, "src/background.js");
-  assert.equal(buildManifest.background.type, "module");
 });
 
 test("侧栏跟随最近的普通标签页", () => {
@@ -210,7 +207,7 @@ test("搜索输入支持中文输入法组合态并在提交后刷新", () => {
 });
 
 test("空状态使用每个平台打包的 favicon 资源", async () => {
-  await Promise.all(platformFaviconFiles.map((name) => access(new URL(`../icons/platform-${name}.png`, import.meta.url))));
+  await Promise.all(platformFaviconFiles.map((name) => access(new URL(`../public/icons/platform-${name}.png`, import.meta.url))));
   assert.equal((windowSource.match(/icons\/platform-[^"']+\.png/g) || []).length, platformFaviconFiles.length);
   assert.doesNotMatch(windowSource, /from ["']\.\/assets\/platform-favicons\/[^"']+\.png["']/);
   assert.match(windowSource, /chrome\.runtime\.getURL\(favicon\)/);

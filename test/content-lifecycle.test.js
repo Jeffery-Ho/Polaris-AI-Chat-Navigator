@@ -39,7 +39,7 @@ test("an invalid Chrome event cannot prevent remaining resource cleanup", () => 
 
 test("route bridge can be disposed and reloaded without wrapping history twice", async () => {
   const dom = new JSDOM("<html><body></body></html>", { url: "https://chatgpt.com/", runScripts: "outside-only" });
-  const source = await readFile(new URL("../src/route-bridge.js", import.meta.url), "utf8");
+  const source = await readFile(new URL("../public/src/route-bridge.js", import.meta.url), "utf8");
   const original = dom.window.history.pushState;
   let calls = 0;
   dom.window.addEventListener("polaris-for-web-route-change", () => calls++);
@@ -111,7 +111,7 @@ test("production WXT entrypoint reloads with one UI and one set of Chrome listen
     assert.equal(s.runtime.listeners.size, 1);
     assert.equal(s.storage.listeners.size, 1);
     assert.equal(s.win.document.querySelectorAll("#gpt-paragraph-nav").length, 1);
-    assert.equal(s.win.PolarisI18n.t("tab.navigation"), "Navigation");
+    assert.equal(s.win.PolarisI18n, undefined);
     await s.inject();
     assert.equal(s.runtime.listeners.size, 1);
     assert.equal(s.storage.listeners.size, 1);

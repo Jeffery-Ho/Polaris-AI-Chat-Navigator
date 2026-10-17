@@ -7,12 +7,13 @@ const [contentSource, backgroundSource] = await Promise.all([
   readFile(new URL("../src/background.js", import.meta.url), "utf8")
 ]);
 
-test("内容脚本缺少 PolarisI18n 时不解构崩溃，并保留单实例返回", () => {
+test("内容脚本从 i18n 模块取翻译，并保留单实例返回", () => {
   const guardIndex = contentSource.indexOf("CONTENT_SCRIPT_INSTANCE_KEY");
   const listenerIndex = contentSource.indexOf("addEventListener");
   assert.match(contentSource, /if \(globalThis\[CONTENT_SCRIPT_INSTANCE_KEY\]\) \{\s*return;\s*\}/);
-  assert.match(contentSource, /\[Polaris\] PolarisI18n is unavailable/);
-  assert.doesNotMatch(contentSource, /const \{ locale, t \} = globalThis\.PolarisI18n;/);
+  assert.match(contentSource, /import \{ createI18n \} from "\.\/i18n\.js";/);
+  assert.match(contentSource, /const \{ locale, t \} = createI18n\(\);/);
+  assert.doesNotMatch(contentSource, /PolarisI18n/);
   assert.ok(guardIndex >= 0 && guardIndex < listenerIndex);
 });
 

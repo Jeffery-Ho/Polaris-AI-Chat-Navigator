@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { SUPPORTED_MATCHES } from "../src/supported-sites.js";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 
@@ -8,11 +9,9 @@ const manifest = JSON.parse(readFileSync(new URL("../manifest.build.json", impor
 
 test("DeepSeek is available to extension injection, the source window and localized platform information", () => {
   const origin = "https://chat.deepseek.com/*";
-  assert.ok(manifest.host_permissions.includes(origin));
-  assert.ok(manifest.content_scripts[0].matches.includes(origin));
-  assert.ok(manifest.web_accessible_resources[0].matches.includes(origin));
+  assert.ok(SUPPORTED_MATCHES.includes(origin));
   assert.ok(manifest.web_accessible_resources[0].resources.includes("icons/platform-deepseek.ico"));
-  assert.ok(readFileSync(new URL("../icons/platform-deepseek.ico", import.meta.url)).length > 0);
+  assert.ok(readFileSync(new URL("../public/icons/platform-deepseek.ico", import.meta.url)).length > 0);
   const background = readFileSync(new URL("../src/background.js", import.meta.url), "utf8");
   const windowSource = readFileSync(new URL("../src/window.js", import.meta.url), "utf8");
   const translations = readFileSync(new URL("../src/i18n.js", import.meta.url), "utf8");

@@ -1,4 +1,4 @@
-import { initializeI18n } from "./i18n.js";
+import { createI18n } from "./i18n.js";
 import { createSidepanelChapterReader } from "./sidepanel-chapter-reader.js";
 import { matchesSearch } from "./window-search.js";
 import { bindSearchInput } from "./search-input.js";
@@ -9,12 +9,10 @@ import { createSidepanelReleaseNotice } from "./sidepanel-release-notice.js";
 import { didWindowConversationChange } from "./window-source-state.js";
 import { releaseNotesForUpdate } from "./release-notes.js";
 
-(() => {
-  initializeI18n();
+export function initializeSidepanel() {
   const SYSTEM_THEME_QUERY = "(prefers-color-scheme: dark)";
   const root = document.getElementById("polaris-window");
-  const i18n = globalThis.PolarisI18n || { locale: "en", t: (key) => key };
-  const { locale, t } = i18n;
+  const { locale, t } = createI18n();
   const settingsDestinations = ["preferences", "help", "feedback", "updates", "about"];
   const supportedPlatforms = [
     { key: "chatgpt", label: "ChatGPT", favicon: "icons/platform-chatgpt.png" },
@@ -1151,4 +1149,4 @@ import { releaseNotesForUpdate } from "./release-notes.js";
     }
   });
   void sendReady();
-})();
+}

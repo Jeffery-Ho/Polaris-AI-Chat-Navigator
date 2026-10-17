@@ -8,19 +8,21 @@ Chrome MV3 extension (Chrome 114+, Side Panel API) that turns headings, list tit
 pnpm install   # install deps, build dist/, enable .githooks
 pnpm dev       # WXT dev Chromium with auto reload (.output/chrome-mv3-dev/)
 pnpm build     # production package into dist/
-pnpm check     # node --check syntax check on listed source files
+pnpm check     # node --check on every script in src/, public/src/, scripts/, entrypoints/
 pnpm test      # node --test (jsdom); package tests read dist/, so build first
 ```
 
 ## Layout
 
-- `entrypoints/`: thin WXT shells (background, content, sidepanel.html) that call into `src/`.
+- `entrypoints/`: thin WXT shells (`background.js`, `content.js`, `sidepanel/`) that call initializers in `src/`.
 - `src/content.js`: content script; per-platform DOM detection and Maker extraction.
-- `src/window.js` / `src/window.css`: sidepanel UI (Navigation, Chapters, Settings).
+- `src/window.js` / `src/window.css`: sidepanel UI (Navigation, Chapters, Settings), exported as `initializeSidepanel()`.
 - `src/background.js`: service worker; tracks the source tab, injects scripts, relays snapshots and commands.
 - `src/*-messages.js`, `src/marker-*.js`, `src/sidepanel-chapter-*.js`: extracted single-purpose modules.
-- `src/i18n.js`: en/zh strings. `src/release-notes.js`: in-panel What's New entries.
-- `manifest.build.json`: product manifest source (version, permissions, sites). WXT generates entrypoint paths.
+- `src/i18n.js`: en/zh strings via `createI18n()`. `src/release-notes.js`: in-panel What's New entries.
+- `src/supported-sites.js`: `SUPPORTED_MATCHES`, the only list of supported sites (content matches, host permissions, resource matches).
+- `public/`: static files copied as-is (`icons/`, `src/route-bridge.js`); extension URLs stay unchanged.
+- `manifest.build.json`: product metadata, permissions, web-accessible resources, version. WXT generates entrypoint paths.
 - `test/`: one `*.test.js` per module or platform.
 
 ## Rules
@@ -28,7 +30,7 @@ pnpm test      # node --test (jsdom); package tests read dist/, so build first
 1. Never edit `dist/` or `.output/`; never add a root `manifest.json`.
 2. Platform detection and heading-level limits follow `guideline.md`; keep per-platform limits unless asked.
 3. Makers come only from currently mounted DOM; exclude user input editors (`textarea`, `contenteditable`, ProseMirror).
-4. New `src/*.js` files must be appended to the `check` script in `package.json`.
+4. Adding a site: edit `SUPPORTED_MATCHES` only; never add site lists to `manifest.build.json`.
 5. User-facing strings need both `en` and `zh`.
 6. New features and fixes include tests.
 7. KISS: minimal interpretation of the request; ask before adding scope.

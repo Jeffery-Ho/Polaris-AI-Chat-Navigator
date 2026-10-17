@@ -10,6 +10,13 @@
 - Version update type must be declared by the user before recording a build.
 - After each build is recorded, confirm the build number and version with the user.
 
+## 295
+
+- Date: 2026-10-17
+- Version: 0.73.3
+- Summary: Completes the WXT migration with standard entrypoints, public assets, and a single supported-site list.
+- Notes: Moves icons and the route bridge into `public/`, removes the manual asset-copy hook, and derives content matches, host permissions, and resource matches from `src/supported-sites.js`. Turns the sidepanel into a directory entrypoint that calls `initializeSidepanel()`, replaces the `PolarisI18n` global with `createI18n()`, renames the JSX-free settings panel to `.js`, and makes `pnpm check` discover scripts automatically. The built manifest is unchanged apart from the version.
+
 ## 291
 
 - Date: 2026-10-14

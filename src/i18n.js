@@ -1,4 +1,4 @@
-export function initializeI18n() {
+export function createI18n(language = navigator.language) {
   const messages = Object.freeze({
     en: Object.freeze({
       "settings.help.stepsTitle": "How to send a diagnostic log",
@@ -225,12 +225,12 @@ export function initializeI18n() {
       "userMarker.replyNotLoaded": "该回复尚未加载，请滚动会话加载后再试。"
     })
   });
-  const locale = (navigator.language || "en").toLowerCase().startsWith("zh") ? "zh" : "en";
+  const locale = (language || "en").toLowerCase().startsWith("zh") ? "zh" : "en";
 
   function t(key, values = {}) {
     const message = messages[locale][key] || messages.en[key] || key;
     return message.replace(/\{(\w+)\}/g, (_, name) => String(values[name] ?? `{${name}}`));
   }
 
-  globalThis.PolarisI18n = Object.freeze({ locale, t });
+  return Object.freeze({ locale, t });
 }

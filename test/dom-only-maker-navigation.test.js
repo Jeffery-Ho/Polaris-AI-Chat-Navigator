@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const contentSource = readFileSync(new URL("../src/content.js", import.meta.url), "utf8");
-const routeBridgeSource = readFileSync(new URL("../src/route-bridge.js", import.meta.url), "utf8");
+const routeBridgeSource = readFileSync(new URL("../public/src/route-bridge.js", import.meta.url), "utf8");
 
 function functionSource(name, nextName) {
   const start = contentSource.indexOf(`function ${name}(`);

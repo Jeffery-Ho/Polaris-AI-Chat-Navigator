@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const contentSource = await readFile(new URL("../src/content.js", import.meta.url), "utf8");
-const settingsPanelSource = await readFile(new URL("../src/settings-panel.jsx", import.meta.url), "utf8");
+const settingsPanelSource = await readFile(new URL("../src/settings-panel.js", import.meta.url), "utf8");
 function functionSource(name, nextName) {
   const start = contentSource.indexOf(`  function ${name}(`);
   const end = contentSource.indexOf(`  function ${nextName}(`, start);

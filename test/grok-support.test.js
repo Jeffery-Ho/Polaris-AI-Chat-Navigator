@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { SUPPORTED_MATCHES } from "../src/supported-sites.js";
 import { readFile } from "node:fs/promises";
 
 const contentSource = await readFile(new URL("../src/content.js", import.meta.url), "utf8");
@@ -37,7 +38,5 @@ test("Grok 默认启用 H1-H3、无序列表和加粗标题，仅默认关闭有
 test("manifest.build.json 会向 Grok 注入内容脚本与路由桥", () => {
   assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
   assert.match(manifest.version_name, new RegExp(`^${manifest.version.replaceAll(".", "\\.")}\\(\\d+\\)$`));
-  assert.ok(manifest.host_permissions.includes("https://grok.com/*"));
-  assert.ok(manifest.web_accessible_resources[0].matches.includes("https://grok.com/*"));
-  assert.ok(manifest.content_scripts[0].matches.includes("https://grok.com/*"));
+  assert.ok(SUPPORTED_MATCHES.includes("https://grok.com/*"));
 });

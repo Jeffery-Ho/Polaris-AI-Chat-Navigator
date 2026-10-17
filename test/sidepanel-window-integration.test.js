@@ -15,7 +15,7 @@ async function boot(windowType = "sidepanel", { locale = "zh", transitionApi = f
   if (stallAnimationFrames) win.requestAnimationFrame = () => 1;
   win.setInterval = () => 0;
   Object.defineProperty(win.navigator, "language", { value: locale === "zh" ? "zh-CN" : "en" });
-  win.eval((await readFile(new URL("../src/i18n.js", import.meta.url), "utf8")).replace("export function initializeI18n", "function initializeI18n") + "\ninitializeI18n();");
+  win.eval((await readFile(new URL("../src/i18n.js", import.meta.url), "utf8")).replace("export function createI18n", "function createI18n"));
   const listeners = []; const commands = [];
   win.chrome = { storage: { local: { get: async () => ({ "polaris-release-notice-version": "0.66.0" }), set: async () => {} } } };
   const transitions = [];
@@ -30,11 +30,11 @@ async function boot(windowType = "sidepanel", { locale = "zh", transitionApi = f
   for (const match of source.matchAll(/import\s+\{([^}]+)\}\s+from\s+"([^"]+)";/g)) {
     const exports = await import(new URL(`../src/${match[2].replace(/^\.\//, "")}`, import.meta.url));
     for (const name of match[1].split(",").map((name) => name.trim()).filter(Boolean)) {
-      if (name !== "initializeI18n") win[name] = exports[name];
+      if (name !== "createI18n") win[name] = exports[name];
     }
   }
-  source = source.replace(/import\s+\{[^}]+\}\s+from\s+"[^"]+";/g, "").replace(/import\s+"[^"]+";/g, "");
-  win.eval(source);
+  source = source.replace(/import\s+\{[^}]+\}\s+from\s+"[^"]+";/g, "").replace(/import\s+"[^"]+";/g, "").replace(/^export function /m, "function ");
+  win.eval(`${source}\ninitializeSidepanel();`);
   const send = (message) => listeners.forEach((listener) => listener(message, {}));
   const snapshot = { hasConversation: true, supportedRoute: true, routeKey: "https://chatgpt.com/c/one", platform: "chatgpt", config: {}, headings: [], markerItems: [{ key: "ai-second", type: "ai", markerKey: "second", title: "second", preview: "second" }], activeMarkerKey: "second" };
   const chapters = ["first", "second"].map((key) => ({ markerKey: key, sourceKey: key, title: key, parentKey: "", contents: [{ type: "block", text: `${key} body`, html: `<p>${key} body</p>` }], blocks: [{ tagName: "p", text: `${key} body` }] }));

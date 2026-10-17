@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { SUPPORTED_MATCHES } from "../src/supported-sites.js";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import {
@@ -168,8 +169,6 @@ test("Manus integration uses its scoped adapter, associations, defaults and scro
   assert.match(source, /document\.removeEventListener\("scroll", handleManusConversationScroll, true\)/);
   assert.match(source, /isInsideNavigationRoot\(event\.target\)[\s\S]*?isManusConversationScrollTarget\(event\.target\)/);
   assert.match(background, /"manus\.im"/);
-  assert.ok(manifest.host_permissions.includes("https://manus.im/*"));
-  assert.ok(manifest.content_scripts[0].matches.includes("https://manus.im/*"));
-  assert.ok(manifest.web_accessible_resources[0].matches.includes("https://manus.im/*"));
+  assert.ok(SUPPORTED_MATCHES.includes("https://manus.im/*"));
   assert.ok(manifest.web_accessible_resources[0].resources.includes("icons/platform-manus.png"));
 });
