@@ -1,0 +1,69 @@
+name: Check extension
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: extension-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check source
+        run: pnpm check
+
+      # Package tests read dist/, so the Chrome build has to finish first.
+      - name: Build Chrome extension
+        run: pnpm build
+
+      - name: Run tests
+        run: pnpm test
+
+      - name: Build Firefox extension
+        run: pnpm build:firefox
+
+      - name: Build Edge extension
+        run: pnpm build:edge
+
+      - name: Zip Firefox extension
+        run: pnpm zip:firefox
+
+      - name: Zip Edge extension
+        run: pnpm zip:edge
+
+      # Errors fail the job. Warnings stay warnings (no --warnings-as-errors).
+      - name: Lint Firefox extension
+        run: pnpm exec web-ext lint --source-dir .output/firefox-mv3 --no-input --no-config-discovery
+
+      - name: Upload store packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: store-packages
+          if-no-files-found: error
+          path: |
+            .output/*-firefox.zip
+            .output/*-edge.zip
+            .output/*-sources.zip
