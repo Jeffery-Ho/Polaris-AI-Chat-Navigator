@@ -7,10 +7,6 @@ settings:
 importers:
 
   .:
-    dependencies:
-      iconify-mcp-server:
-        specifier: ^1.0.4
-        version: 1.0.4(typescript@5.9.3)
     devDependencies:
       '@tailwindcss/vite':
         specifier: ^4.3.3
@@ -1258,12 +1254,6 @@ packages:
   https-proxy-agent@7.0.6:
     resolution: {integrity: sha512-vK9P5/iUfdl95AI+JVyUuIcVtd4ofvtrOr3HNtM2yxC9bnMbEdp3x01OhQNnjb8IJYi38VlTE3mBXwcfvywuSw==}
     engines: {node: '>= 14'}
-
-  iconify-mcp-server@1.0.4:
-    resolution: {integrity: sha512-bviyuhg6/K2gtuKKbENEeJ2M13zfqgJPuqGpCPAdV7t/BRnK3O2cEMC392Xl5aCzsd1eim/DmAGeBW0lDFDsGA==}
-    hasBin: true
-    peerDependencies:
-      typescript: ^5.8.3
 
   iconv-lite@0.6.3:
     resolution: {integrity: sha512-4fCk79wshMdzMp2rH06qWrJE4iolqLhCUH+OiuIgU++RB0+94NlDL81atO7GX55uUKueo0txHNtvEyI6D7WdMw==}
@@ -3396,10 +3386,6 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  iconify-mcp-server@1.0.4(typescript@5.9.3):
-    dependencies:
-      typescript: 5.9.3
-
   iconv-lite@0.6.3:
     dependencies:
       safer-buffer: 2.1.2
@@ -4124,7 +4110,8 @@ snapshots:
 
   type-fest@4.41.0: {}
 
-  typescript@5.9.3: {}
+  typescript@5.9.3:
+    optional: true
 
   ufo@1.6.4: {}
 

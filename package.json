@@ -25,8 +25,5 @@
     "vite": "7.3.6",
     "web-ext": "10.7.0",
     "wxt": "0.21.4"
-  },
-  "dependencies": {
-    "iconify-mcp-server": "^1.0.4"
   }
 }

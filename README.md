@@ -23,6 +23,14 @@ Run `pnpm build` to generate the production extension in `dist/` for Dia or Chro
 
 The project uses WXT 0.21.4, JavaScript, pnpm, and Node.js 22 or newer. `entrypoints/` contains the WXT background, content script, and `sidepanel/` inputs; each calls an initializer in `src/`, where reusable behavior stays. WXT generates entrypoint paths from `wxt.config.js`. `manifest.build.json` supplies product metadata, permissions, web-accessible resources, and versions, and `src/supported-sites.js` is the single list of supported sites for content script matches, host permissions, and resource matches. Static icons and the route bridge live in `public/` and keep their existing extension URLs. `pnpm check` syntax-checks every script under `src/`, `public/src/`, `scripts/`, and `entrypoints/`.
 
+`pnpm build:firefox` writes `.output/firefox-mv3/`, and `pnpm build:edge` writes `.output/edge-mv3/`. `pnpm zip:firefox` and `pnpm zip:edge` write the store zips under `.output/`. AMO reviewers rebuilding the sources zip need pnpm 11.19 (Corepack), not npm: there is no `package-lock.json`. Node.js 22 or newer is required. Review the Firefox directory, not `dist/`:
+
+```bash
+corepack enable
+pnpm install
+pnpm build:firefox
+```
+
 Do not load the repository root. The root is source, not an extension package. `manifest.build.json` is the product manifest source; WXT generates entrypoint paths. A root `manifest.json` must not be added back.
 
 Polaris requires Chrome 114 or a compatible browser with the Side Panel API. Standalone windows and fallback popup windows are no longer supported.
@@ -120,6 +128,8 @@ Visit the [Polaris support page](https://jeffery-ho.github.io/polaris-landing/en
 ## Release
 
 Do not commit `dist/` or load `dist.zip` as the extension. The release workflow builds from source and creates a versioned ZIP plus the stable `Polaris-AI.zip` alias from that fresh `dist/` directory (`cd dist && zip`). It validates both remote assets while the Release is still Draft, publishes only after that check, and then verifies the public Latest download URL. The same check fails if a root `manifest.json` reappears or if `dist/manifest.json` points at a file that is not in `dist/`. Git hooks do not run in CI.
+
+Pull requests run `.github/workflows/ci.yml`, which builds Chrome, Firefox, and Edge, lints the Firefox package, and uploads those zips as workflow artifacts. It does not publish a release. First-time Edge and Firefox store submission is manual; see `docs/store-submission.md`. `wxt submit` is not wired up.
 
 ## Version
 
