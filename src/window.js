@@ -8,25 +8,15 @@ import { createMarkerStreamingIndicator } from "./marker-motion-suppression.js";
 import { createSidepanelReleaseNotice } from "./sidepanel-release-notice.js";
 import { didWindowConversationChange } from "./window-source-state.js";
 import { releaseNotesForUpdate } from "./release-notes.js";
+import { SUPPORTED_PLATFORMS, createPlatformLinks } from "./supported-platforms.js";
+import { createSidepanelOnboarding } from "./sidepanel-onboarding.js";
 
 export function initializeSidepanel() {
   const SYSTEM_THEME_QUERY = "(prefers-color-scheme: dark)";
   const root = document.getElementById("polaris-window");
   const { locale, t } = createI18n();
   const settingsDestinations = ["preferences", "help", "feedback", "updates", "about"];
-  const supportedPlatforms = [
-    { key: "chatgpt", label: "ChatGPT", favicon: "icons/platform-chatgpt.png" },
-    { key: "claude", label: "Claude", favicon: "icons/platform-claude.png" },
-    { key: "gemini", label: "Gemini", favicon: "icons/platform-gemini.png" },
-    { key: "grok", label: "Grok", favicon: "icons/platform-grok.png" },
-    { key: "doubao", label: "Doubao", favicon: "icons/platform-doubao.png" },
-    { key: "kimi", label: "Kimi", favicon: "icons/platform-kimi.png" },
-    { key: "qianwen", label: "Qwen", favicon: "icons/platform-qianwen.png" },
-    { key: "yuanbao", label: "Yuanbao", favicon: "icons/platform-yuanbao.png" },
-    { key: "xiaohongshu", label: "点点 AI", favicon: "icons/platform-xiaohongshu.png" },
-    { key: "manus", label: "Manus", favicon: "icons/platform-manus.png" },
-    { key: "deepseek", label: "DeepSeek", favicon: "icons/platform-deepseek.ico" }
-  ];
+  const supportedPlatforms = SUPPORTED_PLATFORMS;
   const state = {
     snapshot: null,
     activeTab: "navigation",
@@ -566,21 +556,9 @@ export function initializeSidepanel() {
       windowMarkerListReconciler.reset();
       markerStreamingIndicator.reset();
       const empty = element("div", "empty-state");
-      empty.append(element("h1", "empty-title", locale === "zh" ? "打开支持的 AI 对话" : "Open a supported AI conversation"));
-      empty.append(element("p", "empty-copy", locale === "zh" ? "Maker 会自动显示在这里。" : "Makers will appear here automatically."));
-      const platforms = element("div", "platform-stack");
-      platforms.setAttribute("role", "list");
-      platforms.setAttribute("aria-label", locale === "zh" ? "支持的平台" : "Supported platforms");
-      supportedPlatforms.forEach(({ label, favicon }) => {
-        const icon = element("img", "platform-favicon");
-        icon.src = chrome.runtime.getURL(favicon);
-        icon.alt = label;
-        icon.title = label;
-        icon.loading = "lazy";
-        icon.setAttribute("role", "listitem");
-        platforms.appendChild(icon);
-      });
-      empty.append(platforms);
+      empty.append(element("h1", "empty-title", t("empty.title")));
+      empty.append(element("p", "empty-copy", t("empty.copy")));
+      empty.append(createPlatformLinks(document, chrome, { label: t("empty.platforms") }));
       panel.replaceChildren(empty);
       return panel;
     }
@@ -928,6 +906,15 @@ export function initializeSidepanel() {
   }
 
   function renderSettingsHelp(panel) {
+    const guide = element("section", "settings-section settings-onboarding");
+    const guideCopy = element("div", "");
+    guideCopy.append(element("h2", "settings-section-title", t("settings.help.onboardingTitle")), element("p", "settings-onboarding-copy", t("settings.help.onboardingCopy")));
+    const guideButton = element("button", "secondary-button", t("settings.help.onboardingAction"));
+    guideButton.type = "button";
+    guideButton.dataset.settingsFocus = "onboarding";
+    guideButton.addEventListener("click", () => onboarding.open());
+    guide.append(guideCopy, guideButton);
+    panel.appendChild(guide);
     const section = element("section", "settings-section");
     section.appendChild(element("h2", "settings-section-title", t("settings.help.stepsTitle")));
     const steps = element("ol", "settings-diagnostic-steps");
@@ -1161,7 +1148,8 @@ export function initializeSidepanel() {
     }
   });
 
-  const releaseNotice = createSidepanelReleaseNotice({ document, chrome, locale, t });
+  const onboarding = createSidepanelOnboarding({ document, chrome, locale, t, platforms: supportedPlatforms });
+  createSidepanelReleaseNotice({ document, chrome, locale, t, autoShowGate: onboarding.ready.then((shown) => !shown) });
   render();
   startThemeObserver();
   startSourceObserver();
@@ -1174,7 +1162,7 @@ export function initializeSidepanel() {
     if (state.activeTab === "navigation") state.navigationScrollY = window.scrollY;
   }, { passive: true });
   window.addEventListener("keydown", (event) => {
-    if (document.querySelector(".release-notice-dialog[open]")) return;
+    if (document.querySelector("dialog[open]")) return;
     if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "f") {
       event.preventDefault();
       if (event.shiftKey) {

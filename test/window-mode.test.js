@@ -57,6 +57,7 @@ test("侧栏包含导航、章节、设置和无对话平台空状态", () => {
   assert.match(windowSource, /renderChapters/);
   assert.match(windowSource, /renderSettings/);
   assert.match(windowSource, /supportedPlatforms/);
+  assert.match(windowSource, /createPlatformLinks/);
   assert.match(windowSource, /startSourceObserver/);
   assert.match(windowSource, /startThemeObserver/);
   assert.match(windowSource, /matchMedia\(SYSTEM_THEME_QUERY\)/);
@@ -76,9 +77,7 @@ test("侧栏包含导航、章节、设置和无对话平台空状态", () => {
   assert.match(windowSource, /if \(item\.type === "user" \|\| item\.type === "fold"\)/);
   assert.doesNotMatch(windowSource, /append\(copy, element\("span", "maker-chevron"/);
   assert.doesNotMatch(windowSource, /empty-symbol|platform-grid|platform-chip|iconLabel/);
-  assert.match(windowSource, /platform-stack/);
-  assert.match(windowSource, /platform-favicon/);
-  assert.match(windowSource, /icon\.alt = label/);
+  assert.doesNotMatch(windowSource, /platform-stack|platform-favicon/);
   assert.match(windowSource, /download-diagnostics/);
 });
 
@@ -207,10 +206,11 @@ test("搜索输入支持中文输入法组合态并在提交后刷新", () => {
 });
 
 test("空状态使用每个平台打包的 favicon 资源", async () => {
+  const platformSource = await readFile(new URL("../src/supported-platforms.js", import.meta.url), "utf8");
   await Promise.all(platformFaviconFiles.map((name) => access(new URL(`../public/icons/platform-${name}.png`, import.meta.url))));
-  assert.equal((windowSource.match(/icons\/platform-[^"']+\.png/g) || []).length, platformFaviconFiles.length);
-  assert.doesNotMatch(windowSource, /from ["']\.\/assets\/platform-favicons\/[^"']+\.png["']/);
-  assert.match(windowSource, /chrome\.runtime\.getURL\(favicon\)/);
+  assert.equal((platformSource.match(/icons\/platform-[^"']+\.png/g) || []).length, platformFaviconFiles.length);
+  assert.doesNotMatch(platformSource, /from ["']\.\/assets\/platform-favicons\/[^"']+\.png["']/);
+  assert.match(platformSource, /chrome\.runtime\.getURL\(platform\.favicon\)/);
   const resources = buildManifest.web_accessible_resources?.flatMap((entry) => entry.resources) || [];
   for (const name of platformFaviconFiles) assert.ok(resources.includes(`icons/platform-${name}.png`));
 });

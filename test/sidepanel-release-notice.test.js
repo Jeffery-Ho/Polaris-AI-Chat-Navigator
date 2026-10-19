@@ -5,7 +5,7 @@ import { createSidepanelReleaseNotice } from "../src/sidepanel-release-notice.js
 
 const storageKey = "polaris-release-notice-version";
 
-async function boot({ lastSeen, version = "0.68.0", locale = "zh", storageError = false, writeError = false, deferredRead = false, asyncClose = false } = {}) {
+async function boot({ lastSeen, version = "0.68.0", locale = "zh", storageError = false, writeError = false, deferredRead = false, asyncClose = false, autoShowGate } = {}) {
   const dom = new JSDOM('<body><button class="settings-release-notes">更新说明</button><main id="polaris-window"></main></body>', { pretendToBeVisual: true });
   const { window } = dom;
   window.HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
@@ -39,7 +39,7 @@ async function boot({ lastSeen, version = "0.68.0", locale = "zh", storageError 
     "releaseNotice.issueAction": "GitHub Issue",
     "support.aria": "Support Polaris"
   })[key] || key;
-  const notice = createSidepanelReleaseNotice({ document: window.document, chrome, locale, t });
+  const notice = createSidepanelReleaseNotice({ document: window.document, chrome, locale, t, ...(autoShowGate ? { autoShowGate } : {}) });
   if (!deferredRead) await notice.ready;
   return { dom, window, notice, local, writes, listeners, completeRead: () => resolveRead(lastSeen ? { [storageKey]: lastSeen } : {}) };
 }
@@ -140,5 +140,14 @@ test("原生异步关闭和迟到读取不会重新提示或删除后续手动�
     await new Promise((resolve) => s.window.setTimeout(resolve, 5));
     assert.equal(s.window.document.querySelector("dialog[open]"), current);
     assert.equal(s.window.document.querySelectorAll("dialog").length, 1);
+  } finally { s.dom.window.close(); }
+});
+
+test("新手引导已展示时不自动弹出更新说明，手动打开仍可用", async () => {
+  const s = await boot({ autoShowGate: Promise.resolve(false) });
+  try {
+    assert.equal(s.window.document.querySelector("dialog[open]"), null);
+    s.notice.open();
+    assert.ok(s.window.document.querySelector(".release-notice-dialog[open]"));
   } finally { s.dom.window.close(); }
 });

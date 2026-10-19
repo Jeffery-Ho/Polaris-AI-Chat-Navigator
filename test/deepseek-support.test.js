@@ -13,10 +13,10 @@ test("DeepSeek is available to extension injection, the source window and locali
   assert.ok(manifest.web_accessible_resources[0].resources.includes("icons/platform-deepseek.ico"));
   assert.ok(readFileSync(new URL("../public/icons/platform-deepseek.ico", import.meta.url)).length > 0);
   const background = readFileSync(new URL("../src/background.js", import.meta.url), "utf8");
-  const windowSource = readFileSync(new URL("../src/window.js", import.meta.url), "utf8");
+  const platformSource = readFileSync(new URL("../src/supported-platforms.js", import.meta.url), "utf8");
   const translations = readFileSync(new URL("../src/i18n.js", import.meta.url), "utf8");
   assert.match(background, /"chat\.deepseek\.com"/);
-  assert.match(windowSource, /key: "deepseek", label: "DeepSeek", favicon: "icons\/platform-deepseek\.ico"/);
+  assert.match(platformSource, /key: "deepseek", label: "DeepSeek", favicon: "icons\/platform-deepseek\.ico"/);
   assert.equal(translations.split('\n').filter((line) => line.includes('"settings.supportedPlatforms"') && line.includes("DeepSeek")).length, 2);
 });
 

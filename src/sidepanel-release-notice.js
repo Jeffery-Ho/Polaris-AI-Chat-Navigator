@@ -2,7 +2,7 @@ import { releaseNotesForUpdate } from "./release-notes.js";
 
 const STORAGE_KEY = "polaris-release-notice-version";
 
-export function createSidepanelReleaseNotice({ document, chrome, locale, t }) {
+export function createSidepanelReleaseNotice({ document, chrome, locale, t, autoShowGate = Promise.resolve(true) }) {
   const manifest = chrome.runtime.getManifest();
   let pendingNotes = [];
   let dialog = null;
@@ -128,7 +128,9 @@ export function createSidepanelReleaseNotice({ document, chrome, locale, t }) {
     } catch (error) {
       console.warn("[Polaris] Update notice read state could not be loaded.", error);
     }
-    pendingNotes = dismissedInSession ? [] : releaseNotesForUpdate(lastKnownVersion || lastSeen, manifest.version);
+    // Onboarding replaces the automatic notice when it is shown in the same session.
+    const allowAutomatic = await Promise.resolve(autoShowGate).catch(() => true);
+    pendingNotes = dismissedInSession || !allowAutomatic ? [] : releaseNotesForUpdate(lastKnownVersion || lastSeen, manifest.version);
     showPending();
   })();
   return { ready, open: () => open() };

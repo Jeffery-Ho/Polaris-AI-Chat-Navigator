@@ -10,6 +10,27 @@
 - Version update type must be declared by the user before recording a build.
 - After each build is recorded, confirm the build number and version with the user.
 
+## 299
+
+- Date: 2026-10-19
+- Version: 0.74.2
+- Summary: Centers the onboarding close icon inside a circular button.
+- Notes: Replaces the baseline-aligned text cross with a symmetric SVG and centers it in a fixed 28px circle with no default button padding.
+
+## 298
+
+- Date: 2026-10-19
+- Version: 0.74.1
+- Summary: Prevents previous onboarding demos from restarting after a step change.
+- Notes: Removes each stopped demo's pointer listeners and cancels all pending click, typing and loop timers on pause, step changes and dismissal. Clears transient hover and press states, respects an already-hovered figure, scopes the demo press style, and shares the cursor travel duration between JavaScript and CSS. Adds deterministic regression coverage for step switching, hover resume and cancelled effects.
+
+## 297
+
+- Date: 2026-10-19
+- Version: 0.74.0
+- Summary: Adds a seven-step sidepanel onboarding with animated demos and clickable platform links in the empty state.
+- Notes: New and upgrading users see the guide once (`polaris-onboarding-version`), and closing it also marks the current What's New as read, so only one dialog appears. Each card loops a cursor demo of hover, focus, click and the result; the demo pauses on pointer hover and shows the end state under reduced motion. Help and diagnostics can reopen the guide. Empty-state platform icons no longer overlap and open each site in a new tab. Platform display data moves to `src/supported-platforms.js`.
+
 ## 296
 
 - Date: 2026-10-17

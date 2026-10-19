@@ -1,5 +1,16 @@
 const RELEASE_NOTES = Object.freeze([
   {
+    version: "0.74.0",
+    en: {
+      title: "A guided tour of Polaris",
+      changes: ["A seven-step guide in the sidepanel walks through supported platforms, opening the panel, picking a conversation, Maker jumps, outline reading, search, and chapter copy, with a short animated demo on each card. Reopen it any time from Help and diagnostics. Platform shortcuts on the empty state open each site in a new tab."]
+    },
+    zh: {
+      title: "Polaris 新手引导",
+      changes: ["侧栏新增 7 步引导，依次介绍支持的平台、打开侧栏、选中会话、Maker 跳转、大纲阅读、搜索与复制章节，每张卡片附带操作动画演示。可在「帮助与诊断」中随时重新查看。空状态的平台入口可直接在新标签页打开对应网站。"]
+    }
+  },
+  {
     version: "0.72.0",
     en: {
       title: "More ways to get in touch",

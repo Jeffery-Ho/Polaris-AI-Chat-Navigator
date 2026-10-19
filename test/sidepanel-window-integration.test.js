@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { JSDOM } from "jsdom";
 
-async function boot(windowType = "sidepanel", { locale = "zh", transitionApi = false, openChapters = true, deliverChapters = true, stallAnimationFrames = false, reducedMotion = false } = {}) {
+async function boot(windowType = "sidepanel", { locale = "zh", transitionApi = false, openChapters = true, deliverChapters = true, stallAnimationFrames = false, reducedMotion = false, onboardingSeen = true } = {}) {
   const dom = new JSDOM(`<html data-window-type="${windowType}"><body><div id="polaris-window"></div></body></html>`, { url: "https://extension.test/sidepanel.html", runScripts: "outside-only", pretendToBeVisual: true });
   const win = dom.window;
   win.matchMedia = (query) => ({ matches: reducedMotion && query === "(prefers-reduced-motion: reduce)", addEventListener() {} });
@@ -18,7 +18,9 @@ async function boot(windowType = "sidepanel", { locale = "zh", transitionApi = f
   Object.defineProperty(win.navigator, "language", { value: locale === "zh" ? "zh-CN" : "en" });
   win.eval((await readFile(new URL("../src/i18n.js", import.meta.url), "utf8")).replace("export function createI18n", "function createI18n"));
   const listeners = []; const commands = [];
-  win.chrome = { storage: { local: { get: async () => ({ "polaris-release-notice-version": "0.66.0" }), set: async () => {} } } };
+  const local = { "polaris-release-notice-version": "0.66.0", ...(onboardingSeen ? { "polaris-onboarding-version": 1 } : {}) };
+  const writes = [];
+  win.chrome = { storage: { local: { get: async () => ({ ...local }), set: async (values) => { writes.push(values); Object.assign(local, values); } } } };
   const transitions = [];
   if (transitionApi) win.document.startViewTransition = (update) => {
     const updateCallbackDone = Promise.resolve().then(update);
@@ -42,7 +44,7 @@ async function boot(windowType = "sidepanel", { locale = "zh", transitionApi = f
   send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot });
   if (openChapters) [...win.document.querySelectorAll(".window-tab")].find((button) => button.textContent === (locale === "zh" ? "章节" : "Chapters")).click();
   if (deliverChapters) send({ type: "POLARIS_WINDOW_CHAPTERS", tabId: 7, routeKey: snapshot.routeKey, treeChapters: chapters, chapters });
-  return { dom, win, send, commands, snapshot, chapters, transitions, scrollRequests };
+  return { dom, win, send, commands, snapshot, chapters, transitions, scrollRequests, writes };
 }
 test("sidepanel message integration opens active chapter and rejects old conversation results", async () => {
   const s = await boot();
@@ -262,7 +264,7 @@ test("supported conversation skeleton survives retries and yields to real Makers
     assert.ok(skeleton);
     assert.equal(skeleton.querySelector('[role="status"]').textContent, "Reading conversation…");
     assert.equal(skeleton.querySelector(".conversation-skeleton-list").getAttribute("aria-hidden"), "true");
-    assert.equal(s.win.document.querySelector(".platform-stack"), null);
+    assert.equal(s.win.document.querySelector(".platform-links"), null);
     assert.equal(s.win.document.querySelector(".empty-title"), null);
 
     s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...waiting, loading: true, platform: "default", revision: 2 } });
@@ -309,7 +311,7 @@ test("supported platform without a conversation uses a static localized skeleton
     assert.ok(skeleton);
     assert.equal(skeleton.querySelector('[role="status"]').textContent, "等待会话…");
     assert.equal(skeleton.classList.contains("is-reading"), false);
-    assert.equal(s.win.document.querySelector(".platform-stack"), null);
+    assert.equal(s.win.document.querySelector(".platform-links"), null);
 
     for (const routeKey of ["https://chatgpt.com/", "https://claude.ai/new", "https://gemini.google.com/app"]) {
       s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...s.snapshot, routeKey, hasConversation: false, markerItems: [] } });
@@ -330,7 +332,10 @@ test("unsupported pages keep platform guidance instead of an indefinite reading 
 
     s.send({ type: "POLARIS_WINDOW_STATE", tabId: 8, snapshot: { ...empty, supportedRoute: false, loading: false } });
     assert.equal(s.win.document.querySelector(".conversation-skeleton"), null);
-    assert.ok(s.win.document.querySelector(".platform-stack"));
+    const links = [...s.win.document.querySelectorAll(".empty-state .platform-link")];
+    assert.equal(links.length, 11);
+    assert.ok(links.every((link) => link.target === "_blank" && link.rel.includes("noopener") && link.href.startsWith("https://")));
+    assert.equal(links.find((link) => link.dataset.platform === "claude").href, "https://claude.ai/");
     assert.equal(s.win.document.querySelector(".empty-title").textContent, "打开支持的 AI 对话");
   } finally { s.dom.window.close(); }
 });
@@ -416,5 +421,28 @@ test("search location respects reduced motion", async () => {
     s.win.document.querySelector(".window-search-result").click();
     assert.equal(s.scrollRequests.at(-1).behavior, "instant");
     assert.ok(s.win.document.activeElement.matches('.maker-card[data-search-located="true"]'));
+  } finally { s.dom.window.close(); }
+});
+
+test("first launch shows onboarding instead of the release notice and help reopens it", async () => {
+  const s = await boot("sidepanel", { openChapters: false, onboardingSeen: false });
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const doc = s.win.document;
+    const dialog = doc.querySelector(".onboarding-dialog[open]");
+    assert.ok(dialog);
+    assert.equal(doc.querySelector(".release-notice-dialog"), null);
+    assert.equal(dialog.querySelector(".onboarding-title").textContent, "支持 11 个 AI 平台");
+    dialog.querySelector(".onboarding-close").click();
+    assert.equal(doc.querySelector(".onboarding-dialog"), null);
+    assert.deepEqual(s.writes.at(-1), { "polaris-onboarding-version": 1, "polaris-release-notice-version": "0.66.0" });
+
+    doc.querySelector(".window-settings-button").click();
+    doc.querySelector('[data-settings-destination="help"]').click();
+    const reopen = doc.querySelector('[data-settings-focus="onboarding"]');
+    assert.equal(reopen.textContent, "查看引导");
+    reopen.click();
+    assert.ok(doc.querySelector(".onboarding-dialog[open]"));
+    doc.querySelector(".onboarding-skip").click();
   } finally { s.dom.window.close(); }
 });
