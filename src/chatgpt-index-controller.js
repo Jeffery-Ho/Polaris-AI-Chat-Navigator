@@ -16,6 +16,7 @@ export function createChatGptIndexController({ window: win, bridgeUrl, onChange 
   let invalidRun = false;
   let runId = -1;
   let disposed = false;
+  let wanted = false;
   let processing = Promise.resolve();
   let ingestion = new AbortController();
   let locationRun = null;
@@ -220,10 +221,13 @@ export function createChatGptIndexController({ window: win, bridgeUrl, onChange 
   return {
     configure(enabled) {
       if (disposed) return;
+      wanted = enabled;
       if (!enabled || !chatGptConversationId(win.location.href)) { if (index) { clear(); onChange(); } return; }
       if (!index || route !== currentRoute()) start();
     },
     enabled: () => Boolean(index),
+    // Complete mode is on, but the ChatGPT page has no conversation to read yet.
+    awaitingConversation: () => wanted && !index && /^(chatgpt\.com|chat\.openai\.com)$/.test(win.location.hostname),
     title: titleFromPage,
     snapshot: () => index ? { ...index.status(), generation: session, retryAt, native: nativeState } : null,
     outline, syncMounted, resolveTarget, resolveLocation, ensureLocation,

@@ -10,6 +10,13 @@
 - Version update type must be declared by the user before recording a build.
 - After each build is recorded, confirm the build number and version with the user.
 
+## 310
+
+- Date: 2026-10-24
+- Version: 0.78.2
+- Summary: Redesigns the ChatGPT complete-conversation loading cover with Polaris styling and guides users to pick a chat when none is open.
+- Notes: Shows Read messages (with the real count) and Prepare the conversation as separate steps that map to index and native-list phases; a failed step turns red and offers Try again. Adopts the sidepanel's warm neutrals and terracotta accent over a soft top glow, with no decorative shapes, and removes the 1.4 MB backdrop image. With complete mode on and no conversation open, a dismissible card next to ChatGPT's chat list points left and asks the user to click a chat to start reading, or to open the sidebar first when it is collapsed; the composer stays usable. Light and dark themes checked in a standalone preview; live ChatGPT acceptance is pending.
+
 ## 309
 
 - Date: 2026-10-24

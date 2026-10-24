@@ -169,3 +169,25 @@ test("broken chains cannot be marked complete and old route responses cannot ove
     s.controller.configure(false); assert.equal(s.controller.snapshot(), null);
   } finally { s.finish(); }
 });
+
+test("complete mode on a ChatGPT page without a conversation waits for one instead of indexing", () => {
+  const dom = new JSDOM("<main></main>", { url: "https://chatgpt.com/" });
+  const controller = createChatGptIndexController({ window: dom.window, bridgeUrl: "https://example.invalid/bridge.js", onChange() {} });
+  const other = new JSDOM("<main></main>", { url: "https://claude.ai/new" });
+  const otherController = createChatGptIndexController({ window: other.window, bridgeUrl: "https://example.invalid/bridge.js", onChange() {} });
+  try {
+    assert.equal(controller.awaitingConversation(), false);
+    controller.configure(true);
+    assert.equal(controller.awaitingConversation(), true);
+    assert.equal(controller.snapshot(), null);
+    controller.configure(false);
+    assert.equal(controller.awaitingConversation(), false);
+    otherController.configure(true);
+    assert.equal(otherController.awaitingConversation(), false, "other platforms never show the ChatGPT notice");
+  } finally { controller.dispose(); otherController.dispose(); dom.window.close(); other.window.close(); }
+});
+
+test("an indexed conversation is not awaiting one", () => {
+  const s = setup();
+  try { assert.equal(s.controller.awaitingConversation(), false); } finally { s.finish(); }
+});

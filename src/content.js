@@ -491,7 +491,6 @@ export function initializeContent() {
   });
   const conversationCover = createChatGptConversationCover({ window, locale,
     logoUrl: chrome.runtime.getURL("icons/gpt-voyager-icon-96.png"),
-    backdropUrl: chrome.runtime.getURL("images/conversation-cover.png"),
     onRetry: () => conversationIndex.retry()
   });
   const conversationIndex = createChatGptIndexController({
@@ -504,7 +503,9 @@ export function initializeContent() {
     }
   });
   function syncConversationCover() {
-    conversationCover.update(conversationIndex.snapshot(), document.getElementById(ROOT_ID)?.dataset.pageTheme || "light");
+    const theme = document.getElementById(ROOT_ID)?.dataset.pageTheme || "light";
+    if (conversationIndex.awaitingConversation()) conversationCover.awaitConversation(theme);
+    else conversationCover.update(conversationIndex.snapshot(), theme);
   }
 
   function isExtensionContextValid() {

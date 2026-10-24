@@ -1,6 +1,28 @@
 // This cover owns a sibling of the host app, never React's conversation nodes.
-// Data completion and native-list readiness are separate states.
-export function createChatGptConversationCover({ window: win, logoUrl, backdropUrl, locale = "en", onRetry }) {
+// Data completion and native-list readiness are separate states, shown as two steps.
+const ICONS = {
+  active: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5a7.5 7.5 0 1 0 7.5 7.5"/></svg>',
+  done: '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5"/><path d="m6.75 10.25 2.25 2.25 4.25-4.5"/></svg>',
+  error: '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5"/><path d="M10 6.25v4.5M10 13.5v.25"/></svg>',
+  pending: '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5"/></svg>'
+};
+
+// Polaris sidepanel palette: warm paper neutrals with a terracotta accent.
+const THEME = `
+  :host{color-scheme:light;--bg:#faf9f7;--elevated:#ffffff;--fg:#282522;--secondary:#625d57;--muted:#8b847d;--line:#e2ddd7;--accent:#b85c3a;--accent-fg:#ffffff;--danger:#c2410c;font:15px/1.55 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--fg)}
+  :host([data-theme=dark]){color-scheme:dark;--bg:#191817;--elevated:#1e1c1a;--fg:#f2efeb;--secondary:#c2bbb4;--muted:#918981;--line:#38332f;--accent:#e69a78;--accent-fg:#271812;--danger:#f87171}
+  *{box-sizing:border-box}
+`;
+
+export function stepStates(snapshot) {
+  const readFailed = ["error", "partial"].includes(snapshot.phase);
+  const read = readFailed ? "error" : snapshot.phase === "complete" ? "done" : "active";
+  const native = snapshot.native?.phase;
+  const prepare = read !== "done" ? "pending" : native === "error" ? "error" : native === "ready" ? "done" : "active";
+  return { read, prepare };
+}
+
+export function createChatGptConversationCover({ window: win, logoUrl, locale = "en", onRetry }) {
   const doc = win.document;
   const zh = locale === "zh";
   let host = null;
@@ -12,6 +34,8 @@ export function createChatGptConversationCover({ window: win, logoUrl, backdropU
   let dismissed = false;
   let observer = null;
   let ui = null;
+  let notice = null;
+  let noticeDismissed = false;
   const copy = (cn, en) => zh ? cn : en;
   function position() {
     if (!host || !main?.isConnected) return;
@@ -44,61 +68,138 @@ export function createChatGptConversationCover({ window: win, logoUrl, backdropU
     const shadow = host.attachShadow({ mode: "open" });
     const style = doc.createElement("style");
     style.textContent = `
-      :host{color-scheme:light;--bg:#fcfcfd;--fg:#171717;--muted:#77777c;--line:#dedee4;--button:#f0f0f4;font:16px/1.55 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--fg)}
-      :host([data-theme=dark]){color-scheme:dark;--bg:#181818;--fg:#f0f0f2;--muted:#a4a4ad;--line:#3c3c44;--button:#29292f}
-      *{box-sizing:border-box} .surface{position:absolute;inset:0;overflow:auto;background:var(--bg);display:flex;flex-direction:column;text-align:center;outline:none}
-      .backdrop{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none;opacity:.5} :host([data-theme=dark]) .backdrop{opacity:.12;filter:brightness(.55)}
-      .content{position:relative;width:min(100% - 48px,440px);margin:auto;padding:48px 0 40px}
-      .brand{display:flex;justify-content:center;align-items:center;gap:10px;color:var(--muted);font-size:15px;font-weight:600;letter-spacing:.02em}.brand img{width:24px;height:24px;object-fit:contain}
-      .title{font-size:14px;font-weight:400;color:var(--muted);white-space:nowrap;text-overflow:ellipsis;overflow:hidden;margin:12px 0 0}
-      .divider{height:1px;background:var(--line);max-width:300px;margin:32px auto 24px}
-      .number{font-size:clamp(64px,8vw,92px);font-weight:400;line-height:1.15;letter-spacing:-.05em;font-variant-numeric:tabular-nums}
-      .caption{font-size:15px;color:var(--muted);margin-top:12px}.status{font-size:18px;line-height:1.4;font-weight:600;letter-spacing:-.025em;margin:32px 0 12px}
-      .description{margin:0 auto;max-width:410px;color:var(--muted);font-size:15px;line-height:1.7}.hint{margin:16px auto 0;max-width:370px;color:var(--muted);font-size:14px;line-height:1.6}
-      .actions{display:flex;justify-content:center;flex-wrap:wrap;gap:12px;margin-top:28px}button{font:inherit;font-size:15px;line-height:1.4;min-height:44px;border:1px solid var(--line);border-radius:999px;background:var(--button);color:var(--fg);padding:11px 24px;cursor:pointer}button:hover{filter:brightness(.96)}button:focus-visible{outline:2px solid #777ef8;outline-offset:4px}button[hidden]{display:none}
-      footer{position:relative;padding:16px 24px 24px;color:var(--muted);font-size:13px}
-      @media(max-height:620px){.content{padding:28px 0}.divider{margin:20px auto}.status{margin-top:24px}.actions{margin-top:24px}footer{padding-bottom:12px}}
-      @media(prefers-reduced-motion:no-preference){.number{transition:opacity .15s}}
+      ${THEME}
+      .surface{position:absolute;inset:0;overflow:auto;display:flex;flex-direction:column;outline:none;
+        background:radial-gradient(ellipse 70% 45% at 50% 0%,color-mix(in srgb,var(--accent) 12%,transparent),transparent 70%) var(--bg)}
+      .content{width:min(100% - 48px,400px);margin:auto;padding:48px 0 32px}
+      .brand{display:flex;align-items:center;gap:8px;min-width:0;color:var(--muted);font-size:13px}.brand img{width:22px;height:22px;flex:none;object-fit:contain;border:1px solid color-mix(in srgb,var(--accent) 28%,var(--line));border-radius:6px}.brand strong{flex:none;font-weight:600;color:var(--secondary)}
+      .title{min-width:0;margin:0;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}.title:not(:empty)::before{content:"·";margin-right:8px}
+      .status{margin:20px 0 0;font-size:22px;line-height:1.3;font-weight:600;letter-spacing:-.02em}
+      .steps{list-style:none;margin:28px 0 0;padding:0;border-top:1px solid var(--line)}
+      .step{display:flex;align-items:center;gap:12px;min-height:52px;border-bottom:1px solid var(--line);color:var(--fg)}
+      .step svg{width:20px;height:20px;flex:none;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
+      .step .icon{display:flex;color:var(--muted)}.step .label{flex:1}.step .number{color:var(--secondary);font-variant-numeric:tabular-nums}
+      .step[data-state=active] .icon{color:var(--accent)}.step[data-state=done] .icon{color:var(--secondary)}.step[data-state=error] .icon{color:var(--danger)}
+      .step[data-state=pending]{color:var(--muted)}
+      .hint{margin:16px 0 0;color:var(--secondary);font-size:14px;line-height:1.6}.hint:empty{display:none}
+      .actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:24px}
+      button{font:inherit;font-size:14px;line-height:1.4;min-height:36px;border:1px solid var(--line);border-radius:999px;background:transparent;color:var(--fg);padding:7px 16px;cursor:pointer}
+      button:hover{background:color-mix(in srgb,var(--fg) 6%,transparent)}button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}button[hidden]{display:none}
+      .retry{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}.retry:hover{background:color-mix(in srgb,var(--accent) 88%,var(--fg))}
+      footer{padding:16px 24px 20px;color:var(--muted);font-size:12px;text-align:center}
+      @media(max-height:560px){.content{padding:24px 0}.steps{margin-top:20px}.actions{margin-top:16px}}
+      @media(prefers-reduced-motion:no-preference){.step[data-state=active] svg{animation:spin .9s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}}
     `;
     const make = (tag, className, text = "") => { const node = doc.createElement(tag); node.className = className; node.textContent = text; return node; };
     const surface = make("section", "surface"); surface.setAttribute("role", "region"); surface.setAttribute("aria-label", copy("打开完整对话", "Open the full conversation"));
     surface.tabIndex = -1;
-    if (backdropUrl) { const backdrop = make("img", "backdrop"); backdrop.src = backdropUrl; backdrop.alt = ""; surface.append(backdrop); }
     const content = make("div", "content"); const brand = make("div", "brand");
     if (logoUrl) { const logo = make("img", ""); logo.src = logoUrl; logo.alt = ""; brand.append(logo); }
-    brand.append(make("span", "", "Polaris"));
-    const title = make("p", "title"); const number = make("div", "number");
-    const caption = make("p", "caption", copy("条消息已读取", "messages read"));
+    const title = make("p", "title"); brand.append(make("strong", "", "Polaris"), title);
     const status = make("h2", "status"); status.setAttribute("role", "status");
-    const description = make("p", "description"); const hint = make("p", "hint");
+    const steps = make("ol", "steps"); steps.setAttribute("aria-label", copy("进度", "Progress"));
+    const step = (name, label) => {
+      const item = make("li", `step ${name}`); const icon = make("span", "icon");
+      item.append(icon, make("span", "label", label)); steps.append(item); return { item, icon };
+    };
+    const read = step("read", copy("读取消息", "Read messages")); const number = make("span", "number"); read.item.append(number);
+    const prepare = step("prepare", copy("准备正文", "Prepare the conversation"));
+    const hint = make("p", "hint");
     const actions = make("div", "actions"); const retry = make("button", "retry", copy("重试", "Try again")); retry.type = "button";
     retry.addEventListener("click", () => onRetry?.());
-    const partial = make("button", "partial", copy("先打开已加载内容", "Open partial chat instead")); partial.type = "button"; partial.addEventListener("click", skip);
-    actions.append(retry, partial); content.append(brand, title, make("div", "divider"), number, caption, status, description, hint, actions);
+    const partial = make("button", "partial", copy("先阅读已加载内容", "Read loaded messages")); partial.type = "button"; partial.addEventListener("click", skip);
+    actions.append(retry, partial); content.append(brand, status, steps, hint, actions);
     surface.append(content, make("footer", "", copy("已开启完整对话 · 可在 Polaris 偏好设置中更改", "Full conversation is on · Change this in Polaris preferences")));
     shadow.append(style, surface); shadow.addEventListener("keydown", (event) => { if (event.key === "Escape") { event.preventDefault(); skip(); } });
-    doc.body.append(host); ui = { title, number, status, description, hint, retry };
+    doc.body.append(host); ui = { title, status, read, prepare, number, hint, retry };
     if (typeof win.ResizeObserver === "function") { observer = new win.ResizeObserver(position); observer.observe(main); }
     win.addEventListener("resize", position); win.addEventListener("scroll", position, true); position();
     surface.focus({ preventScroll: true });
     return true;
   }
+  // Without a conversation the composer must stay usable, so this is a
+  // non-modal card beside ChatGPT's chat list that points the user to it.
+  function sidebarOpen() {
+    return (doc.querySelector("nav")?.getBoundingClientRect().width || 0) >= 120;
+  }
+  function placeNotice() {
+    if (!notice) return;
+    const rect = doc.querySelector("main")?.getBoundingClientRect() || { left: 0, top: 0, width: win.innerWidth };
+    const width = Math.min(360, Math.max(0, rect.width - 32));
+    Object.assign(notice.style, { left: `${Math.max(0, rect.left) + 16}px`, top: `${Math.max(0, rect.top) + 64}px`, width: `${width}px` });
+  }
+  function hideNotice() {
+    if (!notice) return;
+    win.removeEventListener("resize", placeNotice);
+    notice.remove(); notice = null;
+  }
+  function showNotice(theme) {
+    if (noticeDismissed) return;
+    if (!notice) {
+      notice = doc.createElement("div"); notice.id = "polaris-conversation-notice";
+      Object.assign(notice.style, { position: "fixed", zIndex: "2147483645" });
+      const shadow = notice.attachShadow({ mode: "open" });
+      const style = doc.createElement("style");
+      style.textContent = `
+        ${THEME}
+        .card{display:flex;align-items:flex-start;gap:10px;padding:12px 8px 12px 12px;border:1px solid color-mix(in srgb,var(--accent) 35%,var(--line));border-radius:12px;background:var(--elevated);box-shadow:0 4px 12px rgb(40 37 34 / .12)}
+        :host([data-theme=dark]) .card{box-shadow:0 4px 16px rgb(0 0 0 / .32)}
+        .arrow{display:flex;flex:none;margin-top:1px;color:var(--accent)}.arrow svg{width:20px;height:20px;stroke-width:2}
+        .text{flex:1;min-width:0}.eyebrow{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px}.eyebrow img{width:14px;height:14px;object-fit:contain}
+        strong{display:block;margin-top:2px;font-size:14px;font-weight:600}p{margin:2px 0 0;color:var(--secondary);font-size:13px;line-height:1.5}
+        button{flex:none;display:flex;width:28px;height:28px;align-items:center;justify-content:center;border:0;border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;padding:0}
+        button:hover{background:color-mix(in srgb,var(--fg) 6%,transparent);color:var(--fg)}button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+        svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
+        @media(prefers-reduced-motion:no-preference){.arrow{animation:nudge 1.2s var(--ease,ease-in-out) 3}@keyframes nudge{50%{transform:translateX(-4px)}}}
+      `;
+      const card = doc.createElement("div"); card.className = "card"; card.setAttribute("role", "status");
+      const arrow = doc.createElement("span"); arrow.className = "arrow";
+      arrow.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 10H4m5-5-5 5 5 5"/></svg>';
+      const text = doc.createElement("div"); text.className = "text";
+      const eyebrow = doc.createElement("div"); eyebrow.className = "eyebrow";
+      if (logoUrl) { const logo = doc.createElement("img"); logo.src = logoUrl; logo.alt = ""; eyebrow.append(logo); }
+      eyebrow.append(copy("Polaris · 已开启完整对话", "Polaris · Full conversation is on"));
+      const heading = doc.createElement("strong"); heading.textContent = copy("选择一个会话开始读取", "Pick a chat to start reading");
+      const body = doc.createElement("p"); body.className = "body";
+      text.append(eyebrow, heading, body);
+      const dismiss = doc.createElement("button"); dismiss.type = "button"; dismiss.className = "dismiss";
+      dismiss.setAttribute("aria-label", copy("关闭提示", "Dismiss"));
+      dismiss.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg>';
+      dismiss.addEventListener("click", () => { noticeDismissed = true; hideNotice(); });
+      card.append(arrow, text, dismiss); shadow.append(style, card);
+      doc.body.append(notice); win.addEventListener("resize", placeNotice);
+    }
+    notice.dataset.theme = theme;
+    notice.shadowRoot.querySelector(".body").textContent = sidebarOpen()
+      ? copy("点击左侧列表中的任意会话，Polaris 会读取它的全部消息。", "Click any chat in the sidebar and Polaris reads every message in it.")
+      : copy("先展开左侧边栏，再点击任意会话，Polaris 会读取它的全部消息。", "Open the sidebar, then click any chat and Polaris reads every message in it.");
+    placeNotice();
+  }
+  function paintStep({ item, icon }, state) {
+    if (item.dataset.state === state) return;
+    item.dataset.state = state; icon.innerHTML = ICONS[state];
+  }
   return {
+    awaitConversation(theme = "light") {
+      close(); generation = ""; dismissed = false; showNotice(theme);
+    },
     update(snapshot, theme = "light") {
+      hideNotice();
       if (!snapshot) { close(); generation = ""; dismissed = false; return; }
       if (snapshot.generation !== generation) { close(); generation = snapshot.generation; dismissed = false; }
       if (dismissed || snapshot.phase === "complete" && snapshot.native?.phase === "ready") { close(); return; }
       if (host && main !== doc.querySelector("main")) close();
       if (!host && !mount()) return;
       host.dataset.theme = theme;
-      const failed = ["error", "partial"].includes(snapshot.phase) || snapshot.native?.phase === "error";
+      const states = stepStates(snapshot);
+      const failed = states.read === "error" || states.prepare === "error";
       ui.title.textContent = snapshot.title || ""; ui.title.title = snapshot.title || "";
       ui.number.textContent = Number(snapshot.count || 0).toLocaleString(zh ? "zh-CN" : "en-US");
-      ui.status.textContent = failed ? copy("完整对话还没准备好", "The full conversation is not ready yet") : copy("正在打开完整对话", "Opening the full conversation");
-      ui.description.textContent = failed ? copy("可以重试，或先阅读已经打开的消息。", "Try again, or start with the messages already available.") : copy("准备好后，就能搜索和打开这段对话中的每一条消息。", "Getting every message ready, so you can search and open anything in this conversation.");
-      ui.hint.textContent = failed ? "" : snapshot.phase === "complete" ? copy("消息已读取，正在准备正文…", "Messages have been read. Preparing the conversation…") : copy("较长的对话可能需要一点时间，无需向上翻页。", "Long conversations may take a moment. No need to scroll up.");
+      paintStep(ui.read, states.read); paintStep(ui.prepare, states.prepare);
+      ui.status.textContent = failed ? copy("完整对话还没准备好", "The full conversation isn't ready yet") : copy("正在打开完整对话", "Opening the full conversation");
+      ui.hint.textContent = failed ? copy("可以重试，或先阅读已经加载的消息。", "Try again, or read the messages already loaded.") : states.read === "active" ? copy("较长的对话可能需要一点时间，无需向上翻页。", "Long conversations may take a moment. No need to scroll up.") : "";
       ui.retry.hidden = !failed;
     },
-    dispose() { close(); generation = ""; dismissed = false; }
+    dispose() { close(); hideNotice(); generation = ""; dismissed = false; noticeDismissed = false; }
   };
 }
