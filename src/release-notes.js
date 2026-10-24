@@ -1,5 +1,49 @@
 const RELEASE_NOTES = Object.freeze([
   {
+    version: "0.78.0",
+    en: {
+      title: "Open complete conversations",
+      changes: ["A loading screen shows your chat title and messages read while the conversation gets ready. Retry if needed, or open the messages already available. Table of Contents and search results stay in the ChatGPT conversation."]
+    },
+    zh: {
+      title: "打开完整对话",
+      changes: ["加载页显示你的会话标题和已读取消息数，等待对话准备好后自动退出。也可以重试，或先打开已加载内容。目录和搜索结果始终定位 ChatGPT 会话正文。"]
+    }
+  },
+  {
+    version: "0.77.0",
+    en: {
+      title: "Complete conversation data and independent reading",
+      changes: ["Table of Contents and search results locate the source in the ChatGPT conversation. Outline remains a separate reading mode. Native navigation to older messages that ChatGPT has not displayed is still being added."]
+    },
+    zh: {
+      title: "完整对话数据与独立阅读",
+      changes: ["目录与搜索结果定位 ChatGPT 会话正文，Outline 保持独立阅读。ChatGPT 尚未显示的历史消息，仍在完善会话内定位支持。"]
+    }
+  },
+  {
+    version: "0.76.0",
+    en: {
+      title: "Complete ChatGPT outlines and full-text search",
+      changes: ["Choose Read the whole conversation in Preferences to read all messages, see a complete outline, and search the entire chat. Settings shows the real chat title and reading progress. If a message cannot be located yet, scroll up in ChatGPT and try again."]
+    },
+    zh: {
+      title: "ChatGPT 完整对话目录与搜索",
+      changes: ["在偏好设置中选择「读取完整对话」，即可自动读取全部历史消息，查看完整目录并搜索所有消息。设置中可查看真实对话标题和读取进度。暂时无法定位的消息，可在 ChatGPT 中向上滚动后重试。"]
+    }
+  },
+  {
+    version: "0.75.0",
+    en: {
+      title: "Return to your AI conversations",
+      changes: ["Platform shortcuts return to an existing conversation tab, preferring the current window. A new tab opens only if the platform is not already open. A visible Last used badge marks your last-used platform, remembered locally."]
+    },
+    zh: {
+      title: "回到已打开的 AI 会话",
+      changes: ["平台入口优先切回当前窗口中已打开的对应会话，也可切换到其他窗口；尚未打开该平台时才新建标签页。最近使用的平台会保存在本地，对应入口右上角常驻显示“上次使用”标签，无需悬停。"]
+    }
+  },
+  {
     version: "0.74.0",
     en: {
       title: "A guided tour of Polaris",

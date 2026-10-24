@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "minimum_chrome_version": "114",
   "name": "Polaris: AI Chat Navigator",
-  "version": "0.74.2",
-  "version_name": "0.74.2(299)",
+  "version": "0.78.1",
+  "version_name": "0.78.1(309)",
   "description": "Show heading markers for supported AI web answers and jump to headings from the right edge.",
   "icons": {
     "16": "icons/gpt-voyager-icon-16.png",
@@ -24,6 +24,7 @@
     {
       "resources": [
         "icons/gpt-voyager-icon-96.png",
+        "images/conversation-cover.png",
         "icons/loader-2.svg",
         "icons/platform-chatgpt.png",
         "icons/platform-claude.png",
@@ -37,6 +38,8 @@
         "icons/platform-manus.png",
         "icons/platform-deepseek.ico",
         "src/route-bridge.js",
+        "src/chatgpt-index-bridge.js",
+        "src/chatgpt-native-navigation.js",
         "icons/diagnostics-reproduce.png",
         "icons/diagnostics-download.png",
         "icons/diagnostics-attach.png",

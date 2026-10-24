@@ -267,7 +267,7 @@ async function forwardCommand(message) {
   if (!tab?.id) {
     return;
   }
-  if (message.expectResult && message.expectedTabId !== tab.id) return { ok: false };
+  if (message.expectedTabId != null && message.expectedTabId !== tab.id) return { ok: false, reason: "source-changed" };
   currentTabId = tab.id;
   let result;
   try {
@@ -278,7 +278,7 @@ async function forwardCommand(message) {
     // Unsupported pages and pages that are still loading have no receiver.
     if (message.expectResult) return { ok: false };
   }
-  if (message.expectResult && !result?.ok) return { ok: false };
+  if (message.expectResult && (!result || result.ok === false)) return result || { ok: false };
   if (message.command === "jump-to-marker" || message.command === "jump-to-chapter") {
     try {
       await chrome.tabs.update(tab.id, { active: true });
@@ -287,7 +287,7 @@ async function forwardCommand(message) {
       // The tab may have closed between the send and the focus request.
     }
   }
-  return message.expectResult && result?.diagnosticStatus ? result : { ok: true };
+  return message.expectResult ? result : { ok: true };
 }
 
 async function isCurrentSourceTab(tab) {
@@ -438,6 +438,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         type: "POLARIS_WINDOW_CHAPTERS",
         chapters: message.chapters,
         treeChapters: message.treeChapters,
+        generation: message.generation,
         tabId: sender.tab?.id ?? null,
         routeKey: message.routeKey
       });

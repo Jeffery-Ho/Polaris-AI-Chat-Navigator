@@ -67,7 +67,7 @@ export function createSidepanelOnboarding({ document, chrome, locale, t, platfor
   // Each figure returns static demo markup plus a script of [delayMs, op, target, ...args].
   const figures = {
     platforms(figure) {
-      figure.appendChild(createPlatformLinks(document, chrome, { compact: true, platforms, label: t("onboarding.platformsLabel") }));
+      figure.appendChild(createPlatformLinks(document, chrome, { compact: true, platforms, label: t("onboarding.platformsLabel"), lastUsedLabel: t("empty.lastUsedPlatformShort") }));
       return [
         [500, "move", '[data-platform="chatgpt"]'], [0, "hover", '[data-platform="chatgpt"]'],
         [700, "move", '[data-platform="claude"]'], [0, "hover", '[data-platform="claude"]'],

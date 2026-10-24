@@ -10,6 +10,76 @@
 - Version update type must be declared by the user before recording a build.
 - After each build is recorded, confirm the build number and version with the user.
 
+## 309
+
+- Date: 2026-10-24
+- Version: 0.78.1
+- Summary: Keeps indexed Maker navigation silent during normal jumps.
+- Notes: Removes the bottom finding-message notice during pending navigation, retains failure explanations, and clears the previous failure notice when another jump begins. Covers pending, successful, failed, and retried navigation in the sidepanel integration test.
+
+## 308
+
+- Date: 2026-10-23
+- Version: 0.78.0
+- Summary: Adds a conversation loading cover and native virtual-list navigation for complete ChatGPT history.
+- Notes: Displays the real title and fetched message count, waits for native history and list preparation, and offers retry or partial reading without clearing drafts. Reveals off-screen targets through the host message list before resolving DOM anchors. Corrects older-page requests to the messages endpoint. Real-page validation of the final adapter remains pending while the test Mac is locked.
+
+## 307
+
+- Date: 2026-10-23
+- Version: 0.77.1
+- Summary: Keeps Table of Contents and full-text result navigation in the native conversation.
+- Notes: Removes automatic Outline fallback and its unused reveal plumbing. Preserves full-data indexing, lazy Outline reading, complete background responses, and stale-source guards. Unmounted native sources remain an explicit limitation pending native-list integration.
+
+## 306
+
+- Date: 2026-10-23
+- Version: 0.77.0
+- Summary: Opens indexed ChatGPT source content in the Polaris reader when native navigation is unavailable.
+- Notes: Reuses already-read message data and the existing virtualized Outline reader, reveals exact headings or blocks, and preserves native jumps when possible. Cancels stale navigation on source changes. Background forwarding now retains full search results, lazy chapter contents, and failure reasons.
+
+## 305
+
+- Date: 2026-10-23
+- Version: 0.76.2
+- Summary: Fixes indexed ChatGPT table anchors and message matching without exposed message IDs.
+- Notes: Matches table headers against whole tables and compares canonical visible message text without synthetic table separators or controls. Location failures now distinguish missing messages, missing sections and ambiguous targets.
+
+## 304
+
+- Date: 2026-10-23
+- Version: 0.76.1
+- Summary: Fixes a late ChatGPT bridge load callback reading a cleared script.
+- Notes: Bridge callbacks retain their own script element and ignore disposed controllers or replaced scripts. Regression tests cover late load after disposal and stale load/error events after retry.
+
+## 303
+
+- Date: 2026-10-23
+- Version: 0.76.0
+- Summary: Adds opt-in complete ChatGPT conversation indexing and full-text search.
+- Notes: Uses the selected conversation branch, cursor pagination and an in-memory index independent of mounted DOM. Adds two indexing mode cards with the real conversation title, bounded virtual lists, lazy outline content and native-only source location.
+
+## 302
+
+- Date: 2026-10-22
+- Version: 0.75.1
+- Summary: Renames the main content areas to Table of Contents and Outline.
+- Notes: Uses 目录 and 大纲 in Chinese. Synchronizes sidepanel tabs, onboarding demos and copy, accessibility labels, and README terminology through the existing translations.
+
+## 301
+
+- Date: 2026-10-22
+- Version: 0.75.0
+- Summary: Returns platform shortcuts to existing conversation tabs and marks the last-used platform.
+- Notes: Prefers matching tabs in the current window, focuses another window when needed, and creates a tab only when the platform is not open. Covers supported alternate domains. Remembers the last platform locally from shortcuts and source-page snapshots, and shows a persistent Last used text badge at the top-right of its shortcut, with a shorter label in compact onboarding icons.
+
+## 300
+
+- Date: 2026-10-21
+- Version: 0.74.3
+- Summary: Updates the Firefox add-on ID to polaris@polaris-ai.work.
+- Notes: Replaces polaris@hos.dev in the Firefox Gecko manifest and regenerates the Firefox extension and AMO source archives.
+
 ## 299
 
 - Date: 2026-10-19

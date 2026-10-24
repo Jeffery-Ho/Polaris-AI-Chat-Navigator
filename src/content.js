@@ -1,4 +1,7 @@
 import { createContentLifecycle } from "./content-lifecycle.js";
+import { createChatGptIndexController } from "./chatgpt-index-controller.js";
+import { createChatGptConversationCover } from "./chatgpt-conversation-cover.js";
+import { chapterTreeText } from "./sidepanel-chapter-state.js";
 import { mountSettingsPanel } from "./settings-panel.js";
 import { createI18n } from "./i18n.js";
 import { cleanupLegacyMakerSnapshots } from "./legacy-maker-snapshot-cleanup.js";
@@ -291,7 +294,7 @@ export function initializeContent() {
   const SUPPORT_URL = "https://jeffery-ho.github.io/polaris-landing/entry/extension/";
   const X_PROFILE_URL = "https://x.com/JefferyHo_";
   const RATING_DISMISSAL_DURATION_MS = 24 * 60 * 60 * 1000;
-  const CONFIG_SCHEMA_VERSION = 8;
+  const CONFIG_SCHEMA_VERSION = 9;
   const POINTER_DRAG_THRESHOLD = 4;
   const EXPLOSION_EMPTY_TEXT = t("chapters.empty");
   const EXPLOSION_BLOCK_SELECTOR = CHAPTER_BLOCK_SELECTOR;
@@ -367,6 +370,7 @@ export function initializeContent() {
   const DEFAULT_CONFIG = Object.freeze({
     controlPosition: null,
     isControlMinimized: false,
+    chatgptHistoryMode: "default",
     maxVisible: QUEUE_MAX_VISIBLE,
     maxVisibleUserGroups: 20,
     foldThreshold: 20,
@@ -485,6 +489,23 @@ export function initializeContent() {
     hasStartPoint: (snapshot) => snapshot.headings.length > 0,
     renderSnapshot: (snapshot) => render(snapshot, { suppressMarkerMotion: true })
   });
+  const conversationCover = createChatGptConversationCover({ window, locale,
+    logoUrl: chrome.runtime.getURL("icons/gpt-voyager-icon-96.png"),
+    backdropUrl: chrome.runtime.getURL("images/conversation-cover.png"),
+    onRetry: () => conversationIndex.retry()
+  });
+  const conversationIndex = createChatGptIndexController({
+    window,
+    bridgeUrl: chrome.runtime.getURL("src/chatgpt-index-bridge.js"),
+    onChange() {
+      syncConversationCover();
+      chapterContentRevision += 1;
+      publishWindowSnapshot();
+    }
+  });
+  function syncConversationCover() {
+    conversationCover.update(conversationIndex.snapshot(), document.getElementById(ROOT_ID)?.dataset.pageTheme || "light");
+  }
 
   function isExtensionContextValid() {
     try {
@@ -661,6 +682,8 @@ export function initializeContent() {
     }
 
     state.isExtensionContextInvalidated = true;
+    conversationIndex.dispose();
+    conversationCover.dispose();
     lifecycle.dispose();
     delete globalThis[CONTENT_SCRIPT_INSTANCE_KEY];
     lifecycle.clearTimeout(state.scheduled);
@@ -713,6 +736,7 @@ export function initializeContent() {
     if (settings instanceof HTMLElement && settings.dataset.pageTheme !== theme) {
       settings.dataset.pageTheme = theme;
     }
+    syncConversationCover();
   }
 
   function backgroundColorAlpha(value) {
@@ -1832,6 +1856,7 @@ export function initializeContent() {
     result.enabledUnorderedListByPlatform = normalizeUnorderedListByPlatform(config);
     result.controlPosition = normalizeControlPosition(config && config.controlPosition);
     result.isControlMinimized = Boolean(config && config.isControlMinimized);
+    result.chatgptHistoryMode = config?.chatgptHistoryMode === "complete" ? "complete" : "default";
     if ((Number(config && config.configVersion) || 1) < 2) {
       result.enabledLevelsByPlatform.xiaohongshu = normalizeEnabledLevels(
         [...result.enabledLevelsByPlatform.xiaohongshu, 4],
@@ -1895,7 +1920,8 @@ export function initializeContent() {
       && enabledUnorderedListByPlatformEqual(first.enabledUnorderedListByPlatform, second.enabledUnorderedListByPlatform)
       && first.controlPosition?.top === second.controlPosition?.top
       && first.controlPosition?.right === second.controlPosition?.right
-      && first.isControlMinimized === second.isControlMinimized;
+      && first.isControlMinimized === second.isControlMinimized
+      && first.chatgptHistoryMode === second.chatgptHistoryMode;
   }
 
   function hasSyncStorage() {
@@ -5298,14 +5324,33 @@ export function initializeContent() {
   function windowSnapshot() {
     const filteredGroups = filteredMarkerGroups(state.markerGroups);
     const { groups, earlierUserGroupCount } = limitedMarkerGroups(filteredGroups);
-    const items = markerRenderItems(groups, earlierUserGroupCount)
+    let items = markerRenderItems(groups, earlierUserGroupCount)
       .map(serializableWindowMarkerItem);
+    const indexed = conversationIndex.enabled() ? conversationIndex.outline(state.config) : null;
+    let allMarkerItems = null;
+    if (indexed?.items.length) {
+      const indexedGroups = [];
+      for (const item of indexed.items) {
+        if (item.type === "user") indexedGroups.push({ key: item.groupKey, user: { ...item, previewTitle: item.title }, headings: [], visibleHeadings: [], hasAssistantMessage: true });
+        else {
+          let group = indexedGroups.at(-1);
+          if (!group) { group = { key: "index:orphan", headings: [], visibleHeadings: [], hasAssistantMessage: true }; indexedGroups.push(group); }
+          group.headings.push(item); group.visibleHeadings.push(item);
+        }
+      }
+      const limited = limitedMarkerGroups(indexedGroups);
+      items = markerRenderItems(limited.groups, limited.earlierUserGroupCount).map(serializableWindowMarkerItem);
+      allMarkerItems = indexed.items;
+    }
     const root = document.getElementById(ROOT_ID);
     const fallbackTheme = window.matchMedia(PAGE_THEME_MEDIA_QUERY).matches ? "dark" : "light";
     return {
       activeMarkerKey: state.activeMarkerKey,
       config: JSON.parse(JSON.stringify(state.config)),
-      hasConversation: state.markerSourceContainers.length > 0,
+      hasConversation: Boolean(indexed?.items.length || state.markerSourceContainers.length > 0),
+      conversationIndex: conversationIndex.snapshot(),
+      conversationTitle: conversationIndex.snapshot()?.title || conversationIndex.title(),
+      allMarkerItems,
       headings: state.headings.map((heading) => ({
         id: heading.id,
         markerKey: markerKeyForHeading(heading),
@@ -5400,6 +5445,15 @@ export function initializeContent() {
     const publicationKey = JSON.stringify([currentRouteKey(), chapterContentRevision, state.config]);
     if (onlyIfChanged && publicationKey === lastChapterPublication) return;
     lastChapterPublication = publicationKey;
+    if (conversationIndex.enabled() && conversationIndex.snapshot()?.count) {
+      const outline = conversationIndex.outline(state.config);
+      sendRuntimeMessage(chrome, { type: "POLARIS_WINDOW_CHAPTERS", routeKey: currentRouteKey(),
+        generation: conversationIndex.snapshot().generation, chapters: [],
+        treeChapters: outline.chapters.map((node) => ({ ...node,
+          title: node.title || (locale === "zh" ? "全文" : "Full text"),
+          contents: node.contents.map((part) => part.type === "child" ? part : { type: "block", lazy: true }) })) });
+      return;
+    }
     const treeChapters = [];
     const sections = collectWindowChapterSections(treeChapters).map((section) => ({
       id: section.id,
@@ -5448,7 +5502,32 @@ export function initializeContent() {
     if (!message || typeof message.command !== "string") {
       return;
     }
+    if (message.expectedRouteKey && message.expectedRouteKey !== currentRouteKey()) return { ok: false, reason: "source-changed" };
+    if (message.generation && message.generation !== conversationIndex.snapshot()?.generation) return { ok: false, reason: "source-changed" };
+    if (message.command === "search-conversation") return conversationIndex.search(String(message.query || ""), { offset: Number(message.offset) || 0 });
+    if (message.command === "get-index-chapter") {
+      if (!conversationIndex.enabled()) return { ok: false };
+      const chapters = conversationIndex.outline(state.config).chapters;
+      if (message.format === "text") return { ok: true, text: chapterTreeText(chapters, String(message.markerKey || "")) };
+      const node = chapters.find((item) => item.markerKey === message.markerKey);
+      return node ? { ok: true, contents: node.contents, revision: conversationIndex.snapshot().revision } : { ok: false };
+    }
+    if (message.command === "retry-conversation-index") { conversationIndex.retry(); return { ok: true }; }
+    if ((message.command === "jump-to-marker" || message.command === "jump-to-chapter") && String(message.markerKey || "").startsWith("index:")) {
+      const route = currentRouteKey(); const generation = conversationIndex.snapshot()?.generation;
+      return conversationIndex.ensureLocation(message.markerKey, state.config).then(({ element, reason }) => {
+        if (route !== currentRouteKey() || generation !== conversationIndex.snapshot()?.generation) return { ok: false, reason: "source-changed" };
+        if (!element) return { ok: false, reason };
+        const moved = jumpToMarker({ element }, "smooth");
+        if (moved) {
+          element.animate?.([{ backgroundColor: "rgba(100,140,255,.24)" }, { backgroundColor: "transparent" }], { duration: 1200 });
+          state.activeMarkerKey = message.markerKey; publishWindowSnapshot();
+        }
+        return { ok: Boolean(moved), reason: moved ? "" : "scroll-failed" };
+      });
+    }
     if (message.command === "request-state") {
+      conversationIndex.configure(state.config.chatgptHistoryMode === "complete" && isTopLevelFrame());
       publishWindowSnapshot();
       return;
     }
@@ -5532,6 +5611,7 @@ export function initializeContent() {
     }
     lifecycle.listenChrome(chrome.runtime.onMessage, (message, _sender, sendResponse) => {
       if (message?.type === "POLARIS_WINDOW_REQUEST_STATE") {
+        conversationIndex.configure(state.config.chatgptHistoryMode === "complete" && isTopLevelFrame());
         if (!state.awaitingRouteDom && state.markerSourceContainers.length === 0) {
           render();
           return;
@@ -5539,7 +5619,13 @@ export function initializeContent() {
         publishWindowSnapshot();
       } else if (message?.type === "POLARIS_WINDOW_COMMAND") {
         const result = handleWindowCommand(message);
-        if (message.expectResult) sendResponse(result || { ok: false });
+        if (message.expectResult) {
+          if (result && typeof result.then === "function") {
+            void result.then((value) => sendResponse(value || { ok: false })).catch(() => sendResponse({ ok: false }));
+            return true;
+          }
+          sendResponse(result || { ok: false });
+        }
       }
     });
   }
@@ -5601,6 +5687,9 @@ export function initializeContent() {
       disposeInvalidExtensionContext();
       return;
     }
+
+    conversationIndex.configure(state.config.chatgptHistoryMode === "complete" && isTopLevelFrame() && document.visibilityState !== "hidden");
+    syncConversationCover();
 
     if (!isSupportedRoute()) {
       clearNonConversationPageState();
@@ -5877,6 +5966,7 @@ export function initializeContent() {
     if (mutations.every(shouldIgnoreMutation)) {
       return;
     }
+    conversationIndex.syncMounted();
     const hasDeepSeekMutation = isDeepSeekPage() && mutations.some(isDeepSeekConversationMutation);
     if (!hasDeepSeekMutation && !hasRelevantMarkerMutation({
       mutations,
@@ -5898,6 +5988,11 @@ export function initializeContent() {
   function getSelectedHeading() {
     if (!state.activeMarkerKey) {
       return null;
+    }
+    if (conversationIndex.enabled() && state.activeMarkerKey.startsWith("index:")) {
+      const target = conversationIndex.outline(state.config).targets.get(state.activeMarkerKey);
+      return target ? { markerKey: state.activeMarkerKey, id: "", title: target.title,
+        element: conversationIndex.resolveTarget(state.activeMarkerKey, state.config) } : null;
     }
     return state.headings.find((item) => markerKeyForHeading(item) === state.activeMarkerKey) || null;
   }
@@ -6298,11 +6393,15 @@ export function initializeContent() {
   function handleVisibilityChange() {
     if (document.visibilityState === "hidden") {
       cancelPointerDrag("document-hidden");
+      conversationIndex.configure(false);
+    } else if (state.config.chatgptHistoryMode === "complete" && isTopLevelFrame()) {
+      conversationIndex.configure(true);
     }
   }
 
   function handlePageHide() {
     cancelPointerDrag("pagehide");
+    conversationIndex.configure(false);
   }
 
   function handleKeydown(event) {

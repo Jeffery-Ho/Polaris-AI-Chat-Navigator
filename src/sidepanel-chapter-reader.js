@@ -1,10 +1,12 @@
 import { appendSanitizedChapterContent } from "./chapter-markdown.js";
+import { appendIndexedChapterBlock } from "./indexed-chapter-content.js";
+import { createVirtualList } from "./virtual-list.js";
 import {
   createChapterReaderState, updateChapterReader, enterChapter, searchChapterReader,
   chapterAncestors, chapterReaderVisibility, chapterTreeText
 } from "./sidepanel-chapter-state.js";
 
-export function createSidepanelChapterReader({ document: doc, locale, onLocate, onCopy, onQueryChange }) {
+export function createSidepanelChapterReader({ document: doc, locale, onLocate, onCopy, onQueryChange, onLoadChapter }) {
   const win = doc.defaultView;
   const zh = locale === "zh";
   const label = (cn, en) => zh ? cn : en;
@@ -16,6 +18,12 @@ export function createSidepanelChapterReader({ document: doc, locale, onLocate, 
   let hoveredKey = "";
   let pendingRender = false;
   let scrollRestorePending = false;
+  let virtualized = false;
+  let virtualList = null;
+  let virtualRowRenderer = null;
+  let contentRevision = 0;
+  const loadingChapters = new Set();
+  const loadedChapters = new Map();
   const root = make("div", "chapter-tree-reader");
   const menu = make("div", "chapter-node-menu");
   menu.setAttribute("role", "menu");
@@ -100,7 +108,7 @@ export function createSidepanelChapterReader({ document: doc, locale, onLocate, 
       closeMenu();
     }, !node.sourceKey);
     const copy = async (key) => {
-      await onCopy(chapterTreeText(state.nodes, key));
+      await onCopy(virtualized && onLoadChapter ? (await onLoadChapter(key, "text")).text : chapterTreeText(state.nodes, key));
       if (state.menu === node.markerKey) status.textContent = label("已复制", "Copied");
     };
     action(label("复制本章", "Copy chapter"), () => copy(node.markerKey));
@@ -127,9 +135,47 @@ export function createSidepanelChapterReader({ document: doc, locale, onLocate, 
       });
       children.push(path);
     }
-    const list = make("ul", "chapter-tree-list");
+    const list = virtualized && virtualList ? root.querySelector(":scope > .chapter-tree-list") || make("ul", "chapter-tree-list") : make("ul", "chapter-tree-list");
     list.setAttribute("aria-label", label("章节", "Chapters"));
-    function appendNode(node, parent, depth) {
+    function contentFor(part, node, partIndex, depth) {
+      const content = make("div", "chapter-content chapter-tree-content");
+      content.style.setProperty("--tree-depth", Math.min(depth, 3));
+      if (part.lazy) {
+        content.textContent = label("正在读取内容…", "Reading content…");
+        content.setAttribute("aria-busy", "true");
+        const key = `${currentKey}:${node.markerKey}`;
+        if (!loadingChapters.has(key) && onLoadChapter) {
+          loadingChapters.add(key);
+          const session = state;
+          void onLoadChapter(node.markerKey).then((result) => {
+            if (state !== session || !active) return;
+            const current = state.nodes.find((item) => item.markerKey === node.markerKey);
+            if (!current) return;
+            loadedChapters.set(node.markerKey, result.contents);
+            current.contents = result.contents;
+            signature = ""; paint();
+          }).catch(() => {
+            if (state !== session) return;
+            content.removeAttribute("aria-busy");
+            content.textContent = label("读取失败，重新展开以重试", "Could not load. Collapse and expand to retry.");
+          }).finally(() => loadingChapters.delete(key));
+        }
+        return content;
+      }
+      if (part.ast) appendIndexedChapterBlock(content, part.ast, doc);
+      else {
+        const parsed = new win.DOMParser().parseFromString(part.html || "", "text/html");
+        appendSanitizedChapterContent(content, parsed.body, doc, doc.baseURI);
+        if (!part.html) content.textContent = part.text || "";
+      }
+      content.querySelectorAll("table, pre").forEach((element) => {
+        const wrap = make("div", "chapter-table-wrap"); wrap.tabIndex = 0;
+        wrap.setAttribute("role", "region"); wrap.setAttribute("aria-label", label("可横向滚动的内容", "Scrollable content"));
+        element.replaceWith(wrap); wrap.appendChild(element);
+      });
+      return content;
+    }
+    function appendNode(node, parent, depth, shallow = false) {
       if (!node || !visibility.visible.has(node.markerKey)) return;
       const item = make("li", "chapter-tree-node");
       item.dataset.key = node.markerKey;
@@ -187,32 +233,46 @@ export function createSidepanelChapterReader({ document: doc, locale, onLocate, 
       else title.disabled = true;
       row.append(disclosure, dot, title);
       item.appendChild(row);
-      if (showChildren) {
-        for (const part of node.contents) {
+      if (showChildren && !shallow) {
+        for (const [partIndex, part] of node.contents.entries()) {
           if (part.type === "child") {
             const nested = make("ul", "chapter-tree-list chapter-tree-children");
             appendNode(byKey.get(part.key), nested, depth + 1);
             if (nested.childElementCount) item.appendChild(nested);
           } else if (expanded) {
-            const content = make("div", "chapter-content chapter-tree-content");
-            const parsed = new win.DOMParser().parseFromString(part.html || "", "text/html");
-            appendSanitizedChapterContent(content, parsed.body, doc, doc.baseURI);
-            if (!part.html) content.textContent = part.text || "";
-            content.querySelectorAll("table, pre").forEach((element) => {
-              const wrap = make("div", "chapter-table-wrap");
-              wrap.tabIndex = 0;
-              wrap.setAttribute("role", "region");
-              wrap.setAttribute("aria-label", label("可横向滚动的内容", "Scrollable content"));
-              element.replaceWith(wrap);
-              wrap.appendChild(element);
-            });
-            item.appendChild(content);
+            item.appendChild(contentFor(part, node, partIndex, depth));
           }
         }
       }
       parent.appendChild(item);
     }
-    visibility.roots.forEach((node) => appendNode(node, list, 0));
+    if (virtualized) {
+      const rows = [];
+      function flatten(node, depth) {
+        if (!node || !visibility.visible.has(node.markerKey)) return;
+        rows.push({ key: `title:${node.markerKey}`, node, depth, signature: JSON.stringify([node.title, depth, state.expanded.has(node.markerKey), state.query, [...state.searchCollapsed]]) });
+        const expanded = state.expanded.has(node.markerKey);
+        if (!expanded && !(state.query && visibility.ancestors.has(node.markerKey) && !state.searchCollapsed.has(node.markerKey))) return;
+        node.contents.forEach((part, partIndex) => {
+          if (part.type === "child") flatten(byKey.get(part.key), depth + 1);
+          else if (expanded) rows.push({ key: `block:${node.markerKey}:${partIndex}`, node, part, partIndex, depth, signature: JSON.stringify(part) });
+        });
+      }
+      visibility.roots.forEach((node) => flatten(node, 0));
+      virtualRowRenderer = (item) => {
+        if (item.part) { const li = make("li", "chapter-tree-node"); li.append(contentFor(item.part, item.node, item.partIndex, item.depth)); return li; }
+        const temporary = make("ul"); appendNode(item.node, temporary, item.depth, true); return temporary.firstChild;
+      };
+      if (!virtualList) virtualList = createVirtualList({ element: list, gap: 0, estimateHeight: 48,
+        getPinnedKeys: () => state.menu ? [`title:${state.menu}`] : [],
+        createRow(item) { const row = virtualRowRenderer(item); row.chapterSignature = item.signature; return row; },
+        updateRow(row, item) {
+          if (row.chapterSignature === item.signature) return;
+          const next = virtualRowRenderer(item); row.replaceChildren(...next.childNodes); row.chapterSignature = item.signature;
+        }
+      });
+      virtualList.setItems(rows);
+    } else visibility.roots.forEach((node) => appendNode(node, list, 0));
     if (!list.childElementCount) {
       const empty = make("div", "empty-search", state.query ? label("没有匹配的章节", "No matching chapters") : label("当前对话没有章节", "No chapters in this conversation"));
       if (state.query) empty.appendChild(button("secondary-button", label("清除搜索", "Clear search"), () => {
@@ -258,14 +318,20 @@ export function createSidepanelChapterReader({ document: doc, locale, onLocate, 
   });
   return {
     element: root,
-    update({ conversationKey, nodes, preferredKey, query, ready }) {
+    update({ conversationKey, nodes, preferredKey, query, ready, virtualized: nextVirtualized = false, contentRevision: nextRevision = 0 }) {
       const resumed = !active || currentKey !== conversationKey;
       active = true;
+      if (virtualized !== nextVirtualized) { virtualList?.dispose(); virtualList = null; signature = ""; }
+      virtualized = nextVirtualized;
+      if (contentRevision !== nextRevision) { contentRevision = nextRevision; loadedChapters.clear(); signature = ""; }
       if (currentKey !== conversationKey) {
+        if (virtualized) sessions.clear();
         closeMenu(false);
         pendingRender = false;
         hoveredKey = "";
         currentKey = conversationKey;
+        loadedChapters.clear(); loadingChapters.clear();
+        virtualList?.dispose(); virtualList = null;
         state = sessions.get(currentKey) || createChapterReaderState();
         sessions.set(currentKey, state);
         signature = "";
@@ -278,6 +344,7 @@ export function createSidepanelChapterReader({ document: doc, locale, onLocate, 
         else if (resumed) { paint(); restoreScroll(); }
         return root;
       }
+      if (virtualized) nodes = nodes.map((node) => loadedChapters.has(node.markerKey) ? { ...node, contents: loadedChapters.get(node.markerKey) } : node);
       const nextSignature = JSON.stringify([conversationKey, nodes, query, state.focus, [...state.expanded]]);
       if (nextSignature !== signature) {
         updateChapterReader(state, nodes, preferredKey);
@@ -294,6 +361,7 @@ export function createSidepanelChapterReader({ document: doc, locale, onLocate, 
       state.scrollY = win.scrollY;
       closeMenu(false);
       active = false;
+      virtualList?.dispose(); virtualList = null;
     }
   };
 }

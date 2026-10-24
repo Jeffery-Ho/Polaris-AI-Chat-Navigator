@@ -42,10 +42,104 @@ async function boot(windowType = "sidepanel", { locale = "zh", transitionApi = f
   const snapshot = { hasConversation: true, supportedRoute: true, routeKey: "https://chatgpt.com/c/one", platform: "chatgpt", config: {}, headings: [], markerItems: [{ key: "ai-second", type: "ai", markerKey: "second", title: "second", preview: "second" }], activeMarkerKey: "second" };
   const chapters = ["first", "second"].map((key) => ({ markerKey: key, sourceKey: key, title: key, parentKey: "", contents: [{ type: "block", text: `${key} body`, html: `<p>${key} body</p>` }], blocks: [{ tagName: "p", text: `${key} body` }] }));
   send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot });
-  if (openChapters) [...win.document.querySelectorAll(".window-tab")].find((button) => button.textContent === (locale === "zh" ? "章节" : "Chapters")).click();
+  if (openChapters) [...win.document.querySelectorAll(".window-tab")].find((button) => button.textContent === (locale === "zh" ? "大纲" : "Outline")).click();
   if (deliverChapters) send({ type: "POLARIS_WINDOW_CHAPTERS", tabId: 7, routeKey: snapshot.routeKey, treeChapters: chapters, chapters });
   return { dom, win, send, commands, snapshot, chapters, transitions, scrollRequests, writes };
 }
+test("complete indexing settings show the actual title and two exclusive mode cards", async () => {
+  const s = await boot("sidepanel", { openChapters: false });
+  try {
+    const snapshot = { ...s.snapshot, conversationTitle: "我的真实会话标题", config: { chatgptHistoryMode: "complete" },
+      conversationIndex: { generation: "run", revision: 1, phase: "loading", count: 123, total: null } };
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot });
+    s.win.document.querySelector('.window-settings-button').click();
+    s.win.document.querySelector('[data-settings-destination="preferences"]').click();
+    assert.equal(s.win.document.querySelector('.index-current-title').textContent, "我的真实会话标题");
+    assert.equal(s.win.document.querySelectorAll('.index-mode-card').length, 2);
+    assert.equal(s.win.document.querySelector('.index-progress').hasAttribute("value"), false);
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...snapshot, conversationTitle: "重命名后的标题", conversationIndex: { ...snapshot.conversationIndex, phase: "complete", total: 123 } } });
+    assert.equal(s.win.document.querySelector('.index-current-title').textContent, "重命名后的标题");
+    assert.match(s.win.document.querySelector('.index-current-status').textContent, /已读取全部/);
+    s.win.document.querySelector('input[name="chatgpt-history-mode"][value="default"]').click();
+    assert.ok(s.commands.some((command) => command.patch?.chatgptHistoryMode === "default"));
+  } finally { s.dom.window.close(); }
+});
+
+test("indexed TOC and full-text results stay in TOC when native location is unavailable", async () => {
+  const s = await boot("sidepanel", { openChapters: false });
+  try {
+    const original = s.win.chrome.runtime.sendMessage;
+    s.win.chrome.runtime.sendMessage = async (message) => {
+      if (message.command === "search-conversation") return { generation: "run", items: [{ key: "index:answer", markerKey: "index:answer", type: "result", role: "assistant", title: "正文", count: 1, parts: [{ text: "正文命中", match: true }] }], total: 1, hasMore: false };
+      if (message.command === "jump-to-marker") { s.commands.push(message); return { ok: false, reason: "not-mounted" }; }
+      return original(message);
+    };
+    const snapshot = { ...s.snapshot, config: { chatgptHistoryMode: "complete" },
+      markerItems: Array.from({ length: 20000 }, (_, i) => ({ key: `index:${i}`, markerKey: `index:${i}`, type: "ai", title: `标题 ${i}` })),
+      conversationIndex: { generation: "run", revision: 1, phase: "complete", count: 10000, total: 10000 } };
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot });
+    assert.ok(s.win.document.querySelectorAll('.maker-list .maker-card').length <= 120);
+    s.win.document.querySelector('.maker-card').click();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(s.commands.filter((command) => command.command === "request-chapters").length, 0);
+    const search = s.win.document.querySelector('.window-search input');
+    search.value = "正文"; search.dispatchEvent(new s.win.Event("input"));
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    s.win.document.querySelector('.index-search-result').click();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(s.win.document.querySelector('.window-body').dataset.activeTab, "navigation");
+    assert.equal(s.win.document.querySelector('.window-search input').value, "正文");
+    assert.equal(s.commands.filter((command) => command.command === "request-chapters").length, 0);
+    assert.ok(s.commands.some((command) => command.expectedRouteKey === snapshot.routeKey && command.generation === "run"));
+  } finally { s.dom.window.close(); }
+});
+
+test("completed conversation Maker jumps stay silent while pending and successful, but still explain failures", async () => {
+  const s = await boot("sidepanel", { openChapters: false });
+  try {
+    let finishJump;
+    const original = s.win.chrome.runtime.sendMessage;
+    s.win.chrome.runtime.sendMessage = (message) => message.command === "jump-to-marker"
+      ? new Promise((resolve) => { finishJump = resolve; }) : original(message);
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...s.snapshot,
+      markerItems: [{ key: "index:a:0:0", markerKey: "index:a:0:0", type: "ai", title: "已加载的段落" }],
+      conversationIndex: { generation: "one", revision: 1, phase: "complete", count: 1, native: { phase: "ready" } } } });
+    s.win.document.querySelector('.maker-card').click();
+    assert.equal(s.win.document.querySelector('.index-notice'), null);
+    finishJump({ ok: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(s.win.document.querySelector('.index-notice'), null);
+
+    s.win.document.querySelector('.maker-card').click();
+    finishJump({ ok: false, reason: "anchor-not-found" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.match(s.win.document.querySelector('.index-notice').textContent, /已找到消息/);
+    s.win.document.querySelector('.maker-card').click();
+    assert.equal(s.win.document.querySelector('.index-notice'), null, "retrying a jump clears the previous failure notice");
+    finishJump({ ok: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(s.win.document.querySelector('.index-notice'), null);
+  } finally { s.dom.window.close(); }
+});
+
+test("a delayed native jump cannot open old indexed content after the conversation changes", async () => {
+  const s = await boot("sidepanel", { openChapters: false });
+  try {
+    let finishJump;
+    const original = s.win.chrome.runtime.sendMessage;
+    s.win.chrome.runtime.sendMessage = (message) => message.command === "jump-to-marker" ? new Promise((resolve) => { finishJump = resolve; }) : original(message);
+    const snapshot = { ...s.snapshot, markerItems: [{ key: "index:a:0:0", markerKey: "index:a:0:0", type: "ai", title: "旧段落" }],
+      conversationIndex: { generation: "one", revision: 1, phase: "complete", count: 1 } };
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot });
+    s.win.document.querySelector('.maker-card').click();
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...snapshot, routeKey: "https://chatgpt.com/c/two", conversationIndex: { ...snapshot.conversationIndex, generation: "two" } } });
+    finishJump({ ok: false, reason: "not-mounted" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(s.commands.filter((command) => command.readingRequestId).length, 0);
+    assert.equal(s.win.document.querySelector('.window-body').dataset.activeTab, "navigation");
+  } finally { s.dom.window.close(); }
+});
+
 test("sidepanel message integration opens active chapter and rejects old conversation results", async () => {
   const s = await boot();
   assert.equal(s.win.document.querySelector('.chapter-node-title[data-key="first"]').getAttribute("aria-expanded"), "false");
@@ -67,7 +161,7 @@ test("sidepanel uses a normal content fade without starting browser view transit
   assert.ok(s.win.document.querySelector(".window-body.is-mode-transition"));
   s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...s.snapshot, revision: 2 } });
   assert.equal(s.transitions.length, 0, "streaming state refreshes do not start a transition");
-  [...s.win.document.querySelectorAll(".window-tab")].find((button) => button.textContent === "导航").click();
+  [...s.win.document.querySelectorAll(".window-tab")].find((button) => button.textContent === "目录").click();
   assert.equal(s.transitions.length, 0, "mode switches do not use document.startViewTransition");
   assert.equal(s.win.document.querySelector("#polaris-window > .window-body")?.dataset.activeTab, "navigation");
   s.dom.window.close();
@@ -148,7 +242,7 @@ test("preferences keep live controls, update the current platform, and retain at
     s.win.document.querySelector(".window-settings-button").click();
     s.win.document.querySelector('[data-settings-destination="preferences"]').click();
     const range = s.win.document.querySelector('input[type="range"]');
-    assert.equal(range.getAttribute("aria-label"), "用户分组上限");
+    assert.equal(range.getAttribute("aria-label"), "显示最近几轮对话");
     range.focus();
     range.value = "37";
     range.dispatchEvent(new s.win.Event("input"));
@@ -286,7 +380,7 @@ test("chapters reuse the conversation empty state until a real conversation has 
     const waiting = { ...s.snapshot, hasConversation: false, markerItems: [] };
     s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: waiting });
     const navigationStatus = s.win.document.querySelector(".conversation-skeleton-status").textContent;
-    [...s.win.document.querySelectorAll(".window-tab")].find((button) => button.textContent === "Chapters").click();
+    [...s.win.document.querySelectorAll(".window-tab")].find((button) => button.textContent === "Outline").click();
     const skeleton = s.win.document.querySelector(".conversation-skeleton");
     assert.ok(skeleton);
     assert.equal(skeleton.querySelectorAll(".conversation-skeleton-row").length, 5);
@@ -334,9 +428,23 @@ test("unsupported pages keep platform guidance instead of an indefinite reading 
     assert.equal(s.win.document.querySelector(".conversation-skeleton"), null);
     const links = [...s.win.document.querySelectorAll(".empty-state .platform-link")];
     assert.equal(links.length, 11);
-    assert.ok(links.every((link) => link.target === "_blank" && link.rel.includes("noopener") && link.href.startsWith("https://")));
+    assert.ok(links.every((link) => !link.target && link.href.startsWith("https://")));
     assert.equal(links.find((link) => link.dataset.platform === "claude").href, "https://claude.ai/");
     assert.equal(s.win.document.querySelector(".empty-title").textContent, "打开支持的 AI 对话");
+  } finally { s.dom.window.close(); }
+});
+
+test("实际切换 AI 平台后，空状态标记最近使用的平台且不会被不支持的页面覆盖", async () => {
+  const s = await boot("sidepanel", { openChapters: false });
+  try {
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 9, snapshot: { ...s.snapshot, platform: "claude", routeKey: "https://claude.ai/chat/two" } });
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 10, snapshot: { ...s.snapshot, platform: "default", supportedRoute: false, hasConversation: false, markerItems: [] } });
+    await Promise.resolve();
+    const badges = s.win.document.querySelectorAll(".empty-state .platform-link-badge:not([hidden])");
+    assert.equal(badges.length, 1);
+    assert.equal(badges[0].closest(".platform-link").dataset.platform, "claude");
+    assert.equal(badges[0].closest(".platform-link").title, "Claude · 上次使用");
+    assert.equal(badges[0].textContent, "上次使用");
   } finally { s.dom.window.close(); }
 });
 

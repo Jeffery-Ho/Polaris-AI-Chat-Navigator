@@ -11,7 +11,7 @@ const nodes = [
 function setup(overrides = {}) {
   const dom = new JSDOM("<!doctype html><body></body>", { pretendToBeVisual: true, url: "https://test.local" });
   const { document } = dom.window;
-  dom.window.scrollTo = (_x, y) => { Object.defineProperty(dom.window, "scrollY", { value: y, configurable: true }); };
+  dom.window.scrollTo = (options, y) => { Object.defineProperty(dom.window, "scrollY", { value: typeof options === "object" ? options.top : y, configurable: true }); };
   let query = "";
   const copied = []; const located = [];
   const reader = createSidepanelChapterReader({ document, locale: "zh", onCopy: async (text) => copied.push(text), onLocate: async (key) => located.push(key), onQueryChange: (value) => { query = value; }, ...overrides });
@@ -43,6 +43,28 @@ test("ChatGPT user prompt renders, expands its answer, copies and locates the us
   assert.deepEqual(s.located, ["user"]);
   source.window.close(); s.dom.window.close();
 });
+test("indexed outline virtualizes metadata and reads only visible expanded chapter content", async () => {
+  const requested = [];
+  const s = setup({ onLoadChapter: async (key, format) => {
+    requested.push([key, format]);
+    return format === "text" ? { text: "完整正文" } : { contents: [{ type: "block", text: "按需正文", ast: { type: "paragraph", children: [{ type: "text", value: "按需正文" }] } }] };
+  } });
+  try {
+    const metadata = Array.from({ length: 20000 }, (_, index) => ({ markerKey: `index:${index}`, sourceKey: `index:${index}`, parentKey: "", title: `章节 ${index}`, contents: [{ type: "block", lazy: true }] }));
+    s.reader.update({ conversationKey: "indexed", nodes: metadata, query: "", ready: true, virtualized: true, contentRevision: 1 });
+    await settle();
+    assert.ok(s.document.querySelectorAll('.chapter-node-title').length <= 120);
+    assert.deepEqual(requested, [["index:0", undefined]]);
+    assert.match(s.reader.element.textContent, /按需正文/);
+    s.document.querySelector('.chapter-node-dot[data-key="index:0"]').click();
+    s.click("复制全文"); await settle();
+    assert.equal(s.copied.at(-1), "完整正文");
+    assert.deepEqual(requested.at(-1), ["", "text"]);
+    s.reader.update({ conversationKey: "another", nodes: [], query: "", ready: true, virtualized: true });
+    assert.ok(!s.reader.element.textContent.includes("按需正文"));
+  } finally { s.dom.window.close(); }
+});
+
 test("bullet menu does not navigate source; title expands inline; focus and return work", async () => {
   const s = setup();
   s.document.querySelector('.chapter-node-dot[data-key="b"]').click();

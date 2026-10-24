@@ -71,7 +71,7 @@
     <main>
       <p class="product">Polaris: AI Chat Navigator</p>
       <h1>Privacy Policy</h1>
-      <p class="effective-date">Effective date: August 28, 2026</p>
+      <p class="effective-date">Effective date: October 23, 2026</p>
 
       <p>
         Polaris: AI Chat Navigator is a browser extension that adds section navigation markers to
@@ -84,17 +84,20 @@
       <h3>Website Content</h3>
       <p>
         Polaris: AI Chat Navigator accesses the text and document structure of AI-generated responses
-        displayed on supported websites. For ChatGPT, it also reads the current conversation's
-        active message branch in the browser to keep long-conversation user groups complete.
+        displayed on supported websites. When complete indexing is enabled for ChatGPT, it also requests the current conversation's
+        active public message branch through ChatGPT's same-origin session to build a complete
+        outline and full-text search index. This index stays in memory across DOM removal and
+        is cleared on conversation changes, page refresh or closure, or disabling complete indexing.
+        Conversation text is not written to browser storage or synchronized.
         This access is necessary to identify headings and
         list structures, generate navigation markers, scroll to selected sections, and show
         AI response content in the full-screen text-selection feature.
       </p>
       <p>
         Website content is processed locally within the user's browser. It is not transmitted
-        to the developer or to any third-party server. The extension is not designed to access
-        passwords, authentication credentials, cookies, financial
-        information, health information, or other account information.
+        to the developer or to any third-party server. Complete ChatGPT indexing uses the existing page session to authenticate requests to ChatGPT.
+        Short-lived authentication data remains in the page context and is never placed in extension
+        messages, diagnostic logs, persistent storage, or synchronization. Polaris does not ask for passwords.
       </p>
 
       <h3>Extension Settings</h3>

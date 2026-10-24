@@ -104,6 +104,39 @@ async function bootPackagedContent({ delayConfig = false } = {}) {
   return { dom, win, runtime, storage, messages, errors, pendingConfigReads, flush, inject, invalidate };
 }
 
+test("packaged content keeps indexed body data available without native history mounted", async () => {
+  const s = await bootPackagedContent();
+  try {
+    const posted = [];
+    s.win.postMessage = (data) => posted.push(data);
+    await s.inject();
+    const command = (name, fields = {}) => {
+      let response;
+      for (const listener of s.runtime.listeners) listener({ type: "POLARIS_WINDOW_COMMAND", command: name, ...fields }, {}, (value) => { response = value; });
+      return response;
+    };
+    command("update-config", { patch: { chatgptHistoryMode: "complete" } });
+    command("request-state");
+    s.win.document.querySelector('[data-polaris-conversation-bridge]').dispatchEvent(new s.win.Event("load"));
+    const start = posted.find((item) => item.command === "start");
+    assert.ok(start);
+    s.win.dispatchEvent(new s.win.MessageEvent("message", { source: s.win, origin: s.win.location.origin, data: {
+      type: "polaris-conversation-index-result", requestId: start.requestId, conversationId: start.conversationId, runId: 1, event: "page",
+      payload: { messages: [{ id: "server-answer", author: { role: "assistant" }, content: { content_type: "text", parts: ["| 市场 | 财富 |\n| --- | --- |\n| 日本 | 10 |"] } }], page_info: { has_previous_page: false, has_next_page: false } }
+    } }));
+    await s.flush(); await s.flush();
+    const markerKey = "index:server-answer:0:0";
+    const source = { generation: start.requestId, expectedRouteKey: s.win.location.href };
+    command("request-chapters", source);
+    const published = s.messages.findLast((item) => item.type === "POLARIS_WINDOW_CHAPTERS");
+    assert.ok(published.treeChapters.some((node) => node.markerKey === "index:server-answer"));
+    const body = command("get-index-chapter", { ...source, markerKey: "index:server-answer", expectResult: true });
+    assert.equal(body.contents[0].ast.type, "table");
+    assert.equal(s.win.document.querySelector('[data-message-id="server-answer"]'), null);
+    assert.deepEqual(s.errors, []);
+  } finally { s.invalidate(); s.dom.window.close(); }
+});
+
 test("production WXT entrypoint reloads with one UI and one set of Chrome listeners", async () => {
   const s = await bootPackagedContent();
   try {
@@ -132,6 +165,7 @@ test("production WXT entrypoint reloads with one UI and one set of Chrome listen
     assert.equal(s.win.document.querySelectorAll("#gpt-paragraph-nav").length, 1);
     assert.deepEqual(s.errors, []);
   } finally {
+    s.invalidate();
     s.dom.window.close();
   }
 });
@@ -155,6 +189,7 @@ test("invalidation while storage is pending cannot revive an old content instanc
     assert.equal(s.win.document.querySelectorAll("#gpt-paragraph-nav").length, 1);
     assert.deepEqual(s.errors, []);
   } finally {
+    s.invalidate();
     s.dom.window.close();
   }
 });
@@ -177,6 +212,7 @@ test("an image preview requested before invalidation cannot overwrite a new inst
     assert.equal(s.messages.filter((message) => message.type === "POLARIS_WINDOW_IMAGE").length, 1);
     assert.deepEqual(s.errors, []);
   } finally {
+    s.invalidate();
     s.dom.window.close();
   }
 });
@@ -200,6 +236,7 @@ test("clipboard completion from an old instance cannot add a toast to a new over
     assert.equal(s.win.document.querySelectorAll(".gpt-paragraph-nav__copy-toast").length, 0);
     assert.deepEqual(s.errors, []);
   } finally {
+    s.invalidate();
     s.dom.window.close();
   }
 });

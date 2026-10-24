@@ -9,7 +9,7 @@ import { SUPPORTED_MATCHES } from "./src/supported-sites.js";
 const { manifest_version, web_accessible_resources, ...manifest } = sourceManifest;
 
 // Firefox add-on id; AMO ties every future update to it.
-export const GECKO_ID = "polaris@hos.dev";
+export const GECKO_ID = "polaris@polaris-ai.work";
 
 // Firefox has no Side Panel API; WXT emits the sidepanel entrypoint as
 // sidebar_action there, so drop the Chromium-only keys.

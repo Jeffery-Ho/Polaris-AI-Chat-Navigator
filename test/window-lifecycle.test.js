@@ -157,12 +157,23 @@ test("章节来源定位将 content script 的成功响应返回侧栏", async (
 });
 
 test("章节来源定位保留失败结果并拒绝已切换的来源标签页", async () => {
-  const calls = await runAction({ storedWindow: null, contentResponse: { ok: false } });
+  const calls = await runAction({ storedWindow: null, contentResponse: { ok: false, reason: "not-mounted" } });
   const command = { type: "POLARIS_WINDOW_COMMAND", command: "jump-to-chapter", markerKey: "user-1", expectedTabId: 42, expectResult: true };
-  assert.equal((await calls.command(command)).ok, false);
+  assert.equal((await calls.command(command)).reason, "not-mounted");
   const requests = calls.contentRequests.length;
   assert.equal((await calls.command({ ...command, expectedTabId: 99 })).ok, false);
   assert.equal(calls.contentRequests.length, requests);
+});
+
+test("索引搜索与按需正文完整穿过后台，不被替换为通用成功结果", async () => {
+  for (const [command, contentResponse] of [
+    ["search-conversation", { generation: "run", items: [{ markerKey: "index:a" }], total: 1, hasMore: false }],
+    ["get-index-chapter", { ok: true, revision: 4, contents: [{ type: "block", text: "正文" }] }]
+  ]) {
+    const calls = await runAction({ storedWindow: null, contentResponse });
+    const response = await calls.command({ type: "POLARIS_WINDOW_COMMAND", command, expectedTabId: 42, expectResult: true });
+    assert.deepEqual(JSON.parse(JSON.stringify(response)), contentResponse);
+  }
 });
 
 test("诊断命令将内容页的导出状态返回侧栏", async () => {

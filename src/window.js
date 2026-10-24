@@ -8,8 +8,9 @@ import { createMarkerStreamingIndicator } from "./marker-motion-suppression.js";
 import { createSidepanelReleaseNotice } from "./sidepanel-release-notice.js";
 import { didWindowConversationChange } from "./window-source-state.js";
 import { releaseNotesForUpdate } from "./release-notes.js";
-import { SUPPORTED_PLATFORMS, createPlatformLinks } from "./supported-platforms.js";
+import { SUPPORTED_PLATFORMS, createPlatformLinks, rememberPlatform } from "./supported-platforms.js";
 import { createSidepanelOnboarding } from "./sidepanel-onboarding.js";
+import { createVirtualList } from "./virtual-list.js";
 
 export function initializeSidepanel() {
   const SYSTEM_THEME_QUERY = "(prefers-color-scheme: dark)";
@@ -27,12 +28,15 @@ export function initializeSidepanel() {
     returnScrollY: 0,
     returnFocusTarget: "",
     markerQuery: "",
+    searchScope: "full",
+    fullSearch: { key: "", items: [], total: 0, hasMore: false, loading: false },
     chapterQuery: "",
     chaptersStatus: "idle",
     treeChapters: [],
     imageUrls: [],
     imageIndex: 0,
     sourceTabId: null,
+    lastUsedPlatform: "",
     routeKey: "",
     navigationScrollY: 0,
     pendingModeTarget: "",
@@ -49,6 +53,15 @@ export function initializeSidepanel() {
   });
   const chapterReader = createSidepanelChapterReader({
     document, locale,
+    async onLoadChapter(markerKey, format = "blocks") {
+      const routeKey = state.routeKey; const tab = state.sourceTabId;
+      const generation = state.snapshot?.conversationIndex?.generation;
+      const result = await chrome.runtime.sendMessage({ type: "POLARIS_WINDOW_COMMAND", command: "get-index-chapter", markerKey, format,
+        expectedTabId: tab, expectedRouteKey: routeKey, generation, expectResult: true });
+      if (state.routeKey !== routeKey || state.sourceTabId !== tab || state.snapshot?.conversationIndex?.generation !== generation || !result?.ok) throw new Error("Source unavailable");
+      if (format === "blocks" && result.revision !== state.snapshot?.conversationIndex?.revision) throw new Error("Source updated");
+      return result;
+    },
     onQueryChange(query) {
       state.chapterQuery = query;
       const input = root.querySelector(".window-search input");
@@ -59,14 +72,88 @@ export function initializeSidepanel() {
       await navigator.clipboard.writeText(text);
     },
     async onLocate(markerKey) {
+      if (state.snapshot?.conversationIndex) return locateIndexed(markerKey, "jump-to-chapter");
       const response = await chrome.runtime.sendMessage({
         type: "POLARIS_WINDOW_COMMAND", command: "jump-to-chapter", markerKey,
-        expectedTabId: state.sourceTabId, expectedRouteKey: state.routeKey, expectResult: true
+        expectedTabId: state.sourceTabId, expectedRouteKey: state.routeKey,
+        generation: state.snapshot?.conversationIndex?.generation, expectResult: true
       });
-      if (!response?.ok) throw new Error("Source unavailable");
+      if (!response?.ok) {
+        if (state.snapshot?.conversationIndex) { showIndexNotice(response?.reason); return; }
+        throw new Error("Source unavailable");
+      }
     }
   });
   let sourceRetryTimer = 0;
+  let virtualMarkers = null;
+  let virtualMarkerElement = null;
+  let searchTimer = 0;
+  let noticeTimer = 0;
+  let locateSequence = 0;
+
+  function cancelIndexedLocation() { locateSequence++; }
+
+  function resetVirtualMarkers() {
+    virtualMarkers?.dispose(); virtualMarkers = null; virtualMarkerElement = null;
+  }
+
+  function showIndexNotice(reason) {
+    document.querySelector('.index-notice')?.remove();
+    const copies = {
+      "not-mounted": ["消息已读取，但暂时无法打开正文，请重试。", "The message has been read, but its content could not be opened. Please try again."],
+      "native-list-unavailable": ["暂时无法接入这版 ChatGPT 的历史列表，请刷新页面后重试。", "This ChatGPT history list is not supported yet. Refresh the page and try again."],
+      "native-load-failed": ["历史原文读取失败，请稍后重试。", "Earlier messages could not be loaded. Please try again."],
+      "native-load-timeout": ["原文暂未显示，请重试。", "The original message has not appeared yet. Please try again."],
+      "anchor-not-found": ["已找到消息，但暂时无法定位到这一段。", "The message was found, but this section could not be located."],
+      "ambiguous-anchor": ["这条消息中有多处相同内容，暂时无法确定要跳转的位置。", "This message has several matching sections, so the exact location could not be determined."],
+      "ambiguous-message": ["有多条消息包含相同内容，暂时无法确定要跳转的位置。", "Several messages have the same content, so the exact message could not be determined."],
+      "target-missing": ["目录内容已更新，请重新选择要跳转的位置。", "The outline has changed. Please select the section again."],
+      "source-changed": ["对话已切换，请在当前对话中重新选择目录。", "The conversation has changed. Please select a section in the current conversation."]
+    };
+    const copy = copies[reason] || ["暂时无法跳转，请稍后重试。", "Could not jump to this message. Please try again."];
+    const notice = element("p", "index-notice", copy[locale === "zh" ? 0 : 1]);
+    notice.setAttribute("role", "status"); document.body.append(notice);
+    window.clearTimeout(noticeTimer); noticeTimer = window.setTimeout(() => notice.remove(), 3000);
+    return notice;
+  }
+
+  async function locateIndexed(markerKey, command = "jump-to-marker") {
+    cancelIndexedLocation();
+    document.querySelector('.index-notice')?.remove();
+    window.clearTimeout(noticeTimer); noticeTimer = 0;
+    const requestId = locateSequence;
+    const tab = state.sourceTabId; const route = state.routeKey;
+    const generation = state.snapshot?.conversationIndex?.generation;
+    const response = await chrome.runtime.sendMessage({ type: "POLARIS_WINDOW_COMMAND", command, markerKey,
+      expectedTabId: tab, expectedRouteKey: route, generation, expectResult: true });
+    if (requestId !== locateSequence || state.sourceTabId !== tab || state.routeKey !== route || state.snapshot?.conversationIndex?.generation !== generation) return;
+    if (response?.ok) return;
+    showIndexNotice(response?.reason);
+  }
+
+  function requestFullSearch(append = false) {
+    const index = state.snapshot?.conversationIndex;
+    if (!index || state.searchScope !== "full" || !state.markerQuery.trim()) return;
+    const key = JSON.stringify([state.sourceTabId, state.routeKey, index.generation, index.revision, state.markerQuery]);
+    if (!append && state.fullSearch.key === key) return;
+    const offset = append ? state.fullSearch.items.length : 0;
+    state.fullSearch = { ...state.fullSearch, key, loading: true, ...(append ? {} : { items: [], total: 0, hasMore: false }) };
+    window.clearTimeout(searchTimer);
+    const query = state.markerQuery;
+    const route = state.routeKey; const tab = state.sourceTabId;
+    searchTimer = window.setTimeout(async () => {
+      try {
+        const result = await chrome.runtime.sendMessage({ type: "POLARIS_WINDOW_COMMAND", command: "search-conversation", query, offset,
+          expectedTabId: tab, expectedRouteKey: route, generation: index.generation, expectResult: true });
+        if (state.fullSearch.key !== key || state.routeKey !== route || state.sourceTabId !== tab || state.snapshot?.conversationIndex?.generation !== result?.generation) return;
+        state.fullSearch = { key, items: append ? [...state.fullSearch.items, ...result.items] : result.items,
+          total: result.total, hasMore: result.hasMore, loading: false };
+        render();
+      } catch {
+        if (state.fullSearch.key === key) { state.fullSearch.loading = false; render(); }
+      }
+    }, append ? 0 : 150);
+  }
 
   function changeContentMode(nextTab) {
     const previousTab = state.activeTab;
@@ -81,6 +168,7 @@ export function initializeSidepanel() {
   }
 
   function selectContentTab(key) {
+    cancelIndexedLocation();
     if (key === state.activeTab) {
       if (key === "navigation") state.pendingModeTarget = "";
       return;
@@ -135,7 +223,8 @@ export function initializeSidepanel() {
 
   function requestChapters() {
     state.chaptersStatus = "loading";
-    send({ command: "request-chapters" });
+    send({ command: "request-chapters", expectedTabId: state.sourceTabId, expectedRouteKey: state.routeKey,
+      generation: state.snapshot?.conversationIndex?.generation });
   }
 
   function sendReady() {
@@ -206,6 +295,7 @@ export function initializeSidepanel() {
   }
 
   function render() {
+    if (state.activeTab !== "navigation") resetVirtualMarkers();
     const snapshot = state.snapshot || { markerItems: [], hasConversation: false, supportedRoute: false };
     const isLoading = !state.snapshot;
     const existingBody = root.querySelector(":scope > .window-body");
@@ -277,6 +367,7 @@ export function initializeSidepanel() {
 
   function openSettings() {
     if (state.activeTab === "settings") return;
+    cancelIndexedLocation(); state.pendingModeTarget = "";
     rememberViewState();
     state.previousContentTab = state.activeTab;
     state.activeTab = "settings";
@@ -373,9 +464,20 @@ export function initializeSidepanel() {
 
     const search = element("div", "window-search");
     const isChapterSearch = state.activeTab === "chapters";
+    const isFullSearch = !isChapterSearch && snapshot.conversationIndex && state.searchScope === "full";
+    if (!isChapterSearch && snapshot.conversationIndex) {
+      const scope = element("select", "index-search-scope");
+      scope.setAttribute("aria-label", locale === "zh" ? "搜索范围" : "Search scope");
+      for (const [value, text] of [["full", locale === "zh" ? "全文" : "Full text"], ["titles", locale === "zh" ? "目录" : "Titles"]]) {
+        const option = element("option", "", text); option.value = value; scope.append(option);
+      }
+      scope.value = state.searchScope;
+      scope.addEventListener("change", () => { state.searchScope = scope.value; state.fullSearch.key = ""; render(); });
+      search.append(scope);
+    }
     search.setAttribute("aria-label", isChapterSearch
       ? (locale === "zh" ? "搜索章节" : "Search chapters")
-      : (locale === "zh" ? "搜索 Maker" : "Search Makers"));
+      : isFullSearch ? (locale === "zh" ? "搜索全部消息" : "Search all messages") : (locale === "zh" ? "搜索 Maker" : "Search Makers"));
     const input = document.createElement("input");
     input.setAttribute("aria-label", search.getAttribute("aria-label"));
     input.type = "text";
@@ -386,7 +488,7 @@ export function initializeSidepanel() {
     input.lang = locale === "zh" ? "zh-CN" : "en";
     input.placeholder = isChapterSearch
       ? (locale === "zh" ? "搜索章节" : "Search chapters")
-      : (locale === "zh" ? "搜索 Maker" : "Search Makers");
+      : isFullSearch ? (locale === "zh" ? "搜索全部消息" : "Search all messages") : (locale === "zh" ? "搜索 Maker" : "Search Makers");
     input.value = state.activeTab === "chapters" ? state.chapterQuery : state.markerQuery;
     search.dataset.query = input.value;
     const clear = element("button", "clear-search");
@@ -419,7 +521,7 @@ export function initializeSidepanel() {
       }
     });
     search.append(input, clear);
-    if (!isChapterSearch && state.markerQuery.trim()) {
+    if (!isChapterSearch && state.markerQuery.trim() && !snapshot.conversationIndex) {
       const results = element("div", "window-search-results");
       results.setAttribute("role", "list");
       results.setAttribute("aria-label", locale === "zh" ? "搜索结果" : "Search results");
@@ -475,8 +577,8 @@ export function initializeSidepanel() {
 
     const tabs = element("nav", "window-tabs");
     [
-      ["navigation", locale === "zh" ? "导航" : "Navigation"],
-      ["chapters", locale === "zh" ? "章节" : "Chapters"]
+      ["navigation", t("tab.navigation")],
+      ["chapters", t("tab.chapters")]
     ].forEach(([key, label]) => {
       const button = element("button", `window-tab${state.activeTab === key ? " is-active" : ""}`);
       button.type = "button";
@@ -535,6 +637,33 @@ export function initializeSidepanel() {
     const panel = existingPanel instanceof HTMLElement
       ? existingPanel
       : element("div", "navigation-panel");
+    if (snapshot.conversationIndex && snapshot.hasConversation) {
+      windowMarkerListReconciler.reset(); markerStreamingIndicator.reset();
+      const searching = Boolean(state.markerQuery.trim());
+      if (searching && state.searchScope === "full") requestFullSearch();
+      const items = !searching ? snapshot.markerItems || []
+        : state.searchScope === "full" ? state.fullSearch.items
+          : filterItems(snapshot.allMarkerItems || snapshot.markerItems || [], state.markerQuery);
+      let list = panel.querySelector(':scope > .maker-list');
+      if (!list) { list = element("div", "maker-list"); panel.replaceChildren(list); }
+      if (virtualMarkerElement !== list) {
+        resetVirtualMarkers(); virtualMarkerElement = list;
+        virtualMarkers = createVirtualList({ element: list, createRow: renderIndexedRow, updateRow: updateIndexedRow, estimateHeight: searching ? 100 : 48 });
+      }
+      virtualMarkers.setItems(items);
+      panel.querySelector(':scope > .index-list-status')?.remove();
+      const status = element("div", "index-list-status"); status.setAttribute("role", "status");
+      status.textContent = searching && state.searchScope === "full"
+        ? state.fullSearch.loading ? (locale === "zh" ? "正在搜索…" : "Searching…") : (locale === "zh" ? `${state.fullSearch.total} 条消息匹配` : `${state.fullSearch.total} matching messages`)
+        : indexStatusText(snapshot.conversationIndex);
+      if (searching && state.searchScope === "full" && state.fullSearch.hasMore) {
+        const more = element("button", "secondary-button", locale === "zh" ? "加载更多结果" : "More results"); more.type = "button"; more.disabled = state.fullSearch.loading;
+        more.addEventListener("click", () => { requestFullSearch(true); render(); }); status.append(more);
+      }
+      panel.append(status);
+      return panel;
+    }
+    resetVirtualMarkers();
     const awaitingConversation = !snapshot.hasConversation
       && (snapshot.supportedRoute || activePlatform(snapshot));
     if (isLoading || snapshot.loading || awaitingConversation) {
@@ -558,7 +687,7 @@ export function initializeSidepanel() {
       const empty = element("div", "empty-state");
       empty.append(element("h1", "empty-title", t("empty.title")));
       empty.append(element("p", "empty-copy", t("empty.copy")));
-      empty.append(createPlatformLinks(document, chrome, { label: t("empty.platforms") }));
+      empty.append(createPlatformLinks(document, chrome, { label: t("empty.platforms"), lastUsedLabel: t("empty.lastUsedPlatform") }));
       panel.replaceChildren(empty);
       return panel;
     }
@@ -615,6 +744,97 @@ export function initializeSidepanel() {
     });
     loading.append(status, list);
     return loading;
+  }
+
+  function updateIndexedRow(row, item) {
+    row.indexItem = item;
+    row.className = `maker-card maker-card-${item.type === "result" ? "ai index-search-result" : item.type}${item.isExpanded ? " is-expanded" : ""}${item.markerKey && item.markerKey === state.snapshot?.activeMarkerKey ? " is-active" : ""}`;
+    row.dataset.markerRenderKey = item.key;
+    row.setAttribute("aria-label", item.title || item.preview || "Maker");
+    const signature = JSON.stringify([item.title, item.preview, item.parts, item.count, item.isExpanded, item.remainder]);
+    if (row.dataset.indexSignature === signature) return;
+    row.dataset.indexSignature = signature;
+    const copy = element("span", "maker-copy");
+    if (item.type === "result") {
+      copy.append(element("span", "index-result-meta", `${item.role === "user" ? (locale === "zh" ? "你" : "You") : "ChatGPT"} · ${item.count}`));
+      const snippet = element("span", "index-result-snippet");
+      for (const part of item.parts || []) snippet.append(element(part.match ? "mark" : "span", "", part.text));
+      copy.append(snippet);
+    } else copy.append(element("span", "maker-title", item.title || item.preview || "Maker"));
+    row.replaceChildren(copy);
+    if (item.type === "user" || item.type === "fold") {
+      const chevron = element("span", "maker-chevron"); chevron.setAttribute("aria-hidden", "true"); row.append(chevron);
+      row.setAttribute("aria-expanded", String(Boolean(item.isExpanded)));
+    }
+  }
+
+  function renderIndexedRow(item) {
+    const row = element("button", "maker-card"); row.type = "button";
+    row.addEventListener("click", () => {
+      const current = row.indexItem;
+      if (current.type === "user") send({ command: "toggle-user-group", groupKey: current.groupKey });
+      else if (current.type === "fold") send({ command: "toggle-fold-group", foldKey: current.foldKey });
+      else if (current.type === "earlier") send({ command: "toggle-earlier-groups" });
+      else void locateIndexed(current.markerKey).catch(showIndexNotice);
+    });
+    updateIndexedRow(row, item);
+    return row;
+  }
+
+  function indexStatusText(index) {
+    if (!index) return locale === "zh" ? "仅显示 ChatGPT 页面上已加载的内容" : "Showing messages already loaded in ChatGPT";
+    const count = Number(index.count) || 0;
+    if (index.phase === "complete") return locale === "zh" ? `已读取全部 ${count} 条消息` : `All ${count} messages have been read`;
+    if (["partial", "error"].includes(index.phase)) return locale === "zh" ? `已读取 ${count} 条消息，部分历史暂时无法读取` : `${count} messages are ready. Some earlier messages could not be read.`;
+    return locale === "zh" ? `已读取 ${count} 条消息，正在读取更早的对话…` : `${count} messages are ready. Reading earlier messages…`;
+  }
+
+  function renderIndexSettings(snapshot) {
+    const section = element("section", "settings-section index-settings");
+    section.append(element("h2", "settings-section-title", locale === "zh" ? "长对话阅读" : "Long conversations"));
+    section.append(element("p", "index-current-label", locale === "zh" ? "当前对话" : "Current chat"));
+    section.append(element("h3", "index-current-title"));
+    const status = element("p", "index-current-status"); status.setAttribute("role", "status"); section.append(status);
+    const progress = element("progress", "index-progress"); progress.setAttribute("aria-label", locale === "zh" ? "读取进度" : "Reading progress"); section.append(progress);
+    const cards = element("fieldset", "index-mode-cards");
+    const legend = element("legend", "sr-only", locale === "zh" ? "读取范围" : "Messages to read"); cards.append(legend);
+    for (const [mode, title, description] of [
+      ["default", locale === "zh" ? "跟随 ChatGPT" : "Follow ChatGPT", locale === "zh" ? "只显示页面上已加载的内容。向上滚动 ChatGPT 可查看更多。" : "Show the messages already on the page. Scroll up in ChatGPT to see more."],
+      ["complete", locale === "zh" ? "读取完整对话" : "Read the whole conversation", locale === "zh" ? "自动读取全部历史消息，生成完整目录，并支持搜索所有消息。" : "Read all messages in this chat for a complete outline and search across the whole conversation."]
+    ]) {
+      const card = element("label", "index-mode-card");
+      const input = document.createElement("input"); input.type = "radio"; input.name = "chatgpt-history-mode"; input.value = mode;
+      input.dataset.settingsFocus = `history-${mode}`;
+      input.addEventListener("change", () => {
+        if (input.checked) send({ command: "update-config", patch: { chatgptHistoryMode: mode } });
+      });
+      const copy = element("span", "index-mode-copy"); copy.append(element("strong", "", title), element("span", "", description));
+      card.append(input, copy); cards.append(card);
+    }
+    section.append(cards);
+    const retry = settingsCommandButton(locale === "zh" ? "重新读取" : "Read again", "retry-conversation-index"); retry.dataset.indexRetry = "true";
+    section.append(retry); syncIndexSettings(section, snapshot);
+    return section;
+  }
+
+  function syncIndexSettings(panel, snapshot) {
+    const index = snapshot.conversationIndex;
+    const section = panel.matches(".index-settings") ? panel : panel.querySelector(".index-settings");
+    if (!section) return;
+    section.querySelector(".index-current-title").textContent = snapshot.conversationTitle || (locale === "zh" ? "当前对话" : "Current chat");
+    section.querySelector(".index-current-status").textContent = snapshot.platform !== "chatgpt"
+      ? (locale === "zh" ? "读取完整对话目前支持 ChatGPT" : "Reading the whole conversation is currently available for ChatGPT") : indexStatusText(index);
+    section.querySelectorAll('input[type="radio"]').forEach((input) => {
+      input.checked = input.value === (snapshot.config?.chatgptHistoryMode || "default");
+      input.closest("label").classList.toggle("is-selected", input.checked);
+    });
+    const progress = section.querySelector("progress");
+    progress.hidden = !index;
+    if (index?.total != null) { progress.max = index.total || 1; progress.value = index.total || 1; }
+    else progress.removeAttribute("value");
+    const retry = section.querySelector("[data-index-retry]");
+    retry.hidden = !index || !["partial", "error"].includes(index.phase);
+    retry.disabled = Date.now() < (index?.retryAt || 0);
   }
 
   function isPotentialConversationRoute(routeKey) {
@@ -750,17 +970,19 @@ export function initializeSidepanel() {
 
   function renderChapters(snapshot) {
     return chapterReader.update({
-      conversationKey: `${state.sourceTabId}:${state.routeKey}`,
+      conversationKey: `${state.sourceTabId}:${state.routeKey}:${snapshot.conversationIndex?.generation || "dom"}`,
       nodes: state.treeChapters,
       preferredKey: snapshot.activeMarkerKey,
       query: state.chapterQuery,
-      ready: state.chaptersStatus === "ready" || !snapshot.hasConversation
+      ready: state.chaptersStatus === "ready" || !snapshot.hasConversation,
+      virtualized: Boolean(snapshot.conversationIndex),
+      contentRevision: snapshot.conversationIndex?.revision || 0
     });
   }
 
   function renderSettings(snapshot, existingPanel) {
     if (existingPanel?.dataset.settingsPage === state.settingsPage) {
-      if (state.settingsPage === "preferences") syncSettingsPreferences(existingPanel, snapshot);
+      if (state.settingsPage === "preferences") { syncSettingsPreferences(existingPanel, snapshot); syncIndexSettings(existingPanel, snapshot); }
       return existingPanel;
     }
     const panel = state.settingsPage === "preferences" ? renderSettingsPreferences(snapshot) : element("div", "settings-panel");
@@ -811,9 +1033,10 @@ export function initializeSidepanel() {
   function renderSettingsPreferences(snapshot) {
     const panel = element("div", "settings-panel");
     const config = snapshot.config || {};
+    panel.append(renderIndexSettings(snapshot));
     const displaySection = element("section", "settings-section");
-    displaySection.appendChild(element("h2", "settings-section-title", locale === "zh" ? "列表显示" : "List display"));
-    [["maxVisibleUserGroups", locale === "zh" ? "用户分组上限" : "User group limit", 1, 80], ["foldThreshold", locale === "zh" ? "折叠阈值" : "Fold threshold", 2, 80]].forEach(([key, label, min, max]) => {
+    displaySection.appendChild(element("h2", "settings-section-title", locale === "zh" ? "目录显示" : "Outline display"));
+    [["maxVisibleUserGroups", locale === "zh" ? "显示最近几轮对话" : "Recent turns to show", 1, 80], ["foldThreshold", locale === "zh" ? "每组目录条数" : "Outline items per group", 2, 80]].forEach(([key, label, min, max]) => {
       const wrapper = element("label", "settings-range");
       const line = element("span", "settings-range-line");
       line.append(element("span", "settings-label", label), element("output", "settings-value", String(config[key] ?? min)));
@@ -1105,7 +1328,11 @@ export function initializeSidepanel() {
     if (message.type === "POLARIS_WINDOW_STATE" && message.snapshot) {
       const nextTabId = message.tabId ?? null;
       const changedConversation = didWindowConversationChange(state, message);
-      if (changedConversation) {
+      const changedIndex = state.snapshot?.conversationIndex?.generation !== message.snapshot.conversationIndex?.generation;
+      if (changedConversation || changedIndex) {
+        cancelIndexedLocation();
+        state.markerQuery = ""; state.chapterQuery = ""; state.fullSearch = { key: "", items: [], total: 0, hasMore: false, loading: false };
+        window.clearTimeout(searchTimer); resetVirtualMarkers();
         state.treeChapters = [];
         state.imageUrls = [];
         state.imageIndex = 0;
@@ -1116,6 +1343,13 @@ export function initializeSidepanel() {
       state.sourceTabId = nextTabId;
       state.routeKey = message.snapshot.routeKey || "";
       state.snapshot = message.snapshot;
+      const platform = activePlatform(message.snapshot);
+      if (message.snapshot.supportedRoute && platform && state.lastUsedPlatform !== platform.key) {
+        state.lastUsedPlatform = platform.key;
+        void rememberPlatform(chrome, platform.key).catch((error) => {
+          console.warn("[Polaris] Last-used platform could not be saved.", error);
+        });
+      }
       if (!message.snapshot.hasConversation && state.pendingModeTarget === "chapters") {
         state.pendingModeTarget = "";
         changeContentMode("chapters");
@@ -1134,6 +1368,7 @@ export function initializeSidepanel() {
     if (message.type === "POLARIS_WINDOW_CHAPTERS") {
       if (message.tabId != null && message.tabId !== state.sourceTabId) return;
       if (message.routeKey && message.routeKey !== state.routeKey) return;
+      if (message.generation && message.generation !== state.snapshot?.conversationIndex?.generation) return;
       state.treeChapters = Array.isArray(message.treeChapters) ? message.treeChapters : [];
       state.chaptersStatus = "ready";
       if (state.pendingModeTarget === "chapters" && state.activeTab === "navigation") {

@@ -17,7 +17,7 @@ test("WXT produces self-contained content scripts without volatile loaders", asy
     const source = await readFile(new URL(`../dist/${file}`, import.meta.url), "utf8");
     assert.doesNotMatch(source, /\bimport\s*\(|\bimport\s+.+\s+from\s/);
     assert.doesNotMatch(source, /@vite\/client|localhost:3000|127\.0\.0\.1:3000/);
-    assert.ok(source.includes("Navigation"));
+    assert.ok(source.includes("Table of Contents"));
     assert.equal(source.includes("PolarisI18n"), false);
     assert.ok(source.includes("__POLARIS_CONTENT_SCRIPT_ACTIVE__"));
   }

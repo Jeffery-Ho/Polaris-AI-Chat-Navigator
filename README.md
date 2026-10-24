@@ -59,32 +59,32 @@ DeepSeek navigation reads only mounted messages inside its virtual list. Final-a
 
 ## Features
 
-- Click the browser extension icon to open the Polaris browser sidepanel. It follows the active supported tab and contains navigation, Chapter View, and Settings.
-- Maker navigation is generated only from currently mounted user and AI response DOM. A route change removes the previous list immediately; only a later non-Polaris page mutation can populate the new list. DOM removal also removes its Makers, and a DOM remount receives new runtime keys.
+- Click the browser extension icon to open the Polaris browser sidepanel. It follows the active supported tab and contains **Table of Contents**, **Outline**, and Settings.
+- In the default mode, Maker navigation is generated only from currently mounted user and AI response DOM. A route change removes the previous list immediately; only a later non-Polaris page mutation can populate the new list. DOM removal also removes its Makers, and a DOM remount receives new runtime keys.
 - Progressive Maker rendering begins during streaming output as soon as the first non-empty supported marker is available; fixed 120ms render batches reuse existing Maker nodes and update only changed items, preserving list scrolling, focus, hover, and manual collapse state. Wheel, trackpad, or list-drag input on a Maker or group card immediately takes control from temporary Active Maker positioning, so any Maker can remain outside the list viewport while streaming continues.
 - Click-to-jump navigation, active-section highlighting, and a scrollable marker queue.
-- Sidepanel Chapter View reads as an expandable outline. Each bullet opens chapter actions: focus a subtree, locate its source, copy the chapter, or copy all chapter content. Search and returning to an ancestor preserve the reading state within the panel session.
+- Sidepanel Outline reads as an expandable tree. Each bullet opens chapter actions: focus a subtree, locate its source, copy the chapter, or copy all chapter content. Search and returning to an ancestor preserve the reading state within the panel session.
 - User Maker tooltips show the first message image; clicking that image opens an in-page preview, with previous/next navigation for multi-image messages. The Maker capsule itself remains an expand/collapse control.
 - Visible titles inside AI markers, user groups, and the floating active marker are left-aligned; user group capsules remain on the queue's right edge while AI markers and folded stacks remain on the left.
 - Platform-specific marker filters for H1, H2, H3, H4, bold text, unordered lists, and ordered lists.
 - Settings synchronization through `chrome.storage.sync`.
-- Settings opens six separate icon cards: **Preferences**, **Help and diagnostics**, **Feedback**, **What's New**, **About**, and **Privacy Policy**. The policy opens directly from Settings in a new tab. Back and Escape return through the menu, preserving the previous navigation or chapter view, search focus, and reading position. Preferences keep live controls during conversation updates.
+- Settings opens six separate icon cards: **Preferences**, **Help and diagnostics**, **Feedback**, **What's New**, **About**, and **Privacy Policy**. The policy opens directly from Settings in a new tab. Back and Escape return through the menu, preserving the previous Table of Contents or Outline view, search focus, and reading position. Preferences keep live controls during conversation updates.
 - **About** centers the 40px app icon, name, and actual version; adds a short product introduction, developer credit, and thanks; and lists all 11 supported platforms with their bundled icons.
 - **Feedback** keeps GitHub Issues and developer email as text rows, with personal X and Xiaohongshu profiles in a separate horizontal icon row with hover hints and accessible labels. Profile links open in a new tab.
 - Light and dark adaptive glass styling, with lightweight blur and saturation on Maker cards and the floating Active Maker while controls and search retain the full displacement effect.
 - Native browser scrolling on Maker, user-group, and fold cards, without custom wheel animation or a transparent extended hit area.
-- Fuzzy title search for both the navigation marker queue and Chapter View, with `Cmd/Ctrl+F` focusing the current search box.
+- Fuzzy title search for both Table of Contents and Outline, with `Cmd/Ctrl+F` focusing the current search box.
 - Long marker queues are grouped into stacks of `N` markers (default 20). Each stack starts expanded and shows its first title with the remaining count; clicking its card manually collapses or expands the Maker rows.
 - Currently mounted user maker groups show the latest 20 groups by default, with search covering those mounted groups. Every group starts expanded, including the latest, previous, and newly streamed groups; an explicit click can manually collapse its contents.
 - An active Maker does not change its stack or user group state. Manual collapse keeps the Maker selected, and dragging more than 4px from any Maker or group card scrolls the list without triggering that card's click action.
 - Pointer dragging captures the active pointer and recovers after window blur, page hiding, lost capture, route changes, or a narrow-viewport boundary; an interrupted control drag rolls back its unsaved position.
 - **Help and diagnostics** provides four illustrated steps for sending a redacted, current-tab diagnostic log. **Send diagnostics** downloads the JSON and opens a pre-addressed email; attach the downloaded file manually. **Download diagnostics** saves the file without opening email.
-- **Chapter View**, which organizes AI response content by marker section for convenient reading and copying on every supported platform.
+- **Outline**, which organizes AI response content by marker section for convenient reading and copying on every supported platform.
 - A heart-shaped support entry at the right edge of the About & Settings header, opening the same-origin [Polaris support entry](https://jeffery-ho.github.io/polaris-landing/entry/extension/) in a new tab. The entry preserves the fixed `polaris_extension` source without relying on UTM parameters; the landing page loads optional GA4 and SLS analytics only after the visitor explicitly consents.
 - Update notes place the same heart-shaped support entry as the leftmost feedback action, opening the support page in a new tab.
-- While Chapter View is open, its modal blocks arrow, Home, and End keys from changing the underlying main tab; `Shift + ← / →` continues to switch chapters outside editable fields.
-- Chapter View safely preserves rendered Markdown structure, including headings, nested and task lists, quotes, code, links, images, and wide tables.
-- Complete raw Markdown pipe tables are also formatted in Chapter View when a source page leaves them unrendered.
+- While Outline is open, its modal blocks arrow, Home, and End keys from changing the underlying main tab; `Shift + ← / →` continues to switch chapters outside editable fields.
+- Outline safely preserves rendered Markdown structure, including headings, nested and task lists, quotes, code, links, images, and wide tables.
+- Complete raw Markdown pipe tables are also formatted in Outline when a source page leaves them unrendered.
 
 ## Settings
 
@@ -100,18 +100,30 @@ Preferences are saved to `chrome.storage.sync`.
 
 The Diagnostics section keeps a bounded session-only event log in the current tab. It records version, coarse platform/browser information, viewport and DPR, drag lifecycle, route/render counts, and error names. It excludes AI text, titles, full URLs, account information, prompts, and stack traces.
 
-## Chapter View
+## Outline
 
-- Click **Chapters** in the Polaris sidepanel.
+- Click **Outline** in the Polaris sidepanel.
 - Available on every supported platform: ChatGPT, Claude, Gemini, Grok, Doubao, Kimi, Qwen, Yuanbao, Xiaohongshu Diandian AI, Manus, and DeepSeek.
 - Reads currently mounted conversation content and rebuilds supported rendered Markdown with a strict element and URL allowlist; input fields, sidebars, and the extension's own interface are excluded.
 - Expand chapters inline with the triangle controls. Open a chapter's bullet menu to focus its subtree, locate the original source, or copy content. Use the chapter path to return while preserving the reading position.
-- Search chapter titles from the sidepanel search field, or use `Cmd/Ctrl+F`; `Cmd/Ctrl+Shift+F` opens Chapters. Matching is Unicode-aware and uses the existing fuzzy title search.
+- Search chapter titles from the sidepanel search field, or use `Cmd/Ctrl+F`; `Cmd/Ctrl+Shift+F` opens Outline. Matching is Unicode-aware and uses the existing fuzzy title search.
 - Preserves the current chapter and reading position as a reply updates. Images load from existing `http`/`https` page URLs, with previews and source location available through the existing controls.
+
+## Complete ChatGPT indexing
+
+Preferences offers two mutually exclusive cards: **Follow ChatGPT** (the default) and **Read the whole conversation**. Complete mode reads the current conversation through ChatGPT's same-origin session, reuses native responses, and follows older-page cursors. It supports both selected-branch `messages` responses and legacy `mapping` trees. The real conversation title follows API metadata and subsequent page renames.
+
+The index contains the current branch's public user and assistant text, code, and tables. Hidden reasoning, internal tools, other branches, attachment downloads, and OCR are excluded. Full-text search is normalized Unicode substring search; title search retains the existing fuzzy matching. Results include original-text highlights and are paginated independently of visible or folded rows. Outline bodies are requested only for visible expanded content.
+
+Polaris virtualizes its own directory, search results, and outline blocks. In complete mode, a loading cover over the ChatGPT conversation displays the real title and message count while data and the native conversation list are prepared. Reading all data alone does not dismiss the cover. Users can retry a failure or open the partial chat immediately; the original input and draft are retained.
+
+Table of Contents and full-text result clicks stay in the ChatGPT conversation and never switch to Outline. Normal navigation is silent; only location failures display a notice, which clears when another jump starts. The native adapter requests full history through ChatGPT's own loader, then asks its virtual list to reveal the target message before locating a heading or table. These private host interfaces are validated at runtime; unavailable, changed, or ambiguous interfaces return an explicit failure. Polaris does not splice or replace React-owned conversation messages. Source location matches complete table headers and ignores controls in message text. Unknown totals never appear as a completion percentage. Shared and temporary chats fall back to mounted DOM navigation. The feature currently supports ChatGPT only; payment and licensing are not included.
+
+Conversation text stays in memory until the conversation changes, the page closes or refreshes, or complete mode is disabled. It is never written to browser storage or synchronized. Authentication remains inside the page context, and the background script only forwards navigation metadata and requested content.
 
 ## Privacy
 
-Polaris: AI Chat Navigator processes only currently mounted AI response content locally in your browser and does not transmit it to the developer or third-party servers. It does not retain Maker conversation history across page refreshes, routes, or DOM removal. Diagnostic export is user-initiated: the extension keeps only a bounded, redacted current-tab session log, downloads it locally, and opens a `mailto:` draft only when requested; it does not upload the log or attach it automatically. The separate support page only loads optional Google Analytics and Aliyun SLS after the visitor explicitly consents, and never sends AI conversation content or extension settings. See the [Privacy Policy](https://jeffery-ho.github.io/Polaris-AI-Chat-Navigator/privacy-policy.html) for details.
+Polaris: AI Chat Navigator processes conversation content locally in your browser and does not transmit it to the developer or third-party servers. Default mode reads mounted DOM. Opt-in complete ChatGPT indexing requests the current conversation from ChatGPT and retains public message text in memory across DOM removal, clearing it on refresh, conversation changes, or disabling the feature. Conversation content and authentication credentials are not stored or synchronized. Diagnostic export is user-initiated: the extension keeps only a bounded, redacted current-tab session log, downloads it locally, and opens a `mailto:` draft only when requested; it does not upload the log or attach it automatically. The separate support page only loads optional Google Analytics and Aliyun SLS after the visitor explicitly consents, and never sends AI conversation content or extension settings. See the [Privacy Policy](https://jeffery-ho.github.io/Polaris-AI-Chat-Navigator/privacy-policy.html) for details.
 
 ## Support
 
@@ -123,7 +135,7 @@ Do not commit `dist/` or load `dist.zip` as the extension. The release workflow 
 
 ## Version
 
-Current version: `0.74.2(299)`
+Current version: `0.78.1(309)`
 
 ## License
 
