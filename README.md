@@ -98,7 +98,7 @@ Open **Settings** from the Polaris sidepanel to adjust:
 
 Preferences are saved to `chrome.storage.sync`.
 
-The Diagnostics section keeps a bounded session-only event log in the current tab. It records version, coarse platform/browser information, viewport and DPR, drag lifecycle, route/render counts, and error names. It excludes AI text, titles, full URLs, account information, prompts, and stack traces.
+The Diagnostics section keeps a bounded session-only event log in the current tab. It records version, coarse platform/browser information, viewport and DPR, drag lifecycle, route/render counts, error names, and complete-reading timings (cache restore, index processing, native preparation, total time, and additional history-page requests). It excludes AI text, titles, full URLs, account information, prompts, and stack traces.
 
 ## Outline
 
@@ -111,19 +111,19 @@ The Diagnostics section keeps a bounded session-only event log in the current ta
 
 ## Complete ChatGPT indexing
 
-Preferences offers two mutually exclusive cards: **Follow ChatGPT** (the default) and **Read the whole conversation**. Complete mode reads the current conversation through ChatGPT's same-origin session, reuses native responses, and follows older-page cursors. It supports both selected-branch `messages` responses and legacy `mapping` trees. The real conversation title follows API metadata and subsequent page renames.
+Preferences offers two mutually exclusive cards: **Follow ChatGPT** (the default) and **Read the whole conversation**. Complete mode starts ChatGPT's native full-history loader and restores the local parsed index in parallel. It reuses the native loader's validated complete current-branch data instead of independently walking history again; unavailable or changed native data shapes fall back to the existing same-origin cursor reader. It supports both selected-branch `messages` responses and legacy `mapping` trees. The real conversation title follows API metadata and subsequent page renames.
 
 The index contains the current branch's public user and assistant text, code, and tables. Hidden reasoning, internal tools, other branches, attachment downloads, and OCR are excluded. Full-text search is normalized Unicode substring search; title search retains the existing fuzzy matching. Results include original-text highlights and are paginated independently of visible or folded rows. Outline bodies are requested only for visible expanded content.
 
-Polaris virtualizes its own directory, search results, and outline blocks. In complete mode, a loading cover over the ChatGPT conversation displays the real title and message count while data and the native conversation list are prepared. Reading all data alone does not dismiss the cover. Users can retry a failure or open the partial chat immediately; the original input and draft are retained.
+Polaris virtualizes its own directory, search results, and outline blocks. In complete mode, a loading cover over the ChatGPT conversation displays the real title and message count while data and the native conversation list are prepared. Reading all data alone does not dismiss the cover. Users can retry a failure or open the partial chat immediately; the original input and draft are retained. With complete mode on, a page without a conversation shows a card pointing to the chat list; clicking a chat starts reading and shows the cover at once, reusing ChatGPT's own response for that chat, so no page refresh is needed.
 
 Table of Contents and full-text result clicks stay in the ChatGPT conversation and never switch to Outline. Normal navigation is silent; only location failures display a notice, which clears when another jump starts. The native adapter requests full history through ChatGPT's own loader, then asks its virtual list to reveal the target message before locating a heading or table. These private host interfaces are validated at runtime; unavailable, changed, or ambiguous interfaces return an explicit failure. Polaris does not splice or replace React-owned conversation messages. Source location matches complete table headers and ignores controls in message text. Unknown totals never appear as a completion percentage. Shared and temporary chats fall back to mounted DOM navigation. The feature currently supports ChatGPT only; payment and licensing are not included.
 
-Conversation text stays in memory until the conversation changes, the page closes or refreshes, or complete mode is disabled. It is never written to browser storage or synchronized. Authentication remains inside the page context, and the background script only forwards navigation metadata and requested content.
+Complete mode keeps a gzip-compressed parsed snapshot of public messages in the extension's own IndexedDB. Cache entries are isolated by a confirmed account and workspace plus conversation, bounded to 100 MiB, and evicted in least-recently-used order. Unknown identities and private windows skip persistence. Unchanged messages reuse their parsed records; authoritative edits, deletions, order and branch changes replace stale content. Cache restoration alone never completes loading: current data must be validated and the native conversation must be ready. Snapshots are saved asynchronously afterward. **Clear conversation cache** in Preferences removes local snapshots and prevents pending old writes from restoring them. This cache is not synchronized or uploaded. Authentication remains inside the page context and is never cached.
 
 ## Privacy
 
-Polaris: AI Chat Navigator processes conversation content locally in your browser and does not transmit it to the developer or third-party servers. Default mode reads mounted DOM. Opt-in complete ChatGPT indexing requests the current conversation from ChatGPT and retains public message text in memory across DOM removal, clearing it on refresh, conversation changes, or disabling the feature. Conversation content and authentication credentials are not stored or synchronized. Diagnostic export is user-initiated: the extension keeps only a bounded, redacted current-tab session log, downloads it locally, and opens a `mailto:` draft only when requested; it does not upload the log or attach it automatically. The separate support page only loads optional Google Analytics and Aliyun SLS after the visitor explicitly consents, and never sends AI conversation content or extension settings. See the [Privacy Policy](https://jeffery-ho.github.io/Polaris-AI-Chat-Navigator/privacy-policy.html) for details.
+Polaris: AI Chat Navigator processes conversation content locally in your browser and does not transmit it to the developer or third-party servers. Default mode reads mounted DOM. Opt-in complete ChatGPT indexing also caches the current branch's public text and parsed records locally in extension-owned IndexedDB, with a 100 MiB LRU limit and a clearing control in Preferences. Memory is released on refresh, conversation changes, or disabling complete mode; disk snapshots remain until cleared, evicted, or the extension is removed. Conversation caches are not synchronized. Authentication credentials are never persisted or synchronized. Diagnostic export is user-initiated: the extension keeps only a bounded, redacted current-tab session log, downloads it locally, and opens a `mailto:` draft only when requested; it does not upload the log or attach it automatically. The separate support page only loads optional Google Analytics and Aliyun SLS after the visitor explicitly consents, and never sends AI conversation content or extension settings. See the [Privacy Policy](https://jeffery-ho.github.io/Polaris-AI-Chat-Navigator/privacy-policy.html) for details.
 
 ## Support
 
@@ -135,7 +135,7 @@ Do not commit `dist/` or load `dist.zip` as the extension. The release workflow 
 
 ## Version
 
-Current version: `0.78.1(309)`
+Current version: `0.80.0(314)`
 
 ## License
 

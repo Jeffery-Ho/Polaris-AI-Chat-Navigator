@@ -1,6 +1,8 @@
 import { createContentLifecycle } from "./content-lifecycle.js";
 import { createChatGptIndexController } from "./chatgpt-index-controller.js";
+import { createConversationCacheClient } from "./conversation-cache.js";
 import { createChatGptConversationCover } from "./chatgpt-conversation-cover.js";
+import { createLocateFlash } from "./locate-flash.js";
 import { chapterTreeText } from "./sidepanel-chapter-state.js";
 import { mountSettingsPanel } from "./settings-panel.js";
 import { createI18n } from "./i18n.js";
@@ -489,12 +491,18 @@ export function initializeContent() {
     hasStartPoint: (snapshot) => snapshot.headings.length > 0,
     renderSnapshot: (snapshot) => render(snapshot, { suppressMarkerMotion: true })
   });
+  const locateFlash = createLocateFlash({ window, onReport: (outcome) => recordDiagnosticEvent("locate_flash", { outcome }) });
+  const flashLocated = (element, resolve) => locateFlash.flash(element, { theme: document.getElementById(ROOT_ID)?.dataset.pageTheme || "light", resolve });
   const conversationCover = createChatGptConversationCover({ window, locale,
     logoUrl: chrome.runtime.getURL("icons/gpt-voyager-icon-96.png"),
-    onRetry: () => conversationIndex.retry()
+    onRetry: () => conversationIndex.retry(),
+    onDismiss() { syncConversationCover(); publishWindowSnapshot(); },
+    onStateChange() { syncConversationCover(); publishWindowSnapshot(); }
   });
   const conversationIndex = createChatGptIndexController({
     window,
+    cache: createConversationCacheClient(chrome.runtime),
+    onDiagnostics(timings) { recordDiagnosticEvent("conversation_read", timings); },
     bridgeUrl: chrome.runtime.getURL("src/chatgpt-index-bridge.js"),
     onChange() {
       syncConversationCover();
@@ -502,10 +510,13 @@ export function initializeContent() {
       publishWindowSnapshot();
     }
   });
+  const conversationReading = () => conversationCover.isShowing() || conversationCover.isWaiting();
   function syncConversationCover() {
     const theme = document.getElementById(ROOT_ID)?.dataset.pageTheme || "light";
     if (conversationIndex.awaitingConversation()) conversationCover.awaitConversation(theme);
     else conversationCover.update(conversationIndex.snapshot(), theme);
+    // Makers appear with the conversation, not before the cover finishes.
+    document.getElementById(ROOT_ID)?.toggleAttribute("data-conversation-loading", conversationReading());
   }
 
   function isExtensionContextValid() {
@@ -685,6 +696,7 @@ export function initializeContent() {
     state.isExtensionContextInvalidated = true;
     conversationIndex.dispose();
     conversationCover.dispose();
+    locateFlash.cancel();
     lifecycle.dispose();
     delete globalThis[CONTENT_SCRIPT_INSTANCE_KEY];
     lifecycle.clearTimeout(state.scheduled);
@@ -725,6 +737,7 @@ export function initializeContent() {
     if (isTopLevelFrame()) {
       root.classList.add("is-window-managed");
     }
+    root.toggleAttribute("data-conversation-loading", conversationReading());
     return root;
   }
 
@@ -5350,6 +5363,8 @@ export function initializeContent() {
       config: JSON.parse(JSON.stringify(state.config)),
       hasConversation: Boolean(indexed?.items.length || state.markerSourceContainers.length > 0),
       conversationIndex: conversationIndex.snapshot(),
+      conversationLoading: conversationReading(),
+      conversationStalled: conversationCover.isStalled(),
       conversationTitle: conversationIndex.snapshot()?.title || conversationIndex.title(),
       allMarkerItems,
       headings: state.headings.map((heading) => ({
@@ -5516,12 +5531,14 @@ export function initializeContent() {
     if (message.command === "retry-conversation-index") { conversationIndex.retry(); return { ok: true }; }
     if ((message.command === "jump-to-marker" || message.command === "jump-to-chapter") && String(message.markerKey || "").startsWith("index:")) {
       const route = currentRouteKey(); const generation = conversationIndex.snapshot()?.generation;
-      return conversationIndex.ensureLocation(message.markerKey, state.config).then(({ element, reason }) => {
+      // Sidepanel jumps land instantly, then highlight the target at once.
+      return conversationIndex.ensureLocation(message.markerKey, state.config, { instant: true }).then(({ element, reason, fallback }) => {
         if (route !== currentRouteKey() || generation !== conversationIndex.snapshot()?.generation) return { ok: false, reason: "source-changed" };
-        if (!element) return { ok: false, reason };
-        const moved = jumpToMarker({ element }, "smooth");
+        if (!element) { recordDiagnosticEvent("locate_request", { kind: "index", outcome: "not-found", reason }); return { ok: false, reason }; }
+        const moved = jumpToMarker({ element }, "instant");
+        recordDiagnosticEvent("locate_request", { kind: "index", outcome: moved ? "moved" : "scroll-failed", reason: fallback ? "message-fallback" : "" });
         if (moved) {
-          element.animate?.([{ backgroundColor: "rgba(100,140,255,.24)" }, { backgroundColor: "transparent" }], { duration: 1200 });
+          flashLocated(element, () => conversationIndex.resolveTarget(message.markerKey, state.config));
           state.activeMarkerKey = message.markerKey; publishWindowSnapshot();
         }
         return { ok: Boolean(moved), reason: moved ? "" : "scroll-failed" };
@@ -5592,16 +5609,21 @@ export function initializeContent() {
       if (message.expectedRouteKey && message.expectedRouteKey !== currentRouteKey()) return { ok: false };
       const markerKey = String(message.markerKey || "");
       const heading = state.headings.find((item) => markerKeyForHeading(item) === markerKey);
-      if (heading && jumpToHeading(heading)) {
+      if (heading && jumpToHeading(heading, "instant")) {
+        recordDiagnosticEvent("locate_request", { kind: "heading", outcome: "moved" });
+        flashLocated(currentElementForHeading(heading), () => currentElementForHeading(heading));
         state.activeMarkerKey = markerKey;
         updateActiveMarker();
         publishWindowSnapshot();
         return { ok: true };
       }
       const user = state.markerGroups.find((group) => group.user?.markerKey === markerKey)?.user;
-      if (user?.element?.isConnected && jumpToMarker(user, "smooth")) {
+      if (user?.element?.isConnected && jumpToMarker(user, "instant")) {
+        recordDiagnosticEvent("locate_request", { kind: "user", outcome: "moved" });
+        flashLocated(user.element, () => state.markerGroups.find((group) => group.user?.markerKey === markerKey)?.user?.element);
         return { ok: true };
       }
+      recordDiagnosticEvent("locate_request", { kind: heading ? "heading" : user ? "user" : "unknown", outcome: "not-found" });
       return { ok: false };
     }
   }

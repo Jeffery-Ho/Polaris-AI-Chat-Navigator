@@ -71,7 +71,7 @@
     <main>
       <p class="product">Polaris: AI Chat Navigator</p>
       <h1>Privacy Policy</h1>
-      <p class="effective-date">Effective date: October 23, 2026</p>
+      <p class="effective-date">Effective date: October 26, 2026</p>
 
       <p>
         Polaris: AI Chat Navigator is a browser extension that adds section navigation markers to
@@ -88,7 +88,11 @@
         active public message branch through ChatGPT's same-origin session to build a complete
         outline and full-text search index. This index stays in memory across DOM removal and
         is cleared on conversation changes, page refresh or closure, or disabling complete indexing.
-        Conversation text is not written to browser storage or synchronized.
+        Complete indexing also stores a gzip-compressed snapshot of the active branch's public messages
+        and parsed records in the extension's own local IndexedDB, isolated by a confirmed account,
+        workspace, and conversation. These snapshots are not synchronized or uploaded. Unknown
+        identities and private windows skip persistent caching. Hidden reasoning, tool messages,
+        alternate branches, and downloaded attachments are not included in the cache.
         This access is necessary to identify headings and
         list structures, generate navigation markers, scroll to selected sections, and show
         AI response content in the full-screen text-selection feature.
@@ -120,7 +124,8 @@
         version, coarse platform and browser summaries, viewport measurements, pointer-drag
         lifecycle outcomes, route and render counts, and error type names. It is designed to
         exclude AI response text, marker titles, full URLs, account information, prompts, cookies,
-        tokens, error messages, and stack traces.
+        tokens, error messages, and stack traces. Complete-reading events may also include
+        a cache-hit flag, stage durations, and a count of additional history-page requests.
       </p>
       <p>
         The log is stored only in the current tab's session storage until the tab is closed or the
@@ -177,8 +182,12 @@
 
       <h2>4. Data Retention</h2>
       <p>
-        Polaris: AI Chat Navigator does not create a persistent copy of AI responses, user prompts, or Maker
-        navigation history. Makers are generated from the response elements currently mounted on the page.
+        Default mode does not persist AI responses or user prompts. Opt-in complete ChatGPT indexing
+        caches public conversation text and parsed records locally, with a total compressed limit of
+        100 MiB. Least-recently-used entries are removed when space is needed. Snapshots remain after
+        closing a tab or disabling complete mode until the user selects Clear conversation cache in
+        Preferences, entries are evicted, or the extension is removed. Clearing also invalidates pending
+        old cache writes. The cache does not retain Maker navigation history or authentication credentials.
       </p>
       <p>
         Extension settings remain in Chrome storage until they are reset or removed by the user
@@ -194,7 +203,7 @@
 
       <h2>5. Browser Permissions</h2>
       <ul>
-        <li><strong>Storage permission:</strong> used to save and synchronize extension preferences.</li>
+        <li><strong>Storage permission:</strong> used to save and synchronize extension preferences. Complete-conversation snapshots use extension-owned local IndexedDB and are not synchronized.</li>
         <li><strong>Host permissions:</strong> used to run the extension on supported AI chat websites and locally inspect AI response content required for navigation features.</li>
       </ul>
       <p>The extension requests only the permissions needed to provide its disclosed functionality.</p>

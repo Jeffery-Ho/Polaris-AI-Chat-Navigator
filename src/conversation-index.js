@@ -1,4 +1,5 @@
 import { parseChapterMarkdown } from "./chapter-markdown.js";
+import { CONVERSATION_SNAPSHOT_VERSION, publicConversationSnapshot } from "./conversation-snapshot.js";
 
 export function chatGptConversationId(value) {
   try {
@@ -98,7 +99,7 @@ export function indexedSnippet(text, query) {
   ];
 }
 
-function recordFor(message) {
+function recordFor(message, previous, parseMarkdown) {
   const role = message?.author?.role;
   if (!message?.id || !["user", "assistant"].includes(role)
     || message.metadata?.is_visually_hidden_from_conversation
@@ -106,14 +107,22 @@ function recordFor(message) {
     || (message.recipient && message.recipient !== "all")) return null;
   const markdown = messageText(message);
   if (!markdown && !['text', 'multimodal_text'].includes(message.content?.content_type)) return null;
-  const blocks = parseChapterMarkdown(markdown) || [{ type: "paragraph", children: [{ type: "text", value: markdown }] }];
+  // Compare exact source as well as its fingerprint; a hash collision must never
+  // make an edited message look unchanged. A streaming patch clears the hash.
+  let hash = 2166136261;
+  for (let i = 0; i < markdown.length; i++) hash = Math.imul(hash ^ markdown.charCodeAt(i), 16777619);
+  const fingerprint = `${role}:${markdown.length}:${hash >>> 0}`;
+  if (previous?.fingerprint === fingerprint && previous.markdown === markdown && previous.role === role)
+    return { ...previous, time: message.create_time ?? null };
+  const blocks = parseMarkdown(markdown) || [{ type: "paragraph", children: [{ type: "text", value: markdown }] }];
   const text = blocks.map(blockText).join("\n\n");
-  return { id: message.id, role, time: message.create_time ?? null, markdown, text, blocks,
+  return { id: message.id, role, time: message.create_time ?? null, markdown, text, blocks, fingerprint,
     anchorText: normalizeAnchorText(blocks.map(blockAnchorText).join("")), searchText: normalizeIndexedText(text) };
 }
 
-export function createConversationIndex({ yieldTask = () => new Promise((resolve) => setTimeout(resolve, 0)) } = {}) {
+export function createConversationIndex({ yieldTask = () => new Promise((resolve) => setTimeout(resolve, 0)), parseMarkdown = parseChapterMarkdown } = {}) {
   let records = new Map();
+  let reusableRecords = new Map();
   let order = [];
   let title = "";
   let revision = 0;
@@ -126,11 +135,12 @@ export function createConversationIndex({ yieldTask = () => new Promise((resolve
 
   async function ingest(payload, { older = false, replace = false, signal } = {}) {
     const page = conversationPage(payload);
+    if (replace) reusableRecords = records;
     const normalized = [];
     let budgetStart = performance.now();
     for (const message of page.messages) {
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-      const record = recordFor(message);
+      const record = recordFor(message, records.get(message.id) || reusableRecords.get(message.id), parseMarkdown);
       if (record) normalized.push(record);
       if (performance.now() - budgetStart > 8) { await yieldTask(); budgetStart = performance.now(); }
     }
@@ -144,7 +154,7 @@ export function createConversationIndex({ yieldTask = () => new Promise((resolve
     const incoming = new Set(ids);
     order = older ? [...ids, ...order.filter((id) => !incoming.has(id))] : [...order.filter((id) => !incoming.has(id)), ...ids];
     if (typeof payload.title === "string") title = payload.title;
-    branch = page.branch || branch;
+    branch = replace ? page.branch : page.branch || branch;
     phase = "loading"; error = "";
     notify();
     return page;
@@ -175,12 +185,13 @@ export function createConversationIndex({ yieldTask = () => new Promise((resolve
         chapterByKey.set(rootKey, root);
         continue;
       }
-      // An assistant response is nested under its actual user, even if it has
-      // no heading; this also preserves preamble and code-only responses.
+      // Like DOM chapters, an answer belongs to its user's chapter, so preamble
+      // and code-only answers need no untitled "Full text" wrapper. Only an
+      // answer without a user message keeps its own synthetic root.
       const parent = chapterByKey.get(userKey);
-      if (parent) parent.contents.push({ type: "child", key: rootKey });
-      chapters.push(root);
-      let current = root;
+      if (!parent) chapters.push(root);
+      const base = parent || root;
+      let current = base;
       const stack = [];
       record.blocks.forEach((block, ordinal) => {
         const text = blockText(block);
@@ -202,7 +213,7 @@ export function createConversationIndex({ yieldTask = () => new Promise((resolve
           items.push({ key, markerKey: key, groupKey: userKey, type: "ai", ...candidate, preview: candidate.title });
           if (block.type !== "heading") return;
           while (stack.length && stack.at(-1).level >= candidate.level) stack.pop();
-          const parentNode = stack.at(-1)?.node || root;
+          const parentNode = stack.at(-1)?.node || base;
           const node = { markerKey: key, sourceKey: key, parentKey: parentNode.markerKey, title: candidate.title, contents: [] };
           parentNode.contents.push({ type: "child", key });
           chapters.push(node); stack.push({ level: candidate.level, node }); current = node;
@@ -238,17 +249,33 @@ export function createConversationIndex({ yieldTask = () => new Promise((resolve
 
   return {
     ingest, getOutline, search, status,
+    exportSnapshot() {
+      return publicConversationSnapshot({ version: CONVERSATION_SNAPSHOT_VERSION, title, branch, records: order.map((id) => records.get(id)) });
+    },
+    restoreSnapshot(value) {
+      const snapshot = publicConversationSnapshot(value);
+      if (!snapshot) return false;
+      records = new Map(snapshot.records.map((record) => [record.id, record]));
+      order = snapshot.records.map((record) => record.id);
+      reusableRecords = new Map(); title = snapshot.title; branch = snapshot.branch;
+      phase = "loading"; error = ""; notify(); return true;
+    },
+    async reconcile(payload, options = {}) {
+      const page = conversationPage(payload);
+      if (page.previous || page.next) throw new Error("incomplete-chain");
+      return ingest(payload, { ...options, replace: true });
+    },
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
     begin() { phase = "loading"; error = ""; notify(); },
-    reset() { records.clear(); order = []; title = ""; branch = ""; phase = "loading"; error = ""; notify(); },
-    finish() { phase = "complete"; error = ""; notify(); },
+    reset() { records.clear(); reusableRecords.clear(); order = []; title = ""; branch = ""; phase = "loading"; error = ""; notify(); },
+    finish() { reusableRecords.clear(); phase = "complete"; error = ""; notify(); },
     fail(reason) { error = reason; phase = records.size ? "partial" : "error"; notify(); },
     setTitle(value) { if (value && title !== value) { title = value; notify(); } },
     updateMessage(id, text) {
       const record = records.get(id);
       if (!record || record.text === text) return;
-      records.set(id, { ...record, text, anchorText: normalizeAnchorText(text), searchText: normalizeIndexedText(text) }); notify();
+      records.set(id, { ...record, fingerprint: "", text, anchorText: normalizeAnchorText(text), searchText: normalizeIndexedText(text) }); notify();
     },
-    dispose() { records.clear(); order = []; listeners.clear(); }
+    dispose() { records.clear(); reusableRecords.clear(); order = []; listeners.clear(); }
   };
 }

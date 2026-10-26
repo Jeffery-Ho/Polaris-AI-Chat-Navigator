@@ -31,7 +31,9 @@ const SAFE_KEYS = new Set([
   "activeControlTab",
   "filename",
   "downloaded",
-  "mailOpened"
+  "mailOpened",
+  "outcome",
+  "cacheHit", "cacheMs", "indexMs", "nativeMs", "readMs", "totalMs", "historicalRequests"
 ]);
 const MAX_STRING_LENGTH = 120;
 

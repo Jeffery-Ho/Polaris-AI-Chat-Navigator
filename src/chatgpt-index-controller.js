@@ -1,7 +1,11 @@
 import { chatGptConversationId, createConversationIndex, normalizeIndexedText, normalizeAnchorText } from "./conversation-index.js";
 import { HASHED_MARKDOWN_ROOT_SELECTOR, HASHED_HEADING_SELECTOR } from "./hashed-markdown.js";
 
-export function createChatGptIndexController({ window: win, bridgeUrl, onChange }) {
+const CHATGPT_HOST = /^(chatgpt\.com|chat\.openai\.com)$/;
+const NATIVE_LOAD_TIMEOUT_MS = 20000;
+const ANCHOR_WAIT_MS = 1200;
+
+export function createChatGptIndexController({ window: win, bridgeUrl, onChange, cache = null, onDiagnostics = () => {} }) {
   const doc = win.document;
   let index = null;
   let session = "";
@@ -17,11 +21,20 @@ export function createChatGptIndexController({ window: win, bridgeUrl, onChange 
   let runId = -1;
   let disposed = false;
   let wanted = false;
+  let armed = false;
   let processing = Promise.resolve();
   let ingestion = new AbortController();
   let locationRun = null;
   let preparationRun = null;
   let nativeState = { phase: "loading", error: "" };
+  let lease = "";
+  let restoredScope = "";
+  let persistTimer = 0;
+  let reportedRevision = -1;
+  let savedRevision = -1;
+  let authoritativeData = false;
+  let started = 0;
+  let timings = {};
   const currentRoute = () => `${win.location.origin}${win.location.pathname}`;
   const post = (command, detail = {}) => win.postMessage({ type: "polaris-conversation-index-command", command, ...detail,
     requestId: session, conversationId: chatGptConversationId(win.location.href) }, win.location.origin);
@@ -30,6 +43,8 @@ export function createChatGptIndexController({ window: win, bridgeUrl, onChange 
     preparationRun?.cancel();
     if (session) post("stop"); searchController?.abort(); index?.dispose(); index = null;
     ingestion.abort(); ingestion = new AbortController();
+    processing = Promise.resolve(); win.clearTimeout(persistTimer);
+    lease = ""; restoredScope = ""; reportedRevision = -1; savedRevision = -1; authoritativeData = false; timings = {};
     session = ""; scope = ""; cached = null; cacheKey = ""; retryAt = 0; observedTitle = "";
     runId = -1; invalidRun = false;
     nativeState = { phase: "loading", error: "" };
@@ -39,15 +54,56 @@ export function createChatGptIndexController({ window: win, bridgeUrl, onChange 
     index = createConversationIndex();
     index.subscribe(() => { cached = null; onChange(); });
     session = win.crypto.randomUUID();
+    started = performance.now();
+    timings = { cacheHit: false, cacheMs: 0, indexMs: 0, nativeMs: 0, historicalRequests: 0 };
     observedTitle = titleFromPage();
     if (script?.dataset.ready === "true") post("start");
-    else if (!script) {
+    else loadBridge();
+    onChange();
+  }
+  async function restoreCache(nextScope, current, generation, signal) {
+    if (scope !== nextScope) {
+      if (scope) { searchController?.abort(); current.reset(); }
+      scope = nextScope; lease = ""; restoredScope = ""; savedRevision = -1; authoritativeData = false; timings.cacheHit = false;
+    }
+    if (!cache || !scope || restoredScope === scope) return;
+    restoredScope = scope;
+    const began = performance.now();
+    let stored;
+    try { stored = await cache.read(scope, chatGptConversationId(win.location.href)); } catch { return; }
+    if (current !== index || generation !== session || signal.aborted || nextScope !== scope) return;
+    timings.cacheMs += performance.now() - began;
+    lease = stored?.lease || "";
+    if (stored?.snapshot && !authoritativeData) timings.cacheHit = current.restoreSnapshot(stored.snapshot);
+    saveWhenReady();
+  }
+  function saveWhenReady() {
+    if (!index || index.status().phase !== "complete" || nativeState.phase !== "ready" || invalidRun) return;
+    win.clearTimeout(persistTimer);
+    const current = index; const generation = session; const owner = scope; const writeLease = lease;
+    persistTimer = win.setTimeout(() => {
+      if (current !== index || generation !== session || owner !== scope || current.status().phase !== "complete"
+        || nativeState.phase !== "ready" || invalidRun) return;
+      const revision = current.status().revision;
+      if (reportedRevision !== revision) {
+        reportedRevision = revision; timings.totalMs = performance.now() - started; onDiagnostics({ ...timings });
+      }
+      if (!cache || !owner || !writeLease || savedRevision === revision) return;
+      const snapshot = current.exportSnapshot();
+      if (snapshot) { savedRevision = revision; void Promise.resolve(cache.write(owner, chatGptConversationId(win.location.href), writeLease, snapshot)).catch(() => {}); }
+    }, 0);
+  }
+  // Loaded and armed before any chat is open, so a clicked chat starts at once.
+  function loadBridge() {
+    if (script?.dataset.ready === "true") { if (wanted && !armed) { armed = true; post("arm"); } return; }
+    if (!script) {
       const bridge = doc.createElement("script"); bridge.src = bridgeUrl; bridge.type = "module";
       script = bridge;
       bridge.dataset.polarisConversationBridge = "true";
       bridge.addEventListener("load", () => {
         if (disposed || script !== bridge) return;
         bridge.dataset.ready = "true";
+        if (wanted) { armed = true; post("arm"); }
         if (index) post("start");
       });
       bridge.addEventListener("error", () => {
@@ -56,31 +112,50 @@ export function createChatGptIndexController({ window: win, bridgeUrl, onChange 
       });
       (doc.head || doc.documentElement).appendChild(bridge);
     }
-    onChange();
   }
   function onMessage(event) {
     const data = event.data;
     if (event.source !== win || event.origin !== win.location.origin || data?.type !== "polaris-conversation-index-result"
       || !index || data.requestId !== session || data.conversationId !== chatGptConversationId(win.location.href) || route !== currentRoute()) return;
+    if (Number(data.runId) < runId) return;
     if (data.event === "native-reveal") {
       if (data.navigationId === locationRun?.id) locationRun.reply(data);
       else if (data.navigationId === preparationRun?.id) preparationRun.reply(data);
       return;
     }
-    if (Number(data.runId) < runId) return;
-    if (Number(data.runId) > runId) { runId = Number(data.runId); invalidRun = false; ingestion.abort(); ingestion = new AbortController(); }
+    if (Number(data.runId) > runId) {
+      runId = Number(data.runId); invalidRun = false; ingestion.abort(); ingestion = new AbortController(); processing = Promise.resolve();
+      preparationRun?.cancel();
+      if (!lease) restoredScope = "";
+      win.clearTimeout(persistTimer);
+    }
     const current = index; const generation = session; const signal = ingestion.signal;
     processing = processing.then(async () => {
       if (current !== index || generation !== session || Number(data.runId) < runId || signal.aborted) return;
       try {
-        if (data.event === "page") {
+        if (data.event === "scope") {
+          void restoreCache(typeof data.scope === "string" ? data.scope : "", current, generation, signal).catch(() => {});
+        } else if (data.event === "native-state") {
+          nativeState = { phase: ["preparing", "ready", "error"].includes(data.phase) ? data.phase : "loading", error: data.reason || "" };
+          if (Number.isFinite(data.nativeMs)) timings.nativeMs = data.nativeMs;
+          onChange(); saveWhenReady();
+        } else if (data.event === "page") {
           const changedScope = Boolean(scope && data.scope && scope !== data.scope);
-          if (changedScope) { searchController?.abort(); index.reset(); }
-          scope = data.scope || scope;
-          await index.ingest(data.payload, { older: Boolean(data.older) && !changedScope, replace: Boolean(data.replace) || changedScope, signal });
+          if (typeof data.scope === "string") void restoreCache(data.scope, current, generation, signal).catch(() => {});
+          if (signal.aborted || generation !== session) return;
+          authoritativeData = true;
+          const began = performance.now();
+          if (data.reconcile) await current.reconcile(data.payload, { signal });
+          else await current.ingest(data.payload, { older: Boolean(data.older) && !changedScope, replace: Boolean(data.replace) || changedScope, signal });
+          timings.indexMs += performance.now() - began;
           if (signal.aborted || generation !== session) return;
           syncMounted();
-        } else if (data.event === "complete" && !invalidRun) { index.finish(); prepareNativeList(); }
+        } else if (data.event === "complete" && !invalidRun) {
+          if (["native", "fallback"].includes(data.source)) timings.source = data.source;
+          if (Number.isFinite(data.readMs)) timings.readMs = data.readMs;
+          if (Number.isFinite(data.historicalRequests)) timings.historicalRequests = data.historicalRequests;
+          index.finish(); prepareNativeList(); saveWhenReady();
+        }
         else if (data.event === "loading") { invalidRun = false; index.begin(); }
         else if (data.event === "error") { retryAt = Number(data.retryAt) || 0; index.fail(String(data.reason || "network-error")); }
       } catch (error) {
@@ -175,6 +250,7 @@ export function createChatGptIndexController({ window: win, bridgeUrl, onChange 
   function prepareNativeList() {
     if (!index || preparationRun || nativeState.phase === "ready") return;
     nativeState = { phase: "preparing", error: "" };
+    const began = performance.now();
     const run = { id: win.crypto.randomUUID(), cancel: () => finish(),
       reply(data) { finish(data); } };
     const timer = win.setTimeout(() => finish({ ok: false, reason: "native-load-timeout" }), 30000);
@@ -182,11 +258,12 @@ export function createChatGptIndexController({ window: win, bridgeUrl, onChange 
       if (preparationRun !== run) return;
       preparationRun = null; win.clearTimeout(timer);
       if (!result) return;
-      nativeState = { phase: result.ok ? "ready" : "error", error: result.reason || "" }; onChange();
+      timings.nativeMs += performance.now() - began;
+      nativeState = { phase: result.ok ? "ready" : "error", error: result.reason || "" }; onChange(); saveWhenReady();
     }
     preparationRun = run; onChange(); post("prepare", { navigationId: run.id });
   }
-  function ensureLocation(key, config) {
+  function ensureLocation(key, config, { instant = false } = {}) {
     locationRun?.cancel();
     const found = resolveLocation(key, config);
     if (found.element || !["not-mounted", "ambiguous-message"].includes(found.reason)) return Promise.resolve(found);
@@ -196,10 +273,21 @@ export function createChatGptIndexController({ window: win, bridgeUrl, onChange 
       let timer = 0;
       const observer = new win.MutationObserver(check);
       const run = { id: win.crypto.randomUUID(),
-        cancel: () => finish({ element: null, reason: "source-changed" }),
+        cancel() {
+          post("cancel-reveal", { navigationId: run.id });
+          finish({ element: null, reason: "source-changed" });
+        },
         reply(data) {
           if (!data.ok) { finish({ element: null, reason: data.reason || "native-list-unavailable" }); return; }
-          ready = true; check();
+          ready = true;
+          // The message is revealed; a heading that never matches must not hang
+          // the jump, so fall back to the whole message shortly after.
+          win.clearTimeout(timer);
+          timer = win.setTimeout(() => {
+            const message = resolveLocation(`index:${outline(config).targets.get(key)?.messageId}`, config).element;
+            finish(message ? { element: message, reason: "", fallback: true } : { element: null, reason: "anchor-timeout" });
+          }, ANCHOR_WAIT_MS);
+          check();
         }
       };
       function finish(result) {
@@ -214,22 +302,24 @@ export function createChatGptIndexController({ window: win, bridgeUrl, onChange 
       }
       locationRun = run;
       observer.observe(doc.documentElement, { childList: true, subtree: true, attributes: true });
-      timer = win.setTimeout(() => finish({ element: null, reason: "native-load-timeout" }), 20000);
-      post("reveal", { navigationId: run.id, messageId: outline(config).targets.get(key)?.messageId });
+      timer = win.setTimeout(() => finish({ element: null, reason: "native-load-timeout" }), NATIVE_LOAD_TIMEOUT_MS);
+      post("reveal", { navigationId: run.id, messageId: outline(config).targets.get(key)?.messageId, instant });
     });
   }
   return {
     configure(enabled) {
       if (disposed) return;
       wanted = enabled;
+      if (enabled && CHATGPT_HOST.test(win.location.hostname)) loadBridge();
+      else if (armed) { armed = false; post("disarm"); }
       if (!enabled || !chatGptConversationId(win.location.href)) { if (index) { clear(); onChange(); } return; }
       if (!index || route !== currentRoute()) start();
     },
     enabled: () => Boolean(index),
     // Complete mode is on, but the ChatGPT page has no conversation to read yet.
-    awaitingConversation: () => wanted && !index && /^(chatgpt\.com|chat\.openai\.com)$/.test(win.location.hostname),
+    awaitingConversation: () => wanted && !index && CHATGPT_HOST.test(win.location.hostname),
     title: titleFromPage,
-    snapshot: () => index ? { ...index.status(), generation: session, retryAt, native: nativeState } : null,
+    snapshot: () => index ? { ...index.status(), generation: session, retryAt, native: nativeState, timings: { ...timings } } : null,
     outline, syncMounted, resolveTarget, resolveLocation, ensureLocation,
     async search(query, options = {}) {
       searchController?.abort(); searchController = new AbortController();

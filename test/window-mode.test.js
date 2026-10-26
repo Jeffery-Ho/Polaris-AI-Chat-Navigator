@@ -66,7 +66,7 @@ test("侧栏包含导航、章节、设置和无对话平台空状态", () => {
   assert.match(windowSource, /chrome\.tabs\?\.onUpdated/);
   assert.match(windowSource, /setInterval\(requestSourceState, 1200\)/);
   assert.match(windowSource, /const shouldRetry = !snapshot \|\| Boolean\(snapshot\.supportedRoute && !snapshot\.hasConversation\)/);
-  assert.match(windowSource, /if \(isLoading \|\| snapshot\.loading \|\| awaitingConversation\)/);
+  assert.match(windowSource, /if \(isLoading \|\| snapshot\.loading \|\| snapshot\.conversationLoading \|\| snapshot\.conversationStalled \|\| awaitingConversation\)/);
   assert.match(windowSource, /Reading conversation/);
   assert.doesNotMatch(windowSource, /No conversation here/);
   assert.match(windowSource, /jump-to-marker/);

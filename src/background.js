@@ -1,6 +1,8 @@
 import { snapshotDeliveryResult } from "./snapshot-delivery.js";
+import { createConversationCacheHandler } from "./conversation-cache.js";
 
 export function initializeBackground() {
+const handleConversationCache = createConversationCacheHandler({ runtimeId: chrome.runtime.id, extensionOrigin: chrome.runtime.getURL(""), incognito: chrome.extension?.inIncognitoContext === true });
 const SOURCE_WINDOW_STORAGE_KEY = "polaris-source-window-id";
 const SOURCE_TAB_STORAGE_KEY = "polaris-source-tab-id";
 
@@ -402,6 +404,11 @@ configureAction();
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message.type !== "string") {
     return;
+  }
+
+  if (message.type === "POLARIS_CONVERSATION_CACHE") {
+    void handleConversationCache(message, sender).then(sendResponse).catch(() => sendResponse(null));
+    return true;
   }
 
   if (message.type === "POLARIS_WINDOW_READY") {

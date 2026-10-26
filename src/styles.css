@@ -94,6 +94,12 @@
   --polaris-overlay: rgba(0, 0, 0, 0.64);
 }
 
+#gpt-paragraph-nav[data-conversation-loading] {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
 #gpt-paragraph-nav {
   position: fixed;
   top: var(--gpt-nav-top, calc(var(--gpt-conversation-header-height, 64px) + 8px));

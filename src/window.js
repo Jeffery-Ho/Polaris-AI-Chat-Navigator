@@ -127,7 +127,7 @@ export function initializeSidepanel() {
     const response = await chrome.runtime.sendMessage({ type: "POLARIS_WINDOW_COMMAND", command, markerKey,
       expectedTabId: tab, expectedRouteKey: route, generation, expectResult: true });
     if (requestId !== locateSequence || state.sourceTabId !== tab || state.routeKey !== route || state.snapshot?.conversationIndex?.generation !== generation) return;
-    if (response?.ok) return;
+    if (response?.ok || response?.reason === "navigation-cancelled") return;
     showIndexNotice(response?.reason);
   }
 
@@ -637,7 +637,7 @@ export function initializeSidepanel() {
     const panel = existingPanel instanceof HTMLElement
       ? existingPanel
       : element("div", "navigation-panel");
-    if (snapshot.conversationIndex && snapshot.hasConversation) {
+    if (snapshot.conversationIndex && snapshot.hasConversation && !snapshot.conversationLoading && !snapshot.conversationStalled) {
       windowMarkerListReconciler.reset(); markerStreamingIndicator.reset();
       const searching = Boolean(state.markerQuery.trim());
       if (searching && state.searchScope === "full") requestFullSearch();
@@ -666,14 +666,16 @@ export function initializeSidepanel() {
     resetVirtualMarkers();
     const awaitingConversation = !snapshot.hasConversation
       && (snapshot.supportedRoute || activePlatform(snapshot));
-    if (isLoading || snapshot.loading || awaitingConversation) {
+    if (isLoading || snapshot.loading || snapshot.conversationLoading || snapshot.conversationStalled || awaitingConversation) {
       windowMarkerListReconciler.reset();
       markerStreamingIndicator.reset();
-      const isReading = Boolean(isLoading || snapshot.loading
+      const isReading = !snapshot.conversationStalled && Boolean(isLoading || snapshot.loading || snapshot.conversationLoading
         || (snapshot.supportedRoute && isPotentialConversationRoute(snapshot.routeKey)));
       const loading = panel.querySelector(":scope > .conversation-skeleton") || renderConversationSkeleton();
       loading.classList.toggle("is-reading", isReading);
-      const copy = isReading
+      const copy = snapshot.conversationStalled
+        ? (locale === "zh" ? "没有读取到这个会话，请刷新页面后重试" : "Couldn't read this chat. Refresh the page and try again.")
+        : isReading
         ? (locale === "zh" ? "正在读取会话…" : "Reading conversation…")
         : (locale === "zh" ? "等待会话…" : "Waiting for a conversation…");
       const status = loading.querySelector(".conversation-skeleton-status");
@@ -813,7 +815,23 @@ export function initializeSidepanel() {
     }
     section.append(cards);
     const retry = settingsCommandButton(locale === "zh" ? "重新读取" : "Read again", "retry-conversation-index"); retry.dataset.indexRetry = "true";
-    section.append(retry); syncIndexSettings(section, snapshot);
+    section.append(retry);
+    section.append(element("p", "index-current-status", locale === "zh"
+      ? "完整对话会在本机缓存，最多占用 100 MiB，不会同步。重新打开时仍会校验最新内容并等待正文准备好。"
+      : "Complete conversations are cached on this device, up to 100 MiB, without sync. Reopening still checks current content and waits for the conversation to be ready."));
+    const clearCache = element("button", "secondary-button", locale === "zh" ? "清除会话缓存" : "Clear conversation cache");
+    clearCache.type = "button"; clearCache.dataset.settingsFocus = "clear-conversation-cache";
+    const cacheStatus = element("p", "index-cache-status"); cacheStatus.setAttribute("role", "status");
+    clearCache.addEventListener("click", async () => {
+      clearCache.disabled = true;
+      try {
+        const result = await chrome.runtime.sendMessage({ type: "POLARIS_CONVERSATION_CACHE", operation: "clear" });
+        cacheStatus.textContent = result?.ok ? (locale === "zh" ? "已清除本机会话缓存" : "Conversation cache cleared on this device")
+          : (locale === "zh" ? "暂时无法清除，请重试" : "Could not clear the cache. Please try again.");
+      } catch { cacheStatus.textContent = locale === "zh" ? "暂时无法清除，请重试" : "Could not clear the cache. Please try again."; }
+      finally { clearCache.disabled = false; }
+    });
+    section.append(clearCache, cacheStatus); syncIndexSettings(section, snapshot);
     return section;
   }
 

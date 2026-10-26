@@ -10,6 +10,34 @@
 - Version update type must be declared by the user before recording a build.
 - After each build is recorded, confirm the build number and version with the user.
 
+## 314
+
+- Date: 2026-10-26
+- Version: 0.80.0
+- Summary: Reuses ChatGPT's native full-history load and caches parsed public conversation records locally.
+- Notes: Starts native preparation and account-scoped cache restoration together, reconciles only changed messages, and falls back to cursor paging for unsupported host snapshots. Adds gzip snapshots in extension-owned IndexedDB with a 100 MiB LRU limit, cross-tab write leases, a Preferences clearing action, and redacted per-stage reading timings. The loading cover still waits for both current data and native conversation readiness. Updates privacy disclosures; AI summaries remain out of scope.
+
+## 313
+
+- Date: 2026-10-26
+- Version: 0.79.0
+- Summary: Releases one-click complete reading and located-source highlights as a feature version.
+- Notes: Promotes builds 311 and 312 to a minor release: clicking a chat starts complete reading without a refresh, Makers appear with the finished loading cover, Outline drops stray Full text chapters, sidepanel jumps briefly tint the located source in the terracotta accent, and off-screen Makers scroll smoothly into place. The located-source highlight is a rounded 2 px terracotta frame with a faint fill, drawn as a fixed overlay above the source, clipped to the viewport, so ChatGPT bubble and wrapper backgrounds cannot hide it; it waits on 32 ms timers rather than animation frames (Dia pauses page frames while its side panel has focus) until the target is on screen and still, finds the target again when ChatGPT's virtual list remounts it during the scroll, and records each outcome (shown, lost, offscreen) as a `locate_flash` diagnostic event; each sidepanel jump also records a `locate_request` event with its path and result, and `outcome` is now an allowed diagnostic field. The highlight now holds for about 1 s before fading. TOC jumps to off-screen targets no longer hang until the 20 s native-load timeout: once the native list reveals the message, the jump waits at most 1.2 s for the heading and otherwise locates and highlights the whole message, and the host's `scrollToKey` is bounded to 2 s. The loading cover now appears only once the first message is read. If an open chat yields no message within 6 s, or reading fails with none, no cover is shown: a non-modal card asks the user to refresh the page (with a Refresh page button), the sidepanel shows the same hint, and the composer stays usable. Sidepanel TOC and Outline jumps now land instantly, like the reference navigator: the native reveal skips its approach animation for these jumps and the target scrolls with `instant` behavior, so the highlight appears right away; on-page Maker list jumps keep smooth scrolling. Adds the matching in-panel release notes.
+
+## 312
+
+- Date: 2026-10-26
+- Version: 0.78.4
+- Summary: Smoothly scrolls toward off-screen Makers before aligning their original ChatGPT message.
+- Notes: Uses the native virtual list's geometry to animate the conversation before requesting exact turn alignment, follows row height corrections, and respects reduced motion. A new selection cancels the previous reveal, including when the new Maker is already mounted; manual scrolling interrupts silently. Normal navigation still stays in Table of Contents without progress notices.
+
+## 311
+
+- Date: 2026-10-26
+- Version: 0.78.3
+- Summary: Starts complete ChatGPT reading as soon as a chat is clicked, keeps Makers in step with the loading cover, removes stray Full text chapters, and flashes located sources.
+- Notes: Complete mode now loads and arms the page bridge on pages without a conversation. While armed, it records ChatGPT's own conversation responses and request headers, which ChatGPT fetches before changing the URL. When the route reaches the chat, the cover appears and a complete native response is reused without another request; otherwise the bridge requests the chat with the captured headers. Stopping between chats keeps the bridge armed; disabling complete mode disarms it and restores fetch. At most three native responses stay in page memory. While the cover shows, the on-page Maker list is hidden and the sidepanel shows its reading skeleton; both appear when the cover finishes or is dismissed. Indexed Outline places each answer inside its user chapter, as DOM chapters do, so answers no longer appear as untitled Full text chapters; only an answer without a user message keeps one. TOC and Outline jumps from the sidepanel tint the located source in the terracotta accent for about 1 s once its scroll settles, then fade it; reduced motion skips the fade, and a new jump replaces the previous tint. Live ChatGPT acceptance is pending.
+
 ## 310
 
 - Date: 2026-10-24

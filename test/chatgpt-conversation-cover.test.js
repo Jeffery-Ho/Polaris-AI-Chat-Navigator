@@ -15,6 +15,8 @@ function setup() {
 }
 
 test("step states map data reading and native preparation separately", () => {
+  assert.deepEqual(stepStates({ phase: "loading", native: { phase: "preparing" } }), { read: "active", prepare: "active" });
+  assert.deepEqual(stepStates({ phase: "loading", native: { phase: "ready" } }), { read: "active", prepare: "done" });
   assert.deepEqual(stepStates({ phase: "loading", native: { phase: "loading" } }), { read: "active", prepare: "pending" });
   assert.deepEqual(stepStates({ phase: "complete", native: { phase: "loading" } }), { read: "done", prepare: "active" });
   assert.deepEqual(stepStates({ phase: "complete", native: { phase: "preparing" } }), { read: "done", prepare: "active" });
@@ -110,4 +112,47 @@ test("the no-conversation notice points to the chat list, or to opening the side
     s.cover.awaitConversation();
     assert.match(body(), /点击左侧列表中的任意会话/);
   } finally { s.finish(); }
+});
+
+test("the cover reports whether it is showing and announces a manual dismissal", () => {
+  const dom = new JSDOM("<main></main>", { url: "https://chatgpt.com/c/one" });
+  let dismissals = 0;
+  const cover = createChatGptConversationCover({ window: dom.window, locale: "zh", onDismiss: () => dismissals++ });
+  try {
+    assert.equal(cover.isShowing(), false);
+    cover.update({ generation: "one", phase: "loading", count: 1, native: { phase: "loading" } });
+    assert.equal(cover.isShowing(), true);
+    dom.window.document.getElementById("polaris-conversation-cover").shadowRoot.querySelector(".partial").click();
+    assert.equal(cover.isShowing(), false); assert.equal(dismissals, 1);
+  } finally { cover.dispose(); dom.window.close(); }
+});
+
+test("an empty read shows no cover, then asks for a refresh when the chat is not found", () => {
+  const dom = new JSDOM("<main><textarea></textarea></main>", { url: "https://chatgpt.com/c/one" });
+  const win = dom.window; let time = 0; const timers = []; let changes = 0; let reloads = 0;
+  Object.defineProperty(win.performance, "now", { value: () => time });
+  win.setTimeout = (callback, delay) => { timers.push({ callback, delay }); return timers.length; };
+  win.clearTimeout = () => {};
+  const cover = createChatGptConversationCover({ window: win, locale: "zh", onStateChange: () => changes++, reload: () => reloads++ });
+  const notice = () => win.document.getElementById("polaris-conversation-notice");
+  const loading = (fields = {}) => cover.update({ generation: "one", phase: "loading", count: 0, native: { phase: "loading" }, ...fields });
+  try {
+    loading();
+    assert.equal(cover.isShowing(), false, "no cover over an empty count");
+    assert.equal(cover.isWaiting(), true);
+    assert.equal(win.document.querySelector("main").hasAttribute("inert"), false);
+    assert.equal(timers[0].delay, 6000);
+    time = 6000; timers[0].callback();
+    assert.equal(changes, 1);
+    assert.equal(cover.isStalled(), true); assert.equal(cover.isWaiting(), false);
+    assert.match(notice().shadowRoot.querySelector("strong").textContent, /没有读取到这个会话/);
+    notice().shadowRoot.querySelector(".reload").click(); assert.equal(reloads, 1);
+    loading({ count: 3 });
+    assert.equal(notice(), null); assert.equal(cover.isShowing(), true); assert.equal(cover.isStalled(), false);
+    cover.update({ generation: "two", phase: "error", count: 0 });
+    assert.equal(cover.isStalled(), true, "a failed empty read asks for a refresh at once");
+    assert.equal(cover.isShowing(), false);
+    notice().shadowRoot.querySelector(".dismiss").click();
+    assert.equal(notice(), null); assert.equal(cover.isStalled(), false);
+  } finally { cover.dispose(); dom.window.close(); }
 });

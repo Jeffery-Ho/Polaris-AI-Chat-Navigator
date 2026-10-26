@@ -2,12 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { createChatGptIndexController } from "../src/chatgpt-index-controller.js";
+import { createConversationIndex } from "../src/conversation-index.js";
 
-function setup(html = "", { loadBridge = true } = {}) {
+function setup(html = "", { loadBridge = true, cache = null } = {}) {
   const dom = new JSDOM(`<html><head><title>初始标题 - ChatGPT</title></head><body><main>${html}</main></body></html>`, { url: "https://chatgpt.com/c/one" });
   const win = dom.window; const commands = [];
   win.postMessage = (data) => commands.push(data);
-  const controller = createChatGptIndexController({ window: win, bridgeUrl: "https://example.invalid/bridge.js", onChange() {} });
+  const controller = createChatGptIndexController({ window: win, cache, bridgeUrl: "https://example.invalid/bridge.js", onChange() {} });
   controller.configure(true);
   if (loadBridge) win.document.querySelector('script').dispatchEvent(new win.Event("load"));
   const requestId = commands.at(-1)?.requestId || controller.snapshot().generation;
@@ -17,6 +18,83 @@ function setup(html = "", { loadBridge = true } = {}) {
   const payload = (text = "相同正文", id = "a") => ({ title: "接口真实标题", messages: [{ id, author: { role: "assistant" }, content: { content_type: "text", parts: [text] } }], page_info: { has_previous_page: false, has_next_page: false } });
   return { dom, win, controller, commands, requestId, send, payload, finish() { controller.dispose(); dom.window.close(); } };
 }
+
+test("disk restore stays loading until authoritative data and native preparation are both ready, then saves asynchronously", async () => {
+  const saved = createConversationIndex();
+  const old = { messages: [{ id: "old", author: { role: "user" }, content: { content_type: "text", parts: ["缓存原文"] } }], page_info: { has_previous_page: false, has_next_page: false } };
+  await saved.ingest(old); saved.finish();
+  const writes = []; const reads = [];
+  const s = setup("", { cache: { async read(scope) { reads.push(scope); return { snapshot: saved.exportSnapshot(), lease: "lease" }; },
+    async write(...args) { writes.push(args); } } });
+  try {
+    await s.send("scope", { scope: "a".repeat(64) });
+    assert.equal(s.controller.snapshot().count, 1);
+    assert.equal(s.controller.snapshot().phase, "loading");
+    assert.equal(s.controller.snapshot().timings.cacheHit, true);
+    assert.equal(writes.length, 0);
+    await s.send("page", { payload: s.payload("最新原文"), reconcile: true, scope: "a".repeat(64) });
+    await s.send("complete", { source: "native", historicalRequests: 0 });
+    assert.equal(writes.length, 0);
+    assert.equal((await s.controller.search("缓存原文")).total, 0);
+    const preparation = s.commands.find((command) => command.command === "prepare");
+    await s.send("native-reveal", { navigationId: preparation.navigationId, ok: true });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.equal(reads.length, 1); assert.equal(writes.length, 1);
+    assert.equal(writes[0][3].records[0].markdown, "最新原文");
+  } finally { s.finish(); }
+});
+
+test("a late cache read cannot populate another route", async () => {
+  const saved = createConversationIndex();
+  await saved.ingest({ messages: [{ id: "secret", author: { role: "user" }, content: { content_type: "text", parts: ["旧账号"] } }], page_info: { has_previous_page: false, has_next_page: false } });
+  let resolveRead;
+  const s = setup("", { cache: { read: () => new Promise((resolve) => { resolveRead = resolve; }) } });
+  try {
+    await s.send("scope", { scope: "a".repeat(64) });
+    s.win.history.pushState({}, "", "/c/two"); s.controller.configure(true);
+    resolveRead({ snapshot: saved.exportSnapshot(), lease: "old" });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.equal(s.controller.snapshot().count, 0);
+    assert.equal((await s.controller.search("旧账号")).total, 0);
+  } finally { s.finish(); }
+});
+
+test("a slow cache never delays authoritative readiness or overwrites newer messages when it finally returns", async () => {
+  const old = createConversationIndex();
+  await old.ingest({ messages: [{ id: "old", author: { role: "user" }, content: { content_type: "text", parts: ["旧缓存"] } }], page_info: { has_previous_page: false, has_next_page: false } });
+  let release; const writes = [];
+  const s = setup("", { cache: { read: () => new Promise((resolve) => { release = resolve; }), async write(...args) { writes.push(args); } } });
+  try {
+    await s.send("scope", { scope: "a".repeat(64) });
+    await s.send("native-state", { phase: "ready" });
+    await s.send("page", { payload: s.payload("最新内容"), reconcile: true }); await s.send("complete");
+    assert.equal(s.controller.snapshot().phase, "complete");
+    assert.equal(s.controller.snapshot().native.phase, "ready");
+    assert.equal((await s.controller.search("最新内容")).total, 1);
+    release({ snapshot: old.exportSnapshot(), lease: "late" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal((await s.controller.search("旧缓存")).total, 0);
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0][3].records[0].markdown, "最新内容");
+  } finally { s.finish(); }
+});
+
+test("storage failures leave the normal reader usable and an unconfirmed identity discards an earlier account's cache", async () => {
+  const saved = createConversationIndex();
+  await saved.ingest({ messages: [{ id: "old", author: { role: "user" }, content: { content_type: "text", parts: ["旧账号"] } }], page_info: { has_previous_page: false, has_next_page: false } });
+  let reads = 0;
+  const s = setup("", { cache: { async read() { if (++reads === 1) return { snapshot: saved.exportSnapshot(), lease: "old" }; throw new Error("storage unavailable"); } } });
+  try {
+    await s.send("scope", { scope: "a".repeat(64) });
+    assert.equal(s.controller.snapshot().count, 1);
+    await s.send("scope", { scope: "" });
+    assert.equal(s.controller.snapshot().count, 0);
+    await s.send("scope", { scope: "b".repeat(64) });
+    await s.send("page", { payload: s.payload("当前账号") }); await s.send("complete");
+    assert.equal((await s.controller.search("旧账号")).total, 0);
+    assert.equal((await s.controller.search("当前账号")).total, 1);
+  } finally { s.finish(); }
+});
 
 test("late bridge load after disposal cannot access a cleared script or start a request", () => {
   const s = setup("", { loadBridge: false });
@@ -158,6 +236,21 @@ test("native navigation errors and late replies do not move a changed conversati
   } finally { s.finish(); }
 });
 
+test("selecting a mounted Maker cancels an earlier native animation before resolving the new anchor", async () => {
+  const s = setup();
+  try {
+    await s.send("page", { payload: s.payload(), replace: true }); await s.send("complete");
+    const pending = s.controller.ensureLocation("index:a", {});
+    const navigationId = s.commands.at(-1).navigationId;
+    s.win.document.querySelector("main").innerHTML = '<article data-message-id="a"><p>相同正文</p></article>';
+    const mounted = await s.controller.ensureLocation("index:a", {});
+    assert.ok(mounted.element);
+    assert.equal((await pending).reason, "source-changed");
+    assert.equal(s.commands.at(-1).command, "cancel-reveal");
+    assert.equal(s.commands.at(-1).navigationId, navigationId);
+  } finally { s.finish(); }
+});
+
 test("broken chains cannot be marked complete and old route responses cannot overwrite a new conversation", async () => {
   const s = setup();
   try {
@@ -190,4 +283,52 @@ test("complete mode on a ChatGPT page without a conversation waits for one inste
 test("an indexed conversation is not awaiting one", () => {
   const s = setup();
   try { assert.equal(s.controller.awaitingConversation(), false); } finally { s.finish(); }
+});
+
+test("complete mode arms the bridge on a page without a chat, then starts as soon as a chat is clicked", () => {
+  const dom = new JSDOM("<main></main>", { url: "https://chatgpt.com/" });
+  const win = dom.window; const commands = [];
+  win.postMessage = (data) => commands.push(data.command);
+  const controller = createChatGptIndexController({ window: win, bridgeUrl: "https://example.invalid/bridge.js", onChange() {} });
+  try {
+    controller.configure(true);
+    const bridge = win.document.querySelector("script");
+    assert.ok(bridge, "the bridge loads before any chat is open");
+    bridge.dispatchEvent(new win.Event("load"));
+    assert.deepEqual(commands, ["arm"]);
+    win.history.pushState({}, "", "/c/one"); controller.configure(true);
+    assert.deepEqual(commands, ["arm", "start"]);
+    assert.equal(controller.snapshot().phase, "loading");
+    controller.configure(false);
+    assert.deepEqual(commands.slice(-2), ["disarm", "stop"]);
+  } finally { controller.dispose(); dom.window.close(); }
+});
+
+test("a revealed message whose heading never matches falls back to the message instead of hanging", async () => {
+  const s = setup();
+  try {
+    await s.send("page", { payload: s.payload("## 标题\n\n正文"), replace: true }); await s.send("complete");
+    const marker = s.controller.outline({}).items[0];
+    const pending = s.controller.ensureLocation(marker.markerKey, {});
+    s.win.document.querySelector("main").innerHTML = '<article data-message-id="a"><div class="markdown"><h2>已改写的标题</h2></div></article>';
+    const started = Date.now();
+    await s.send("native-reveal", { navigationId: s.commands.at(-1).navigationId, ok: true });
+    const result = await pending;
+    assert.equal(result.element, s.win.document.querySelector('[data-message-id="a"]'));
+    assert.equal(result.fallback, true);
+    assert.ok(Date.now() - started < 5000, "the jump settles long before the native load timeout");
+  } finally { s.finish(); }
+});
+
+test("an instant location request asks the native list to skip its approach animation", async () => {
+  const s = setup();
+  try {
+    await s.send("page", { payload: s.payload("## 标题\n\n正文"), replace: true }); await s.send("complete");
+    const marker = s.controller.outline({}).items[0];
+    void s.controller.ensureLocation(marker.markerKey, {}, { instant: true });
+    assert.equal(s.commands.at(-1).command, "reveal");
+    assert.equal(s.commands.at(-1).instant, true);
+    void s.controller.ensureLocation(marker.markerKey, {});
+    assert.equal(s.commands.at(-1).instant, false);
+  } finally { s.finish(); }
 });

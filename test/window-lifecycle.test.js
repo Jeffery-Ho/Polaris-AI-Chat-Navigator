@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
 import { readFile } from "node:fs/promises";
+import { createConversationCacheHandler } from "../src/conversation-cache.js";
 
 const packagedContentScripts = [{
   css: ["assets/content-styles-HASH.css"],
@@ -15,7 +16,8 @@ const [backgroundSource, deliverySource] = await Promise.all([
 const executableBackgroundSource = backgroundSource.replace(
   'import { snapshotDeliveryResult } from "./snapshot-delivery.js";\n',
   deliverySource.replaceAll("export ", "")
-).replace("export function initializeBackground", "function initializeBackground") + "\ninitializeBackground();";
+).replace('import { createConversationCacheHandler } from "./conversation-cache.js";\n', "")
+  .replace("export function initializeBackground", "function initializeBackground") + "\ninitializeBackground();";
 
 function createEvent() {
   let listener = null;
@@ -129,6 +131,7 @@ async function runAction({ storedWindow, getError = null, updateError = null, sy
 
   vm.runInNewContext(executableBackgroundSource, {
     chrome,
+    createConversationCacheHandler,
     URL,
     Number,
     Date,
@@ -233,7 +236,7 @@ async function runSidePanelReady() {
     }
   };
 
-  vm.runInNewContext(executableBackgroundSource, { chrome, URL, Number, Date, Promise, console });
+  vm.runInNewContext(executableBackgroundSource, { chrome, createConversationCacheHandler, URL, Number, Date, Promise, console });
   runtimeMessage.emit({ type: "POLARIS_WINDOW_READY", windowType: "sidepanel" });
   await new Promise((resolve) => setTimeout(resolve, 0));
   return { local, sends };

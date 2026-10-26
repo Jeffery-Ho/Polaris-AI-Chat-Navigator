@@ -1,5 +1,27 @@
 const RELEASE_NOTES = Object.freeze([
   {
+    version: "0.80.0",
+    en: {
+      title: "Reuse long conversations faster",
+      changes: ["Complete reading reuses ChatGPT's loaded history and keeps a compressed parsed cache on this device. Unchanged messages do not need to be parsed again. The cache is limited to 100 MiB, is not synchronized, and can be cleared in Preferences. Opening still waits for current content and the native conversation to be ready."]
+    },
+    zh: {
+      title: "更快复用长对话",
+      changes: ["完整阅读优先复用 ChatGPT 已加载的历史，并在本机压缩缓存解析结果，未变化消息无需重复解析。缓存最多 100 MiB，不会同步，可在偏好设置中清除。打开时仍会等待最新内容和原生正文准备完成。"]
+    }
+  },
+  {
+    version: "0.79.0",
+    en: {
+      title: "Start reading with one click",
+      changes: ["With complete mode on, click any chat and Polaris starts reading it, with no page refresh needed. A card on ChatGPT's home page points you to the chat list. Makers appear together with the conversation once the loading screen finishes. Jumps from Table of Contents or Outline scroll smoothly and briefly highlight the location in the chat, and Outline no longer adds extra Full text chapters."]
+    },
+    zh: {
+      title: "点一下就开始读取",
+      changes: ["开启完整对话后，点击任意会话即可开始读取，无需刷新页面；ChatGPT 首页会提示你从会话列表中选择。加载页结束后，Maker 列表与对话同时出现。从目录或 Outline 定位时会平滑滚动，并短暂高亮目标位置；Outline 不再多出“全文”章节。"]
+    }
+  },
+  {
     version: "0.78.0",
     en: {
       title: "Open complete conversations",

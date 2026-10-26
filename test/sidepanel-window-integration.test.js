@@ -65,6 +65,25 @@ test("complete indexing settings show the actual title and two exclusive mode ca
   } finally { s.dom.window.close(); }
 });
 
+test("Preferences clear cache uses the background cache operation and announces its result", async () => {
+  const s = await boot("sidepanel", { openChapters: false });
+  try {
+    const original = s.win.chrome.runtime.sendMessage;
+    s.win.chrome.runtime.sendMessage = async (message) => {
+      if (message.type === "POLARIS_CONVERSATION_CACHE") { s.commands.push(message); return { ok: true }; }
+      return original(message);
+    };
+    s.win.document.querySelector('.window-settings-button').click();
+    s.win.document.querySelector('[data-settings-destination="preferences"]').click();
+    const button = s.win.document.querySelector('[data-settings-focus="clear-conversation-cache"]');
+    button.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(s.commands.filter((command) => command.type === "POLARIS_CONVERSATION_CACHE" && command.operation === "clear").length, 1);
+    assert.match(s.win.document.querySelector('.index-cache-status').textContent, /已清除/);
+    assert.equal(button.disabled, false);
+  } finally { s.dom.window.close(); }
+});
+
 test("indexed TOC and full-text results stay in TOC when native location is unavailable", async () => {
   const s = await boot("sidepanel", { openChapters: false });
   try {
@@ -109,6 +128,11 @@ test("completed conversation Maker jumps stay silent while pending and successfu
     finishJump({ ok: true });
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(s.win.document.querySelector('.index-notice'), null);
+
+    s.win.document.querySelector('.maker-card').click();
+    finishJump({ ok: false, reason: "navigation-cancelled" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(s.win.document.querySelector('.index-notice'), null, "manual interruption stays silent");
 
     s.win.document.querySelector('.maker-card').click();
     finishJump({ ok: false, reason: "anchor-not-found" });
@@ -552,5 +576,31 @@ test("first launch shows onboarding instead of the release notice and help reope
     reopen.click();
     assert.ok(doc.querySelector(".onboarding-dialog[open]"));
     doc.querySelector(".onboarding-skip").click();
+  } finally { s.dom.window.close(); }
+});
+
+test("indexed Makers wait for the loading cover and appear when it finishes", async () => {
+  const s = await boot("sidepanel", { openChapters: false });
+  try {
+    const snapshot = { ...s.snapshot, config: { chatgptHistoryMode: "complete" }, conversationLoading: true,
+      conversationIndex: { generation: "run", revision: 1, phase: "loading", count: 40, total: null } };
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot });
+    assert.ok(s.win.document.querySelector(".conversation-skeleton.is-reading"));
+    assert.equal(s.win.document.querySelector(".index-list-status"), null);
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...snapshot, conversationLoading: false,
+      conversationIndex: { ...snapshot.conversationIndex, phase: "complete", total: 40 } } });
+    assert.equal(s.win.document.querySelector(".conversation-skeleton"), null);
+    assert.match(s.win.document.querySelector(".index-list-status").textContent, /已读取全部/);
+  } finally { s.dom.window.close(); }
+});
+
+test("a chat that could not be read asks for a page refresh in the sidepanel", async () => {
+  const s = await boot("sidepanel", { openChapters: false });
+  try {
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...s.snapshot, config: { chatgptHistoryMode: "complete" }, conversationStalled: true,
+      conversationIndex: { generation: "run", revision: 1, phase: "loading", count: 0, total: null } } });
+    const skeleton = s.win.document.querySelector(".conversation-skeleton");
+    assert.equal(skeleton.classList.contains("is-reading"), false);
+    assert.match(skeleton.querySelector(".conversation-skeleton-status").textContent, /请刷新页面/);
   } finally { s.dom.window.close(); }
 });
