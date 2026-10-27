@@ -179,6 +179,20 @@ test("an indexed table locates its already mounted table rather than comparing i
   } finally { s.finish(); }
 });
 
+test("modern ChatGPT reply ids locate all segments without matching tool text to the API answer", async () => {
+  const s = setup('<div data-chatgpt-search-message-ids="aa"><h2>报告</h2></div><div data-chatgpt-search-message-ids="reasoning a"><div>Tool activity absent from the answer</div><div class="MarkdownRoot-first"><h2>报告</h2><p>第一段</p></div><div class="MarkdownRoot-last"><p>第二段</p></div><button>Copy</button></div>');
+  try {
+    await s.send("page", { payload: s.payload("## 报告\n\n第一段\n\n第二段"), replace: true });
+    const reply = s.win.document.querySelector('[data-chatgpt-search-message-ids="reasoning a"]');
+    const marker = s.controller.outline({}).items.find((item) => item.title === "报告");
+    assert.equal(s.controller.resolveTarget("index:a", {}), reply);
+    assert.equal(s.controller.resolveTarget(marker.markerKey, {}), reply.querySelector("h2"));
+    assert.equal(s.commands.some((command) => command.command === "reveal"), false);
+    reply.insertAdjacentHTML("afterend", reply.outerHTML);
+    assert.equal(s.controller.resolveLocation("index:a", {}).reason, "ambiguous-message");
+  } finally { s.finish(); }
+});
+
 test("a mounted message without an exposed id matches visible paragraphs and table content", async () => {
   const s = setup('<div class="markdown"><h2>报告</h2><p>前言</p><table><thead><tr><th>市场</th><th>财富</th></tr></thead><tbody><tr><td>日本</td><td>10</td></tr></tbody></table><button>Copy</button><span aria-hidden="true">Hidden control</span></div>');
   try {
@@ -187,6 +201,24 @@ test("a mounted message without an exposed id matches visible paragraphs and tab
     assert.equal(s.controller.resolveTarget("index:a", {}), s.win.document.querySelector(".markdown"));
     const heading = s.controller.outline({}).items.find((item) => item.title === "报告");
     assert.equal(s.controller.resolveTarget(heading.markerKey, {}), s.win.document.querySelector("h2"));
+  } finally { s.finish(); }
+});
+
+test("a Maker in a message with an unrendered memory citation resolves without native navigation", async () => {
+  const s = setup('<div class="MarkdownRoot-current"><p>设备方向</p><p><strong>猫砂机</strong></p><p>健康管理。</p></div>');
+  try {
+    await s.send("page", { payload: s.payload("设备方向\n\n**猫砂机**\n\n健康管理。\uE200memcite\uE201"), replace: true });
+    await s.send("complete");
+    const config = { enabledStrong: true };
+    const marker = [...s.controller.outline(config).targets.entries()].find(([, target]) => target.title === "猫砂机");
+    assert.ok(marker);
+    const result = await s.controller.ensureLocation(marker[0], config, { instant: true });
+    assert.equal(result.element, s.win.document.querySelector("strong"));
+    assert.equal(s.commands.some((command) => command.command === "reveal"), false);
+    assert.equal(s.controller.resolveTarget("index:a", config), s.win.document.querySelector(".MarkdownRoot-current"));
+    // The same comparison must accept persisted anchors produced before the fix.
+    for (const target of s.controller.outline(config).targets.values()) target.anchorText += "\uE200memcite\uE201";
+    assert.equal(s.controller.resolveTarget(marker[0], config), s.win.document.querySelector("strong"));
   } finally { s.finish(); }
 });
 

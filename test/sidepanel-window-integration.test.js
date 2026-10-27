@@ -604,3 +604,46 @@ test("a chat that could not be read asks for a page refresh in the sidepanel", a
     assert.match(skeleton.querySelector(".conversation-skeleton-status").textContent, /请刷新页面/);
   } finally { s.dom.window.close(); }
 });
+
+test("the full-read failure action reloads only its source conversation and prevents duplicate clicks", async () => {
+  for (const locale of ["zh", "en"]) for (const theme of ["light", "dark"]) {
+    const s = await boot("sidepanel", { locale, openChapters: false });
+    try {
+      s.win.matchMedia = () => ({ matches: theme === "dark" });
+      const snapshot = { ...s.snapshot, config: { chatgptHistoryMode: "complete" }, conversationStalled: true,
+        conversationIndex: { generation: "run", phase: "loading", count: 0 } };
+      s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot });
+      const action = s.win.document.querySelector(".conversation-read-reload");
+      assert.ok(action, `${locale}/${theme}: the failure has an action`);
+      assert.equal(action.textContent, locale === "zh" ? "刷新页面" : "Refresh page");
+      assert.equal(s.win.document.documentElement.dataset.theme, theme);
+      action.click(); action.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const commands = s.commands.filter((command) => command.command === "reload-conversation");
+      assert.equal(commands.length, 1);
+      assert.equal(commands[0].expectedTabId, 7);
+      assert.equal(commands[0].expectedRouteKey, snapshot.routeKey);
+      assert.equal(action.disabled, true);
+      s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...snapshot, conversationStalled: false, conversationLoading: true } });
+      assert.equal(s.win.document.querySelector(".conversation-read-reload"), null, "normal reading needs no refresh action");
+      s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...snapshot, config: { chatgptHistoryMode: "default" } } });
+      assert.equal(s.win.document.querySelector(".conversation-read-reload"), null, "turning complete mode off removes the action");
+    } finally { s.dom.window.close(); }
+  }
+});
+
+test("a rejected refresh is retryable without changing the full-read preference", async () => {
+  const s = await boot("sidepanel", { openChapters: false });
+  try {
+    const original = s.win.chrome.runtime.sendMessage;
+    s.win.chrome.runtime.sendMessage = async (message) => message.command === "reload-conversation" ? { ok: false } : original(message);
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...s.snapshot, config: { chatgptHistoryMode: "complete" }, conversationStalled: true } });
+    const action = s.win.document.querySelector(".conversation-read-reload");
+    assert.ok(action);
+    action.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(action.disabled, false);
+    assert.match(s.win.document.querySelector(".conversation-skeleton-status").textContent, /刷新失败/);
+    assert.equal(s.commands.some((command) => command.command === "update-config"), false);
+  } finally { s.dom.window.close(); }
+});

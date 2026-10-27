@@ -680,6 +680,29 @@ export function initializeSidepanel() {
         : (locale === "zh" ? "等待会话…" : "Waiting for a conversation…");
       const status = loading.querySelector(".conversation-skeleton-status");
       if (status.textContent !== copy) status.textContent = copy;
+      const canReload = snapshot.config?.chatgptHistoryMode === "complete" && snapshot.conversationStalled
+        && snapshot.platform === "chatgpt" && isPotentialConversationRoute(snapshot.routeKey);
+      let reload = loading.querySelector(".conversation-read-reload");
+      if (!canReload) reload?.remove();
+      else if (!reload) {
+        reload = element("button", "secondary-button conversation-read-reload", locale === "zh" ? "刷新页面" : "Refresh page");
+        reload.type = "button";
+        reload.addEventListener("click", async () => {
+          const tabId = state.sourceTabId; const routeKey = state.routeKey;
+          reload.disabled = true;
+          reload.textContent = locale === "zh" ? "正在刷新…" : "Refreshing…";
+          let result;
+          try {
+            result = await chrome.runtime.sendMessage({ type: "POLARIS_WINDOW_COMMAND", command: "reload-conversation", expectResult: true,
+              expectedTabId: tabId, expectedRouteKey: routeKey });
+          } catch { /* Keep the failed action available for another attempt. */ }
+          if (!reload.isConnected || state.sourceTabId !== tabId || state.routeKey !== routeKey || result?.ok) return;
+          reload.disabled = false;
+          reload.textContent = locale === "zh" ? "刷新页面" : "Refresh page";
+          status.textContent = locale === "zh" ? "刷新失败，请重试。" : "Couldn't refresh the page. Try again.";
+        });
+        status.after(reload);
+      }
       if (panel.firstElementChild !== loading) panel.replaceChildren(loading);
       return panel;
     }

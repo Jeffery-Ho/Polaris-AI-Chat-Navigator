@@ -54,7 +54,8 @@ function blockAnchorText(block) {
 }
 
 export function normalizeAnchorText(value) {
-  return normalizeIndexedText(value).replace(/\s/gu, "");
+  // ChatGPT includes this memory-citation token in API text but does not paint it.
+  return normalizeIndexedText(value).replace(/\uE200memcite\uE201/gu, "").replace(/\s/gu, "");
 }
 
 export function messageText(message) {
@@ -133,7 +134,7 @@ export function createConversationIndex({ yieldTask = () => new Promise((resolve
   const notify = () => { revision++; listeners.forEach((listener) => listener(status())); };
   const status = () => ({ phase, title, count: records.size, total: phase === "complete" ? records.size : null, revision, branch, error });
 
-  async function ingest(payload, { older = false, replace = false, signal } = {}) {
+  async function ingest(payload, { older = false, replace = false, signal, complete = false } = {}) {
     const page = conversationPage(payload);
     if (replace) reusableRecords = records;
     const normalized = [];
@@ -155,7 +156,8 @@ export function createConversationIndex({ yieldTask = () => new Promise((resolve
     order = older ? [...ids, ...order.filter((id) => !incoming.has(id))] : [...order.filter((id) => !incoming.has(id)), ...ids];
     if (typeof payload.title === "string") title = payload.title;
     branch = replace ? page.branch : page.branch || branch;
-    phase = "loading"; error = "";
+    if (complete) reusableRecords.clear();
+    phase = complete ? "complete" : "loading"; error = "";
     notify();
     return page;
   }

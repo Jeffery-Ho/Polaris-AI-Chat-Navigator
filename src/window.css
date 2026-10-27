@@ -599,6 +599,11 @@ button { color: inherit; }
   background: var(--polaris-accent);
 }
 
+.conversation-read-reload {
+  max-width: 100%;
+  margin-bottom: var(--polaris-space-3);
+}
+
 .conversation-skeleton-list {
   display: grid;
   gap: var(--polaris-space-2);

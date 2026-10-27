@@ -492,7 +492,31 @@ export function initializeContent() {
     renderSnapshot: (snapshot) => render(snapshot, { suppressMarkerMotion: true })
   });
   const locateFlash = createLocateFlash({ window, onReport: (outcome) => recordDiagnosticEvent("locate_flash", { outcome }) });
-  const flashLocated = (element, resolve) => locateFlash.flash(element, { theme: document.getElementById(ROOT_ID)?.dataset.pageTheme || "light", resolve });
+  const flashLocated = (element, resolve) => {
+    // Keep the scroll anchor precise, but tint its entire assistant reply.
+    const replyFor = (target) => {
+      const body = target && getAssistantContainers().find((reply) => reply.contains(target));
+      // Modern ChatGPT can split one reply into several Markdown roots.
+      const reply = isChatGPTPage() && body?.closest("[data-chatgpt-search-message-ids]");
+      return reply && !isChatGptUserTurnNode(reply)
+        && !reply.querySelector('[data-message-author-role="user"], [data-message-role="user"], [data-user-message-bubble]')
+        ? reply : body || target;
+    };
+    return locateFlash.flash(replyFor(element), {
+      theme: document.getElementById(ROOT_ID)?.dataset.pageTheme || "light",
+      resolve: resolve && (() => replyFor(resolve())),
+      getViewport(reply) {
+        const scroller = reply && nearestVerticalScrollContainer(reply);
+        const bounds = scroller?.getBoundingClientRect();
+        return {
+          top: Math.max(getConversationHeaderHeight() + TABLE_MARKER_SCROLL_GAP, bounds?.top ?? 0),
+          bottom: Math.min(window.innerHeight, bounds?.bottom ?? window.innerHeight),
+          left: Math.max(0, bounds?.left ?? 0),
+          right: Math.min(window.innerWidth, bounds?.right ?? window.innerWidth)
+        };
+      }
+    });
+  };
   const conversationCover = createChatGptConversationCover({ window, locale,
     logoUrl: chrome.runtime.getURL("icons/gpt-voyager-icon-96.png"),
     onRetry: () => conversationIndex.retry(),
@@ -4633,6 +4657,7 @@ export function initializeContent() {
   }
 
   function jumpToHeading(heading, behavior = "smooth") {
+    locateFlash.cancel();
     const element = currentElementForHeading(heading);
     if (!element) {
       return false;
@@ -4643,6 +4668,7 @@ export function initializeContent() {
       return false;
     }
     window.history.replaceState(null, "", `#${encodeURIComponent(element.id)}`);
+    flashLocated(element, () => currentElementForHeading(heading));
     return true;
   }
 
@@ -5611,7 +5637,6 @@ export function initializeContent() {
       const heading = state.headings.find((item) => markerKeyForHeading(item) === markerKey);
       if (heading && jumpToHeading(heading, "instant")) {
         recordDiagnosticEvent("locate_request", { kind: "heading", outcome: "moved" });
-        flashLocated(currentElementForHeading(heading), () => currentElementForHeading(heading));
         state.activeMarkerKey = markerKey;
         updateActiveMarker();
         publishWindowSnapshot();

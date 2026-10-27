@@ -24,10 +24,10 @@ export function stepStates(snapshot) {
 }
 
 // Reading stays silent until the first message arrives; if none arrives in
-// time, the chat was not found and the user is asked to refresh instead.
+// time, report the stalled state to the sidepanel without covering the page.
 const STALL_MS = 6000;
 
-export function createChatGptConversationCover({ window: win, logoUrl, locale = "en", onRetry, onDismiss, onStateChange, reload = () => win.location.reload() }) {
+export function createChatGptConversationCover({ window: win, logoUrl, locale = "en", onRetry, onDismiss, onStateChange }) {
   const doc = win.document;
   const zh = locale === "zh";
   let host = null;
@@ -40,7 +40,6 @@ export function createChatGptConversationCover({ window: win, logoUrl, locale = 
   let observer = null;
   let ui = null;
   let notice = null;
-  let noticeKind = "";
   let noticeDismissed = false;
   let waitingSince = null;
   let stallTimer = 0;
@@ -141,12 +140,10 @@ export function createChatGptConversationCover({ window: win, logoUrl, locale = 
   function hideNotice() {
     if (!notice) return;
     win.removeEventListener("resize", placeNotice);
-    notice.remove(); notice = null; noticeKind = "";
+    notice.remove(); notice = null;
   }
-  // kind "await": no chat is open; kind "refresh": the open chat was not read.
-  function showNotice(theme, kind = "await") {
-    if (kind === "await" && noticeDismissed) return;
-    if (notice && noticeKind !== kind) hideNotice();
+  function showNotice(theme) {
+    if (noticeDismissed) return;
     if (!notice) {
       notice = doc.createElement("div"); notice.id = "polaris-conversation-notice";
       Object.assign(notice.style, { position: "fixed", zIndex: "2147483645" });
@@ -161,42 +158,29 @@ export function createChatGptConversationCover({ window: win, logoUrl, locale = 
         strong{display:block;margin-top:2px;font-size:14px;font-weight:600}p{margin:2px 0 0;color:var(--secondary);font-size:13px;line-height:1.5}
         button{flex:none;display:flex;width:28px;height:28px;align-items:center;justify-content:center;border:0;border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;padding:0}
         button:hover{background:color-mix(in srgb,var(--fg) 6%,transparent);color:var(--fg)}button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
-        .reload{width:auto;height:auto;margin-top:10px;padding:6px 14px;border-radius:999px;background:var(--accent);color:var(--accent-fg);font:inherit;font-size:13px;line-height:1.4}
-        .reload:hover{background:color-mix(in srgb,var(--accent) 88%,var(--fg));color:var(--accent-fg)}
         svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
         @media(prefers-reduced-motion:no-preference){.arrow{animation:nudge 1.2s var(--ease,ease-in-out) 3}@keyframes nudge{50%{transform:translateX(-4px)}}}
       `;
       const card = doc.createElement("div"); card.className = "card"; card.setAttribute("role", "status");
       const arrow = doc.createElement("span"); arrow.className = "arrow";
-      arrow.innerHTML = kind === "refresh"
-        ? '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 10a6 6 0 1 1-1.76-4.24M16 4v3.5h-3.5"/></svg>'
-        : '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 10H4m5-5-5 5 5 5"/></svg>';
-      if (kind === "refresh") arrow.style.animation = "none";
+      arrow.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 10H4m5-5-5 5 5 5"/></svg>';
       const text = doc.createElement("div"); text.className = "text";
       const eyebrow = doc.createElement("div"); eyebrow.className = "eyebrow";
       if (logoUrl) { const logo = doc.createElement("img"); logo.src = logoUrl; logo.alt = ""; eyebrow.append(logo); }
       eyebrow.append(copy("Polaris · 已开启完整对话", "Polaris · Full conversation is on"));
       const heading = doc.createElement("strong");
-      heading.textContent = kind === "refresh" ? copy("没有读取到这个会话", "Couldn't read this chat") : copy("选择一个会话开始读取", "Pick a chat to start reading");
+      heading.textContent = copy("选择一个会话开始读取", "Pick a chat to start reading");
       const body = doc.createElement("p"); body.className = "body";
       text.append(eyebrow, heading, body);
-      if (kind === "refresh") {
-        const button = doc.createElement("button"); button.type = "button"; button.className = "reload";
-        button.textContent = copy("刷新页面", "Refresh page");
-        button.addEventListener("click", () => reload());
-        text.append(button);
-      }
       const dismiss = doc.createElement("button"); dismiss.type = "button"; dismiss.className = "dismiss";
       dismiss.setAttribute("aria-label", copy("关闭提示", "Dismiss"));
       dismiss.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg>';
-      dismiss.addEventListener("click", () => { if (kind === "await") noticeDismissed = true; else dismissed = true; hideNotice(); onDismiss?.(); });
+      dismiss.addEventListener("click", () => { noticeDismissed = true; hideNotice(); onDismiss?.(); });
       card.append(arrow, text, dismiss); shadow.append(style, card);
-      doc.body.append(notice); win.addEventListener("resize", placeNotice); noticeKind = kind;
+      doc.body.append(notice); win.addEventListener("resize", placeNotice);
     }
     notice.dataset.theme = theme;
-    notice.shadowRoot.querySelector(".body").textContent = kind === "refresh"
-      ? copy("刷新页面后，Polaris 会重新读取完整对话。", "Refresh the page and Polaris reads the full conversation again.")
-      : sidebarOpen()
+    notice.shadowRoot.querySelector(".body").textContent = sidebarOpen()
       ? copy("点击左侧列表中的任意会话，Polaris 会读取它的全部消息。", "Click any chat in the sidebar and Polaris reads every message in it.")
       : copy("先展开左侧边栏，再点击任意会话，Polaris 会读取它的全部消息。", "Open the sidebar, then click any chat and Polaris reads every message in it.");
     placeNotice();
@@ -216,12 +200,12 @@ export function createChatGptConversationCover({ window: win, logoUrl, locale = 
       if (!snapshot) { hideNotice(); close(); resetWaiting(); generation = ""; dismissed = false; return; }
       if (snapshot.generation !== generation) { close(); resetWaiting(); generation = snapshot.generation; dismissed = false; }
       if (dismissed || snapshot.phase === "complete" && snapshot.native?.phase === "ready") { hideNotice(); close(); resetWaiting(); return; }
-      // Nothing read yet: no cover over an empty count. A failure or a quiet
-      // wait means the chat was not found, so ask for a refresh instead.
+      // Nothing read yet: leave the host page usable. The sidepanel owns
+      // the stalled/error message; do not add a floating refresh notice.
       if (!Number(snapshot.count) && snapshot.phase !== "complete") {
-        close();
+        hideNotice(); close();
         waitingSince ??= now();
-        if (snapshot.phase === "error" || now() - waitingSince >= STALL_MS) { stalled = true; win.clearTimeout(stallTimer); stallTimer = 0; showNotice(theme, "refresh"); }
+        if (snapshot.phase === "error" || now() - waitingSince >= STALL_MS) { stalled = true; win.clearTimeout(stallTimer); stallTimer = 0; }
         else if (!stallTimer) stallTimer = win.setTimeout(() => { stallTimer = 0; if (last) this.update(last.snapshot, last.theme); onStateChange?.(); }, STALL_MS - (now() - waitingSince));
         return;
       }
@@ -239,7 +223,7 @@ export function createChatGptConversationCover({ window: win, logoUrl, locale = 
       ui.retry.hidden = !failed;
     },
     isShowing: () => Boolean(host),
-    // Waiting for the first message, before either the cover or a refresh notice.
+    // Waiting for the first message, before completion or a stalled state.
     isWaiting: () => waitingSince !== null && !stalled && !dismissed,
     isStalled: () => stalled && !dismissed,
     dispose() { close(); hideNotice(); resetWaiting(); last = null; generation = ""; dismissed = false; noticeDismissed = false; }

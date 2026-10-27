@@ -145,7 +145,7 @@ export function createChatGptIndexController({ window: win, bridgeUrl, onChange,
           if (signal.aborted || generation !== session) return;
           authoritativeData = true;
           const began = performance.now();
-          if (data.reconcile) await current.reconcile(data.payload, { signal });
+          if (data.reconcile) await current.reconcile(data.payload, { signal, complete: current.status().phase === "complete" });
           else await current.ingest(data.payload, { older: Boolean(data.older) && !changedScope, replace: Boolean(data.replace) || changedScope, signal });
           timings.indexMs += performance.now() - began;
           if (signal.aborted || generation !== session) return;
@@ -154,7 +154,8 @@ export function createChatGptIndexController({ window: win, bridgeUrl, onChange,
           if (["native", "fallback"].includes(data.source)) timings.source = data.source;
           if (Number.isFinite(data.readMs)) timings.readMs = data.readMs;
           if (Number.isFinite(data.historicalRequests)) timings.historicalRequests = data.historicalRequests;
-          index.finish(); prepareNativeList(); saveWhenReady();
+          if (index.status().phase !== "complete") index.finish();
+          prepareNativeList(); saveWhenReady();
         }
         else if (data.event === "loading") { invalidRun = false; index.begin(); }
         else if (data.event === "error") { retryAt = Number(data.retryAt) || 0; index.fail(String(data.reason || "network-error")); }
@@ -210,17 +211,21 @@ export function createChatGptIndexController({ window: win, bridgeUrl, onChange,
     const unavailable = (reason) => ({ element: null, reason });
     const target = outline(config).targets.get(key);
     if (!target) return unavailable("target-missing");
-    const candidates = [...doc.querySelectorAll('main [data-message-id]')].filter((node) => node.getAttribute("data-message-id") === target.messageId);
+    const candidates = [...doc.querySelectorAll('main [data-message-id], main [data-chatgpt-search-message-ids]')]
+      .filter((node) => node.getAttribute("data-message-id") === target.messageId
+        || (node.getAttribute("data-chatgpt-search-message-ids") || "").split(/\s+/).includes(target.messageId));
     const outerCandidates = candidates.filter((node) => !candidates.some((other) => other !== node && other.contains(node)));
     if (outerCandidates.length > 1) return unavailable("ambiguous-message");
     let message = outerCandidates[0];
     if (!message) {
-      const ids = new Set([...outline(config).targets.values()].filter((entry) => entry.role === target.role && entry.anchorText === target.anchorText).map((entry) => entry.messageId));
+      // Cached records from older builds may still contain unrendered tokens.
+      const anchorText = normalizeAnchorText(target.anchorText || "");
+      const ids = new Set([...outline(config).targets.values()].filter((entry) => entry.role === target.role && normalizeAnchorText(entry.anchorText || "") === anchorText).map((entry) => entry.messageId));
       if (ids.size > 1) return unavailable("ambiguous-message");
       const selector = target.role === "user"
         ? 'main [data-message-author-role="user"], main [data-message-role="user"], main [data-conversation-role="user"], main [class~="group/user-message"]'
         : `main [data-message-author-role="assistant"], main [data-message-role="assistant"], main [data-conversation-role="assistant"], main .markdown, main .prose, ${HASHED_MARKDOWN_ROOT_SELECTOR.split(", ").map((selector) => `main ${selector}`).join(", ")}`;
-      const unique = [...doc.querySelectorAll(selector)].filter((node) => target.anchorText && messageAnchor(node) === target.anchorText);
+      const unique = [...doc.querySelectorAll(selector)].filter((node) => anchorText && messageAnchor(node) === anchorText);
       const outer = unique.filter((node) => !unique.some((other) => other !== node && other.contains(node)));
       // Without an exposed message id, only an unambiguous content match is safe.
       if (outer.length !== 1) return unavailable(outer.length ? "ambiguous-message" : "not-mounted");

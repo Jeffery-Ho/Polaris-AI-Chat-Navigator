@@ -127,17 +127,20 @@ test("the cover reports whether it is showing and announces a manual dismissal",
   } finally { cover.dispose(); dom.window.close(); }
 });
 
-test("an empty read shows no cover, then asks for a refresh when the chat is not found", () => {
+test("an empty or failed read reports its state without a floating notice over the host page", () => {
   const dom = new JSDOM("<main><textarea></textarea></main>", { url: "https://chatgpt.com/c/one" });
-  const win = dom.window; let time = 0; const timers = []; let changes = 0; let reloads = 0;
+  const win = dom.window; let time = 0; const timers = []; let changes = 0;
   Object.defineProperty(win.performance, "now", { value: () => time });
   win.setTimeout = (callback, delay) => { timers.push({ callback, delay }); return timers.length; };
   win.clearTimeout = () => {};
-  const cover = createChatGptConversationCover({ window: win, locale: "zh", onStateChange: () => changes++, reload: () => reloads++ });
+  const cover = createChatGptConversationCover({ window: win, locale: "zh", onStateChange: () => changes++ });
   const notice = () => win.document.getElementById("polaris-conversation-notice");
   const loading = (fields = {}) => cover.update({ generation: "one", phase: "loading", count: 0, native: { phase: "loading" }, ...fields });
   try {
+    cover.awaitConversation();
+    assert.ok(notice());
     loading();
+    assert.equal(notice(), null, "the home-page notice leaves when a conversation opens");
     assert.equal(cover.isShowing(), false, "no cover over an empty count");
     assert.equal(cover.isWaiting(), true);
     assert.equal(win.document.querySelector("main").hasAttribute("inert"), false);
@@ -145,14 +148,14 @@ test("an empty read shows no cover, then asks for a refresh when the chat is not
     time = 6000; timers[0].callback();
     assert.equal(changes, 1);
     assert.equal(cover.isStalled(), true); assert.equal(cover.isWaiting(), false);
-    assert.match(notice().shadowRoot.querySelector("strong").textContent, /没有读取到这个会话/);
-    notice().shadowRoot.querySelector(".reload").click(); assert.equal(reloads, 1);
+    assert.equal(notice(), null, "a timeout must not cover the host sidebar");
     loading({ count: 3 });
     assert.equal(notice(), null); assert.equal(cover.isShowing(), true); assert.equal(cover.isStalled(), false);
-    cover.update({ generation: "two", phase: "error", count: 0 });
-    assert.equal(cover.isStalled(), true, "a failed empty read asks for a refresh at once");
+    cover.update({ generation: "two", phase: "error", count: 0 }, "dark");
+    assert.equal(cover.isStalled(), true, "the sidepanel can still report a failed empty read");
     assert.equal(cover.isShowing(), false);
-    notice().shadowRoot.querySelector(".dismiss").click();
-    assert.equal(notice(), null); assert.equal(cover.isStalled(), false);
+    assert.equal(notice(), null, "an error must not create a floating notice in dark mode either");
+    cover.update(null);
+    assert.equal(cover.isStalled(), false);
   } finally { cover.dispose(); dom.window.close(); }
 });

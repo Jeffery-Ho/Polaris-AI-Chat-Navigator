@@ -65,6 +65,7 @@ async function bootPackagedContent({ delayConfig = false } = {}) {
     url: "https://chatgpt.com/c/wxt-test", runScripts: "outside-only", pretendToBeVisual: true, virtualConsole: console
   });
   const win = dom.window;
+  win.CSS = { escape: (value) => String(value).replace(/[^a-zA-Z0-9_-]/g, (char) => `\\${char}`) };
   win.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
   win.ResizeObserver = class { observe() {} disconnect() {} };
   win.HTMLElement.prototype.getBoundingClientRect = () => ({ top: 0, bottom: 100, left: 0, right: 600, height: 100, width: 600 });
@@ -122,7 +123,7 @@ test("packaged content keeps indexed body data available without native history 
     assert.ok(start);
     s.win.dispatchEvent(new s.win.MessageEvent("message", { source: s.win, origin: s.win.location.origin, data: {
       type: "polaris-conversation-index-result", requestId: start.requestId, conversationId: start.conversationId, runId: 1, event: "page",
-      payload: { messages: [{ id: "server-answer", author: { role: "assistant" }, content: { content_type: "text", parts: ["| 市场 | 财富 |\n| --- | --- |\n| 日本 | 10 |"] } }], page_info: { has_previous_page: false, has_next_page: false } }
+      payload: { messages: [{ id: "server-answer", author: { role: "assistant" }, content: { content_type: "text", parts: ["| 市场 | 财富 |\n| --- | --- |\n| 日本 | 10 |\n\n表格后的解释。"] } }], page_info: { has_previous_page: false, has_next_page: false } }
     } }));
     await s.flush(); await s.flush();
     const markerKey = "index:server-answer:0:0";
@@ -133,6 +134,111 @@ test("packaged content keeps indexed body data available without native history 
     const body = command("get-index-chapter", { ...source, markerKey: "index:server-answer", expectResult: true });
     assert.equal(body.contents[0].ast.type, "table");
     assert.equal(s.win.document.querySelector('[data-message-id="server-answer"]'), null);
+    const mounted = s.win.document.createElement("div");
+    mounted.dataset.chatgptSearchMessageIds = "tool-id server-answer";
+    mounted.innerHTML = '<div>Tool activity absent from the answer</div><div class="MarkdownRoot-first"><table><thead><tr><th>市场</th><th>财富</th></tr></thead><tbody><tr><td>日本</td><td>10</td></tr></tbody></table></div><div class="MarkdownRoot-last"><p>表格后的解释。</p></div>';
+    mounted.getBoundingClientRect = () => ({ top: 120, bottom: 620, left: 100, right: 700, width: 600, height: 500 });
+    mounted.querySelector("table").getBoundingClientRect = () => ({ top: 150, bottom: 250, left: 100, right: 700, width: 600, height: 100 });
+    s.win.document.querySelector("main").append(mounted);
+    const scrolls = [];
+    s.win.HTMLElement.prototype.scrollIntoView = function () { scrolls.push(this); };
+    command("jump-to-marker", { ...source, markerKey, expectResult: true });
+    await s.flush();
+    assert.equal(scrolls.at(-1), mounted.querySelector("table"));
+    assert.equal(s.win.document.querySelector("[data-polaris-locate-flash]"), null, "wait for scroll settling before painting");
+    await new Promise((resolve) => setTimeout(resolve, 220));
+    const highlight = s.win.document.querySelector("[data-polaris-locate-flash]");
+    assert.ok(highlight, "the sidepanel runtime command paints the mounted indexed reply");
+    assert.equal(highlight.style.top, "112px");
+    assert.equal(highlight.style.height, "516px", "includes the rest of the reply after the table");
+    const replacement = mounted.cloneNode(true);
+    replacement.getBoundingClientRect = () => ({ top: 220, bottom: 620, left: 100, right: 700, width: 600, height: 400 });
+    mounted.replaceWith(replacement);
+    await new Promise((resolve) => setTimeout(resolve, 220));
+    assert.equal(highlight.style.top, "212px", "a remounted target resolves the whole reply again");
+    assert.equal(highlight.style.height, "416px");
+    assert.deepEqual(s.errors, []);
+  } finally { s.invalidate(); s.dom.window.close(); }
+});
+
+for (const theme of ["light", "dark"]) {
+  for (const markup of ["legacy", "modern"]) {
+    test(`on-page Maker jumps tint the whole ${markup} reply after scrolling (${theme})`, async () => {
+      const s = await bootPackagedContent();
+      try {
+        const scrolls = [];
+        s.win.HTMLElement.prototype.scrollIntoView = function (options) { scrolls.push({ element: this, ...options }); };
+        const reply = s.win.document.querySelector('[data-message-author-role="assistant"]');
+        reply.insertAdjacentHTML("beforeend", '<div class="markdown"><p>Another segment of this reply</p></div>');
+        reply.insertAdjacentHTML("afterend", '<div data-message-author-role="user">Next question</div><div data-message-author-role="assistant"><div class="markdown"><p>Next reply</p></div></div>');
+        if (markup === "modern") {
+          reply.removeAttribute("data-message-author-role");
+          reply.setAttribute("data-chatgpt-search-message-ids", "reply-id");
+          for (const [index, segment] of [...reply.children].entries()) {
+            segment.className = `MarkdownRoot-segment${index}`;
+            segment.setAttribute("data-content-search-unit-key", `part-${index}:assistant`);
+          }
+        }
+        reply.getBoundingClientRect = () => ({ top: 120, bottom: 620, left: 100, right: 700, width: 600, height: 500 });
+        reply.querySelector("h2").getBoundingClientRect = () => ({ top: 150, bottom: 180, left: 100, right: 700, width: 600, height: 30 });
+        await s.inject();
+        const root = s.win.document.getElementById("gpt-paragraph-nav");
+        root.dataset.pageTheme = theme;
+        const marker = root.querySelector('.gpt-paragraph-nav__list [data-marker-item-type="ai"]');
+        assert.ok(marker, "the packaged content renders a clickable Maker");
+        marker.click();
+        assert.equal(scrolls.at(-1).element, s.win.document.querySelector("main h2"));
+        assert.equal(scrolls.at(-1).behavior, "smooth");
+        const overlay = () => s.win.document.querySelector("[data-polaris-locate-flash]");
+        assert.equal(overlay(), null, "no tint during the jump");
+        await new Promise((resolve) => setTimeout(resolve, 220));
+        assert.ok(overlay(), "the Maker target receives the shared highlight");
+        assert.equal(overlay().style.top, "112px");
+        assert.equal(overlay().style.left, "92px");
+        assert.equal(overlay().style.width, "616px");
+        assert.equal(overlay().style.height, "516px", "covers all reply segments, excluding adjacent turns");
+        assert.equal(overlay().style.background, theme === "dark" ? "rgba(230, 154, 120, 0.12)" : "rgba(184, 92, 58, 0.08)");
+        const previous = overlay();
+        marker.click();
+        assert.equal(previous.isConnected, false, "a repeated jump replaces the previous frame");
+        assert.equal(overlay(), null);
+        await new Promise((resolve) => setTimeout(resolve, 220));
+        assert.ok(overlay());
+        s.invalidate();
+        await new Promise((resolve) => setTimeout(resolve, 160));
+        assert.equal(overlay(), null, "disposing the content cancels the pending highlight");
+        assert.deepEqual(s.errors, []);
+      } finally { s.invalidate(); s.dom.window.close(); }
+    });
+  }
+}
+
+test("a long reply is tinted below the fixed header and inside the actual conversation scrollport", async () => {
+  const s = await bootPackagedContent();
+  try {
+    s.win.HTMLElement.prototype.scrollIntoView = () => {};
+    const main = s.win.document.querySelector("main");
+    main.style.overflowY = "auto";
+    Object.defineProperty(main, "scrollHeight", { value: 2000 });
+    Object.defineProperty(main, "clientHeight", { value: 700 });
+    main.getBoundingClientRect = () => ({ top: 0, bottom: 700, left: 0, right: 800, width: 800, height: 700 });
+    const header = s.win.document.createElement("header");
+    header.dataset.testid = "conversation-header";
+    header.getBoundingClientRect = () => ({ top: 0, bottom: 96, left: 0, right: 800, width: 800, height: 96 });
+    main.prepend(header);
+    const reply = main.querySelector('[data-message-author-role="assistant"]');
+    reply.getBoundingClientRect = () => ({ top: -300, bottom: 2000, left: 100, right: 700, width: 600, height: 2300 });
+    reply.querySelector("h2").getBoundingClientRect = () => ({ top: 110, bottom: 140, left: 100, right: 700, width: 600, height: 30 });
+    const scrolls = [];
+    main.scrollTo = (options) => scrolls.push(options);
+    await s.inject();
+    s.win.document.querySelector('#gpt-paragraph-nav .gpt-paragraph-nav__list [data-marker-item-type="ai"]').click();
+    assert.equal(scrolls.at(-1).top, 2, "the heading is aligned below the header with a 12px gap");
+    assert.equal(s.win.document.querySelector("[data-polaris-locate-flash]"), null);
+    await new Promise((resolve) => setTimeout(resolve, 220));
+    const highlight = s.win.document.querySelector("[data-polaris-locate-flash]");
+    assert.equal(highlight.style.top, "108px");
+    assert.equal(highlight.style.height, "592px");
     assert.deepEqual(s.errors, []);
   } finally { s.invalidate(); s.dom.window.close(); }
 });

@@ -271,6 +271,16 @@ async function forwardCommand(message) {
   }
   if (message.expectedTabId != null && message.expectedTabId !== tab.id) return { ok: false, reason: "source-changed" };
   currentTabId = tab.id;
+  if (message.command === "reload-conversation") {
+    const url = new URL(tab.pendingUrl || tab.url || "");
+    const routeKey = `${url.origin}${url.pathname}${url.search}`;
+    if (message.expectedTabId !== tab.id || message.expectedRouteKey !== routeKey
+      || !/^(chatgpt\.com|chat\.openai\.com)$/.test(url.hostname) || !/\/c\/[a-zA-Z0-9-]+(?:\/|$)/.test(url.pathname)) return { ok: false, reason: "source-changed" };
+    const stored = await chrome.storage.sync.get("gpt-paragraph-nav-config");
+    if (stored["gpt-paragraph-nav-config"]?.chatgptHistoryMode !== "complete") return { ok: false, reason: "complete-mode-disabled" };
+    await chrome.tabs.reload(tab.id);
+    return { ok: true };
+  }
   let result;
   try {
     result = await sendContentMessage(tab.id, message, {

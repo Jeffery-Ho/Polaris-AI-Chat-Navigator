@@ -1,5 +1,93 @@
 const RELEASE_NOTES = Object.freeze([
   {
+    version: "0.81.8",
+    en: {
+      title: "Refresh a stalled full read",
+      changes: ["When complete mode is enabled and a chat cannot be read, refresh its page directly from the sidepanel message. The button prevents duplicate clicks and allows another attempt if refreshing fails."]
+    },
+    zh: {
+      title: "在侧栏重试全文读取",
+      changes: ["已开启全文读取但未读取到会话时，可直接点击侧栏提示下方的“刷新页面”。按钮防止重复点击，刷新失败后可再次尝试。"]
+    }
+  },
+  {
+    version: "0.81.7",
+    en: {
+      title: "Keep the chat list unobstructed",
+      changes: ["Removed the floating refresh notice that could overflow over ChatGPT's chat list. Reading failures remain visible in the Polaris sidepanel."]
+    },
+    zh: {
+      title: "避免提示遮挡会话列表",
+      changes: ["移除可能挤压溢出、遮挡 ChatGPT 会话列表的浮动刷新提示，读取失败状态继续在 Polaris 侧栏显示。"]
+    }
+  },
+  {
+    version: "0.81.6",
+    en: {
+      title: "Stable conversation loading",
+      changes: ["Repeated complete ChatGPT responses no longer restart conversation loading. Unchanged data is skipped, while updated complete replies refresh the index without covering the conversation again."]
+    },
+    zh: {
+      title: "稳定会话读取",
+      changes: ["ChatGPT 重复返回完整会话数据时，不再反复启动读取；相同数据跳过处理，更新后的完整回复直接同步索引，不再重新遮住正文。"]
+    }
+  },
+  {
+    version: "0.81.5",
+    en: {
+      title: "Highlight after scrolling settles",
+      changes: ["Reply highlights now wait for scrolling and layout to settle, stay inside the conversation area below the header, and hide during renewed scrolling. Keeps the whole-reply highlight and existing Outline colors."]
+    },
+    zh: {
+      title: "滚动停稳后再高亮",
+      changes: ["等待滚动和布局停稳后再显示整条回复高亮，范围限制在顶部栏下方的正文区域；再次滚动时先隐藏，沿用 Outline 配色。"]
+    }
+  },
+  {
+    version: "0.81.4",
+    en: {
+      title: "Highlight complete ChatGPT replies",
+      changes: ["Modern ChatGPT reply ids now keep Maker jumps working when replies contain tool activity or multiple content segments. The highlight covers the whole reply with the existing Outline colors."]
+    },
+    zh: {
+      title: "高亮 ChatGPT 完整回复",
+      changes: ["支持 ChatGPT 新界面的整条回复 ID，修复工具活动或多段正文导致定位失败的问题；高亮覆盖整条回复，沿用 Outline 现有配色。"]
+    }
+  },
+  {
+    version: "0.81.3",
+    en: {
+      title: "Highlight the whole reply",
+      changes: ["Maker jumps now highlight the entire assistant reply, including its content segments, while scrolling to the selected heading or table. Keeps the existing Outline colors."]
+    },
+    zh: {
+      title: "高亮完整回复",
+      changes: ["Maker 跳转后高亮所属的整条 AI 回复及其内容分段，滚动仍定位到点击的标题或表格，沿用 Outline 现有配色。"]
+    }
+  },
+  {
+    version: "0.81.2",
+    en: {
+      title: "Follow your Maker destination",
+      changes: ["The destination highlight now appears as soon as the target is visible and follows it through scrolling and layout changes, using the existing Outline colors. Fixes location failures caused by hidden ChatGPT memory citations."]
+    },
+    zh: {
+      title: "高亮跟随 Maker 目标",
+      changes: ["跳转目标进入视口即显示高亮，并跟随滚动和布局变化，沿用 Outline 现有配色；修复 ChatGPT 隐藏记忆引用导致定位失败的问题。"]
+    }
+  },
+  {
+    version: "0.81.0",
+    en: {
+      title: "See where your Maker lands",
+      changes: ["On-page Maker jumps now highlight the destination after scrolling settles, using the same terracotta frame and subtle fill as Outline. The highlight holds briefly before fading, adapts to light and dark pages, and respects reduced motion."]
+    },
+    zh: {
+      title: "看清 Maker 跳转位置",
+      changes: ["点击页面右侧 Maker 后，目标停稳时会显示与 Outline 相同的赤陶色描边和浅色填充，短暂停留后淡出，适配浅色、深色页面及减少动态效果设置。"]
+    }
+  },
+  {
     version: "0.80.0",
     en: {
       title: "Reuse long conversations faster",

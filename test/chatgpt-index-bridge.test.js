@@ -4,6 +4,8 @@ import { readFile } from "node:fs/promises";
 import { webcrypto } from "node:crypto";
 import { JSDOM } from "jsdom";
 import { createChatGptNativeNavigation } from "../public/src/chatgpt-native-navigation.js";
+import { createChatGptIndexController } from "../src/chatgpt-index-controller.js";
+import { createChatGptConversationCover } from "../src/chatgpt-conversation-cover.js";
 
 const source = (await readFile(new URL("../public/src/chatgpt-index-bridge.js", import.meta.url), "utf8")).replace(/^import .*\n/, "");
 const message = (id) => ({ id, author: { role: "user" }, content: { content_type: "text", parts: [id] } });
@@ -28,6 +30,53 @@ async function settled(s) {
   for (let i = 0; i < 50 && !s.events.some((item) => ["complete", "error"].includes(item.event)); i++) await new Promise((resolve) => setTimeout(resolve, 2));
 }
 
+test("late native conversation reads do not reopen the completed conversation cover", async () => {
+  let preparations = 0;
+  let payload = page(["a", "b"], false, false);
+  const s = await boot(() => Response.json(payload), () => ({
+    invalidate() {}, async prepare() { preparations++; return { ok: true, payload }; }
+  }));
+  s.win.document.body.innerHTML = "<main></main>";
+  const cover = createChatGptConversationCover({ window: s.win });
+  let reopened = 0; let initiallyReady = false; let wasShowing = false;
+  const controller = createChatGptIndexController({ window: s.win, bridgeUrl: "https://example.invalid/bridge.js", onChange() {
+    cover.update(controller.snapshot());
+    if (initiallyReady && cover.isShowing() && !wasShowing) reopened++;
+    wasShowing = cover.isShowing();
+  } });
+  s.win.postMessage = (data) => {
+    if (data.type === "polaris-conversation-index-result") s.events.push(data);
+    queueMicrotask(() => s.win.dispatchEvent(new s.win.MessageEvent("message", { source: s.win, origin: s.win.location.origin, data })));
+  };
+  try {
+    controller.configure(true);
+    s.win.document.querySelector("script").dispatchEvent(new s.win.Event("load"));
+    await settled(s); await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(controller.snapshot().phase, "complete");
+    assert.equal(cover.isShowing(), false);
+    initiallyReady = true;
+    for (let read = 0; read < 3; read++) {
+      await s.win.fetch("/backend-api/conversations/one?num_turns=50");
+      await new Promise((resolve) => setTimeout(resolve, 650));
+    }
+    assert.equal(reopened, 0, "already readable content must not be covered again by native GET responses");
+    assert.equal(preparations, 1, "opening the conversation must prepare the native list only once");
+    assert.equal(s.events.filter((event) => event.event === "page").length, 1, "identical refetches must not rebuild the index");
+    payload = page(["replacement"], false, false);
+    await s.win.fetch("/backend-api/conversations/one?num_turns=50");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(controller.snapshot().count, 1, "a changed full snapshot removes the previous branch");
+    assert.equal((await controller.search("replacement")).total, 1);
+    payload.messages[0].content.parts = ["Edited content"];
+    await s.win.fetch("/backend-api/conversations/one?num_turns=50");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal((await controller.search("Edited content")).total, 1);
+    assert.equal((await controller.search("replacement")).total, 0);
+    assert.equal(reopened, 0, "changed complete snapshots must commit without reopening the cover");
+    assert.equal(preparations, 1);
+  } finally { controller.dispose(); cover.dispose(); await Promise.resolve(); s.finish(); }
+});
+
 test("native preparation supplies the full branch on every open without an extra history traversal", async () => {
   let preparations = 0;
   const s = await boot(() => { throw new Error("Polaris must not request history when the native snapshot is complete"); }, () => ({
@@ -46,6 +95,50 @@ test("native preparation supplies the full branch on every open without an extra
     }
     assert.equal(preparations, 2);
     assert.deepEqual(s.calls.map((call) => call.url), ["/api/auth/session", "/api/auth/session"]);
+  } finally { s.finish(); }
+});
+
+test("partial native responses and completed edits still request a fresh complete snapshot", async () => {
+  let preparations = 0;
+  const s = await boot(() => Response.json(page(["latest"], true, false)), () => ({
+    invalidate() {}, async prepare() { preparations++; return { ok: true, payload: page(["old", "latest"], false, false) }; }
+  }));
+  try {
+    s.command("start"); await settled(s);
+    for (const [url, method] of [["/backend-api/conversations/one", "GET"], ["/backend-api/conversations/one", "PATCH"], ["/backend-api/conversation", "POST"]]) {
+      const before = preparations;
+      await s.win.fetch(url, { method });
+      await new Promise((resolve) => setTimeout(resolve, 650));
+      assert.equal(preparations, before + 1, `${method} must still reconcile changes from a fresh full snapshot`);
+      assert.equal(s.events.at(-1).event, "complete");
+      assert.equal(s.events.filter((event) => event.event === "page").at(-1).payload.messages.length, 2, "a partial response must not truncate history");
+    }
+  } finally { s.finish(); }
+});
+
+test("a workspace change rechecks identity before publishing even an identical complete response", async () => {
+  let account = "first-workspace"; let preparations = 0;
+  const payload = page(["a"], false, false);
+  const s = await boot(() => Response.json(payload), ({ window: win }) => ({
+    invalidate() {}, async prepare() {
+      preparations++;
+      await win.fetch("/backend-api/conversations/one/messages", { headers: { "chatgpt-account-id": account } });
+      return { ok: true, payload };
+    }
+  }));
+  Object.defineProperty(s.win.crypto, "subtle", { value: webcrypto.subtle });
+  s.win.TextEncoder = TextEncoder;
+  try {
+    s.command("start"); await settled(s);
+    const previous = s.events.find((event) => event.event === "page").scope;
+    assert.match(previous, /^[a-f0-9]{64}$/);
+    account = "second-workspace";
+    await s.win.fetch("/backend-api/conversations/one", { headers: { "chatgpt-account-id": account } });
+    await new Promise((resolve) => setTimeout(resolve, 650));
+    assert.equal(preparations, 2);
+    const next = s.events.filter((event) => event.event === "page").at(-1).scope;
+    assert.match(next, /^[a-f0-9]{64}$/); assert.notEqual(next, previous);
+    assert.equal(s.events.at(-1).event, "complete");
   } finally { s.finish(); }
 });
 

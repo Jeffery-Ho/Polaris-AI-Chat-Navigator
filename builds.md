@@ -10,6 +10,69 @@
 - Version update type must be declared by the user before recording a build.
 - After each build is recorded, confirm the build number and version with the user.
 
+## 323
+
+- Date: 2026-10-27
+- Version: 0.81.8
+- Summary: Adds a source-page refresh action to the sidepanel full-read failure state.
+- Notes: Shows the button only for a stalled ChatGPT conversation with complete mode enabled. The background rechecks the saved preference, source tab, and conversation route before reloading without a content-script dependency. Disables duplicate clicks, allows retry after browser failure, and removes the action during normal reading or after disabling complete mode. Covers both locales and themes, source changes, disabled mode, and reload failure.
+
+## 322
+
+- Date: 2026-10-27
+- Version: 0.81.7
+- Summary: Removes the floating unread-conversation refresh notice.
+- Notes: Empty or failed reads report their stalled state to the Polaris sidepanel without placing a narrow notice over ChatGPT's navigation. Removes the floating refresh button and clears the home-page notice when a conversation opens. Covers timeout, failure, recovery, and both themes.
+
+## 321
+
+- Date: 2026-10-27
+- Version: 0.81.6
+- Summary: Avoids restarting full-conversation loading for complete native refetches.
+- Notes: Deduplicates unchanged full snapshots and reconciles changed complete responses atomically without reopening the cover or preparing the native list again. Partial responses, completed edits/streams, and workspace changes retain the existing full-read and identity checks. Integration coverage reproduces three cover reopenings before the fix and none afterward.
+
+## 320
+
+- Date: 2026-10-27
+- Version: 0.81.5
+- Summary: Shows the reply highlight after scrolling settles and keeps it below the header.
+- Notes: Waits for 150 ms of stable reply bounds and scroll inactivity, including long replies whose clipped bounds stay unchanged. Clips the tint to the conversation scrollport below the header, hides it during renewed scrolling, and preserves the whole-reply Outline colors, hold, fade, and reduced-motion behavior. Tests cover both themes, nested scrolling, remounting, cancellation, timeout, and the packaged sidepanel/Maker paths.
+
+## 319
+
+- Date: 2026-10-27
+- Version: 0.81.4
+- Summary: Resolves modern ChatGPT reply ids and highlights every reply segment.
+- Notes: Uses ChatGPT's message-id list before full-text fallback, so tool activity and split Markdown roots do not prevent indexed jumps. Tints the enclosing reply while keeping heading/table scroll anchors precise. Covers ambiguous ids, both themes, the sidepanel command, and remounted reply containers.
+
+## 318
+
+- Date: 2026-10-27
+- Version: 0.81.3
+- Summary: Highlights the entire assistant reply after a Maker jump.
+- Notes: Keeps heading and table scroll anchors precise while resolving the highlight to the enclosing assistant reply, including multiple Markdown segments. Reuses the Outline colors and resolves the reply again after remounting. Packaged-content coverage checks reply bounds and excludes adjacent turns in both themes and the indexed sidepanel path.
+
+## 317
+
+- Date: 2026-10-26
+- Version: 0.81.2
+- Summary: Follows Maker destinations with a live highlight overlay.
+- Notes: Paints the Outline accent as soon as the destination enters the viewport, tracks its bounds every 50 ms, resolves remounted nodes, and measures descendants of boxless wrappers. Uses timer-driven cleanup independent of page animation frames. Covers the indexed sidepanel command path, both themes, reduced motion, cancellation, and moving targets.
+
+## 316
+
+- Date: 2026-10-26
+- Version: 0.81.1
+- Summary: Fixes Maker location and highlighting for ChatGPT answers with hidden memory citations.
+- Notes: Ignores the unrendered memcite token when comparing indexed anchors with mounted text, including anchors restored from older caches. Preserves exact message matching and the existing Outline highlight colors. Adds regression coverage for id-less hashed Markdown containers and cached anchors.
+
+## 315
+
+- Date: 2026-10-26
+- Version: 0.81.0
+- Summary: Highlights on-page Maker destinations with the existing Outline accent.
+- Notes: Routes heading jumps through the shared located-source tint, preserving smooth on-page scrolling and the existing light/dark terracotta frame, faint fill, one-second hold, fade, and reduced-motion behavior. Repeated jumps clear the previous tint, detached targets are resolved again while settling, and content disposal cancels pending highlights. Removes the duplicate sidepanel heading call and adds packaged-content coverage for both themes and cleanup.
+
 ## 314
 
 - Date: 2026-10-26

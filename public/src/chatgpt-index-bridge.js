@@ -72,6 +72,14 @@ import { createChatGptNativeNavigation } from "./chatgpt-native-navigation.js";
     } else { result.messages = payload.messages.map(message).filter(Boolean); result.page_info = payload.page_info; }
     return result;
   }
+  function publishSnapshot(payload, scope, context) {
+    const snapshot = publicPayload(payload);
+    const signature = JSON.stringify(snapshot);
+    if (context.snapshotSignature === signature && context.snapshotScope === scope) return false;
+    context.snapshotSignature = signature; context.snapshotScope = scope;
+    send("page", { payload: snapshot, replace: true, reconcile: true, scope }, context);
+    return true;
+  }
   async function begin(context) {
     const native = recent.get(context.conversationId);
     const payload = native ? await native : null;
@@ -102,6 +110,7 @@ import { createChatGptNativeNavigation } from "./chatgpt-native-navigation.js";
     const run = ++serial;
     const valid = () => active === context && serial === run && !pending.signal.aborted && currentId() === context.conversationId;
     context.observed = null;
+    context.snapshotSignature = "";
     context.userId = null; context.scope = "";
     nativeNavigation.invalidate?.();
     const started = performance.now();
@@ -149,7 +158,7 @@ import { createChatGptNativeNavigation } from "./chatgpt-native-navigation.js";
       const native = [prepared?.payload, context.observed, cachedNative].find((payload) => isComplete(payload)
         && (!(payload.id || payload.conversation_id) || (payload.id || payload.conversation_id) === context.conversationId));
       if (native) {
-        send("page", { payload: publicPayload(native), replace: true, reconcile: true, scope }, context);
+        publishSnapshot(native, scope, context);
         send("complete", { source: "native", nativeMs, readMs: performance.now() - started, historicalRequests }, context);
         return;
       }
@@ -201,12 +210,14 @@ import { createChatGptNativeNavigation } from "./chatgpt-native-navigation.js";
     timer = setTimeout(load, 600);
   }
   function wrappedFetch(input, init) {
-    let url; let method;
+    let url; let method; let workspaceChanged = false;
     try {
       url = new URL(typeof input === "string" || input instanceof URL ? input : input.url, location.href);
       method = String(init?.method || input?.method || "GET").toUpperCase();
       if ((active || armed) && url.origin === location.origin && (requestConversationId(url) || url.pathname === "/backend-api/conversation")) {
         const supplied = new Headers(init?.headers || (input instanceof Request ? input.headers : undefined));
+        const accountKey = supplied.has("chatgpt-account-id") ? "chatgpt-account-id" : supplied.has("openai-account-id") ? "openai-account-id" : "";
+        workspaceChanged = Boolean(accountKey && headers.get(accountKey) !== supplied.get(accountKey));
         for (const key of ["authorization", "chatgpt-account-id", "openai-account-id"]) {
           if (supplied.has(key)) headers.set(key, supplied.get(key));
         }
@@ -237,7 +248,12 @@ import { createChatGptNativeNavigation } from "./chatgpt-native-navigation.js";
             // Observe, but never replace, ChatGPT's response. While its loader
             // is running the final merged query snapshot is authoritative.
             if (controller) context.observed = payload;
-            else refresh();
+            else if (!workspaceChanged && isComplete(payload)
+              && (!(payload.id || payload.conversation_id) || (payload.id || payload.conversation_id) === context.conversationId)) {
+              // A native refetch is already the complete data. Reconcile it
+              // directly instead of restarting the loader and covering the chat.
+              if (publishSnapshot(payload, context.scope, context)) send("complete", {}, context);
+            } else refresh();
           }).catch(() => {});
         } else if (url.pathname === "/backend-api/conversation" && method === "POST") {
           const reader = response.clone().body?.getReader();
@@ -272,7 +288,7 @@ import { createChatGptNativeNavigation } from "./chatgpt-native-navigation.js";
       void task.then((result) => {
         if (active !== context || pending.signal.aborted) return;
         if (preparing && result.ok && isComplete(result.payload)) {
-          send("page", { payload: publicPayload(result.payload), replace: true, reconcile: true, scope: context.scope }, context);
+          publishSnapshot(result.payload, context.scope, context);
           send("complete", {}, context);
         }
         send("native-reveal", { ok: result.ok, reason: result.reason, navigationId: data.navigationId }, context);
