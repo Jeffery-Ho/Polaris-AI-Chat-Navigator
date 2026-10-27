@@ -90,6 +90,53 @@ export function initializeSidepanel() {
   let searchTimer = 0;
   let noticeTimer = 0;
   let locateSequence = 0;
+  const scrollControls = createScrollControls();
+  root.after(scrollControls);
+
+  function maxWindowScrollY() {
+    const scroller = document.scrollingElement || document.documentElement;
+    return Math.max(0, scroller.scrollHeight - (document.documentElement.clientHeight || window.innerHeight));
+  }
+
+  function updateScrollControls() {
+    const maxScrollY = maxWindowScrollY();
+    scrollControls.querySelector('[data-scroll-edge="top"]').disabled = maxScrollY <= 1 || window.scrollY <= 1;
+    scrollControls.querySelector('[data-scroll-edge="bottom"]').disabled = window.scrollY >= maxScrollY - 1;
+  }
+
+  function createScrollControls() {
+    const group = element("div", "window-scroll-controls");
+    group.setAttribute("role", "group");
+    group.setAttribute("aria-label", t("scroll.label"));
+    for (const edge of ["top", "bottom"]) {
+      const button = element("button", "window-scroll-button");
+      button.type = "button";
+      button.dataset.scrollEdge = edge;
+      button.title = t(`scroll.${edge}`);
+      button.setAttribute("aria-label", button.title);
+      button.disabled = true;
+      const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      icon.setAttribute("viewBox", "0 0 24 24");
+      icon.setAttribute("fill", "none");
+      icon.setAttribute("stroke", "currentColor");
+      icon.setAttribute("stroke-width", "1.8");
+      icon.setAttribute("stroke-linecap", "round");
+      icon.setAttribute("stroke-linejoin", "round");
+      icon.setAttribute("aria-hidden", "true");
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", edge === "top" ? "M12 19V7m-5 5 5-5 5 5M5 4h14" : "M12 5v12m-5-5 5 5 5-5M5 20h14");
+      icon.appendChild(path);
+      button.appendChild(icon);
+      button.addEventListener("click", () => {
+        window.scrollTo({
+          top: edge === "top" ? 0 : maxWindowScrollY(),
+          behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth"
+        });
+      });
+      group.appendChild(button);
+    }
+    return group;
+  }
 
   function cancelIndexedLocation() { locateSequence++; }
 
@@ -326,6 +373,7 @@ export function initializeSidepanel() {
       focusSearchInput(activeSearch);
     }
     if (state.imageUrls.length) renderImagePreview();
+    updateScrollControls();
   }
 
   function focusSearchInput({ selectionStart, selectionEnd, select = false, preventScroll = false } = {}) {
@@ -1436,7 +1484,12 @@ export function initializeSidepanel() {
   }, 1500);
   window.addEventListener("scroll", () => {
     if (state.activeTab === "navigation") state.navigationScrollY = window.scrollY;
+    updateScrollControls();
   }, { passive: true });
+  window.addEventListener("resize", updateScrollControls);
+  if (typeof window.ResizeObserver === "function") {
+    new window.ResizeObserver(updateScrollControls).observe(root);
+  }
   window.addEventListener("keydown", (event) => {
     if (document.querySelector("dialog[open]")) return;
     if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "f") {

@@ -10,6 +10,13 @@
 - Version update type must be declared by the user before recording a build.
 - After each build is recorded, confirm the build number and version with the user.
 
+## 324
+
+- Date: 2026-10-27
+- Version: 0.82.0
+- Summary: Adds centered floating buttons to scroll to the top and bottom of the sidepanel.
+- Notes: Disables each button at its corresponding edge and both when no scrolling is needed. Keeps states in sync with scrolling, content changes, and viewport resizing. Includes light/dark styling, localized accessible labels, reduced-motion support, and space below content for the floating controls.
+
 ## 323
 
 - Date: 2026-10-27

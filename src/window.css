@@ -60,8 +60,42 @@ button { color: inherit; }
 
 #polaris-window {
   min-height: 100vh;
-  padding: 0 var(--polaris-space-4) var(--polaris-space-6);
+  padding: 0 var(--polaris-space-4) calc(84px + env(safe-area-inset-bottom, 0px));
 }
+
+.window-scroll-controls {
+  position: fixed;
+  left: 50%;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  z-index: 4;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  transform: translateX(-50%);
+  border: 1px solid var(--polaris-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--polaris-bg-elevated) 94%, transparent);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  backdrop-filter: blur(14px);
+}
+
+.window-scroll-button {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--polaris-text-secondary);
+  cursor: pointer;
+}
+
+.window-scroll-button svg { width: 20px; height: 20px; }
+.window-scroll-button:hover:not(:disabled) { background: var(--polaris-accent-subtle); color: var(--polaris-accent); }
+.window-scroll-button:focus-visible { outline: 2px solid var(--polaris-focus); outline-offset: -2px; }
+.window-scroll-button:disabled { opacity: 0.35; cursor: default; }
 
 
 

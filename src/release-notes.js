@@ -1,5 +1,16 @@
 const RELEASE_NOTES = Object.freeze([
   {
+    version: "0.82.0",
+    en: {
+      title: "Jump to the top or bottom",
+      changes: ["Use the floating buttons at the bottom center of the sidepanel to jump to either end. Each button is disabled when its edge is reached, and both are disabled when the page fits in the panel."]
+    },
+    zh: {
+      title: "快速回到顶部或底部",
+      changes: ["侧栏底部中央新增悬浮按钮，可快速回到顶部或底部；到达对应位置时自动禁用，内容无需滚动时两颗按钮均禁用。"]
+    }
+  },
+  {
     version: "0.81.8",
     en: {
       title: "Refresh a stalled full read",

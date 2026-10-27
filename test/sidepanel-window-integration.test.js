@@ -11,6 +11,13 @@ async function boot(windowType = "sidepanel", { locale = "zh", transitionApi = f
   Object.defineProperty(win, "scrollY", { get: () => scrollY });
   const scrollRequests = [];
   win.scrollTo = (options) => { scrollRequests.push(options); scrollY = options.top || 0; };
+  const resizeObservers = [];
+  win.ResizeObserver = class {
+    constructor(callback) { this.callback = callback; resizeObservers.push(this); }
+    observe(target) { this.target = target; }
+    unobserve() {}
+    disconnect() {}
+  };
   win.HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
   win.HTMLDialogElement.prototype.close = function () { this.removeAttribute("open"); this.dispatchEvent(new win.Event("close")); };
   if (stallAnimationFrames) win.requestAnimationFrame = () => 1;
@@ -44,8 +51,90 @@ async function boot(windowType = "sidepanel", { locale = "zh", transitionApi = f
   send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot });
   if (openChapters) [...win.document.querySelectorAll(".window-tab")].find((button) => button.textContent === (locale === "zh" ? "大纲" : "Outline")).click();
   if (deliverChapters) send({ type: "POLARIS_WINDOW_CHAPTERS", tabId: 7, routeKey: snapshot.routeKey, treeChapters: chapters, chapters });
-  return { dom, win, send, commands, snapshot, chapters, transitions, scrollRequests, writes };
+  return { dom, win, send, commands, snapshot, chapters, transitions, scrollRequests, writes, resizeObservers };
 }
+
+test("floating scroll controls disable at each edge and jump within the sidepanel", async () => {
+  const s = await boot("sidepanel", { openChapters: false });
+  try {
+    const { document } = s.win;
+    Object.defineProperty(document.documentElement, "scrollHeight", { value: 1600 });
+    Object.defineProperty(document.documentElement, "clientHeight", { value: 600 });
+    s.win.dispatchEvent(new s.win.Event("resize"));
+    const top = document.querySelector('[aria-label="回到顶部"]');
+    const bottom = document.querySelector('[aria-label="回到底部"]');
+    assert.equal(top.disabled, true);
+    assert.equal(bottom.disabled, false);
+    const requests = s.scrollRequests.length;
+    top.click();
+    assert.equal(s.scrollRequests.length, requests, "disabled buttons do not scroll");
+    bottom.click();
+    assert.deepEqual({ ...s.scrollRequests.at(-1) }, { top: 1000, behavior: "smooth" });
+    s.win.dispatchEvent(new s.win.Event("scroll"));
+    assert.equal(top.disabled, false);
+    assert.equal(bottom.disabled, true);
+    top.click();
+    assert.deepEqual({ ...s.scrollRequests.at(-1) }, { top: 0, behavior: "smooth" });
+    s.win.dispatchEvent(new s.win.Event("scroll"));
+    assert.equal(top.disabled, true);
+    assert.equal(bottom.disabled, false);
+    s.win.scrollTo({ top: 500 });
+    s.win.dispatchEvent(new s.win.Event("scroll"));
+    assert.equal(top.disabled, false);
+    assert.equal(bottom.disabled, false);
+    s.win.scrollTo({ top: 999.5 });
+    s.win.dispatchEvent(new s.win.Event("scroll"));
+    assert.equal(bottom.disabled, true, "fractional scroll positions count as reaching the edge");
+    assert.equal(s.commands.some(({ command }) => command?.startsWith("jump-")), false);
+  } finally { s.dom.window.close(); }
+});
+
+test("scroll controls refresh after content and viewport changes without being replaced", async () => {
+  const s = await boot("sidepanel", { openChapters: false });
+  try {
+    const { document } = s.win;
+    let height = 600;
+    Object.defineProperty(document.documentElement, "scrollHeight", { get: () => height });
+    Object.defineProperty(document.documentElement, "clientHeight", { value: 600, configurable: true });
+    s.win.dispatchEvent(new s.win.Event("resize"));
+    const controls = document.querySelector(".window-scroll-controls");
+    const [top, bottom] = controls.querySelectorAll("button");
+    assert.equal(top.disabled, true);
+    assert.equal(bottom.disabled, true, "a short page has no scroll targets");
+    const observer = s.resizeObservers.find(({ target }) => target.id === "polaris-window");
+    assert.ok(observer);
+    height = 1200;
+    observer.callback();
+    assert.equal(bottom.disabled, false, "new content enables scrolling down");
+    s.win.scrollTo({ top: 600 });
+    s.win.dispatchEvent(new s.win.Event("scroll"));
+    assert.equal(bottom.disabled, true);
+    height = 1400;
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...s.snapshot, theme: "dark" } });
+    assert.equal(document.querySelector(".window-scroll-controls"), controls);
+    assert.equal(bottom.disabled, false, "rendered content recalculates the edge");
+    Object.defineProperty(document.documentElement, "clientHeight", { value: 800 });
+    s.win.dispatchEvent(new s.win.Event("resize"));
+    assert.equal(bottom.disabled, true, "a taller viewport reaches the new bottom");
+    document.querySelector(".window-settings-button").click();
+    assert.equal(document.querySelectorAll(".window-scroll-controls").length, 1);
+  } finally { s.dom.window.close(); }
+});
+
+test("scroll controls use English labels and respect reduced motion", async () => {
+  const s = await boot("sidepanel", { locale: "en", openChapters: false, reducedMotion: true });
+  try {
+    Object.defineProperty(s.win.document.documentElement, "scrollHeight", { value: 1600 });
+    Object.defineProperty(s.win.document.documentElement, "clientHeight", { value: 600 });
+    s.win.dispatchEvent(new s.win.Event("resize"));
+    const top = s.win.document.querySelector('[aria-label="Back to top"]');
+    const bottom = s.win.document.querySelector('[aria-label="Back to bottom"]');
+    assert.equal(top.title, "Back to top");
+    bottom.click();
+    assert.deepEqual({ ...s.scrollRequests.at(-1) }, { top: 1000, behavior: "instant" });
+  } finally { s.dom.window.close(); }
+});
+
 test("complete indexing settings show the actual title and two exclusive mode cards", async () => {
   const s = await boot("sidepanel", { openChapters: false });
   try {
