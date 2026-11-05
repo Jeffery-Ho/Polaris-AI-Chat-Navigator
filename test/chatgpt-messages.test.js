@@ -6,11 +6,23 @@ import { JSDOM } from "jsdom";
 import {
   collectChatGptConversation,
   CHATGPT_USER_SELECTOR,
+  chatGptAssistantImageNodes,
   isChatGptUserTurnNode,
   stripChatGptUserRolePrefix
 } from "../src/chatgpt-messages.js";
 
 const contentSource = readFileSync(new URL("../src/content.js", import.meta.url), "utf8");
+
+test("image-only shared turns exclude user attachments, avatars and hidden copies", () => {
+  const dom = new JSDOM(`<main>
+    <div data-testid="conversation-turn-0" data-turn="user"><img id="user"></div>
+    <div data-testid="conversation-turn-1" data-turn="assistant"><img id="first"><img id="second"><img hidden id="hidden"><span class="avatar"><img id="avatar"></span></div>
+    <div data-message-author-role="assistant"><img id="legacy"></div>
+    <nav><img id="chrome"></nav>
+  </main>`);
+  try { assert.deepEqual(chatGptAssistantImageNodes(dom.window.document).map((image) => image.id), ["first", "second", "legacy"]); }
+  finally { dom.window.close(); }
+});
 
 test("ChatGPT recognizes current user bubbles without legacy roles or conversation-turn attributes", () => {
   const doc = new JSDOM('<main><div data-content-search-turn-key="fallback-turn-0"><div class="block-BQZwFn"><h4 class="sr-only m-0 select-none">You said:</h4><div class="group/user-message flex flex-col items-end gap-2">可以在模拟器里面安装系统相册么</div></div><div class="block-BQZwFn"><h4 class="sr-only">ChatGPT said:</h4><div class="MarkdownRoot-rZKhxa"><p>可以，但要区分两件事：</p></div></div></div></main>').window.document;

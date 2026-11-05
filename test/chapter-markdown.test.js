@@ -205,8 +205,8 @@ const emoji = "🎯";
   assert.equal(blocks[3].rows[0][1][2].type, "code");
 });
 
-test("原始图片、HTML 与未闭合 Markdown 保持普通文本", () => {
-  assert.equal(parseChapterMarkdown("![示例](https://example.com/image.png)"), null);
+test("图片进入 AST，HTML 与未闭合 Markdown 保持普通文本", () => {
+  assert.deepEqual(parseChapterMarkdown("![示例](https://example.com/image.png)"), [{ type: "paragraph", children: [{ type: "image", src: "https://example.com/image.png", alt: "示例" }] }]);
   assert.equal(parseChapterMarkdown("<script>alert(1)</script>"), null);
   assert.equal(parseChapterMarkdown("未闭合 **强调"), null);
   assert.equal(parseChapterMarkdown("链接 [说明](javascript:alert(1))"), null);

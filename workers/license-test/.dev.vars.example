@@ -1,0 +1,9 @@
+# Test credentials only. Never use sk_live_ or rk_live_.
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
+LICENSE_HASH_SECRET=
+LICENSE_DELIVERY_ENCRYPTION_KEY=
+# Optional transactional email delivery (Resend). Pending deliveries remain in D1 without these.
+EMAIL_PROVIDER_API_KEY=
+EMAIL_FROM_ADDRESS=
+SUPPORT_EMAIL=

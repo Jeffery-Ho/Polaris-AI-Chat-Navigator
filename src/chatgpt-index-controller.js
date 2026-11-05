@@ -4,8 +4,9 @@ import { HASHED_MARKDOWN_ROOT_SELECTOR, HASHED_HEADING_SELECTOR } from "./hashed
 const CHATGPT_HOST = /^(chatgpt\.com|chat\.openai\.com)$/;
 const NATIVE_LOAD_TIMEOUT_MS = 20000;
 const ANCHOR_WAIT_MS = 1200;
+const READ_FAILURE_CODES = new Set(["bridge-unavailable", "unsupported-format", "incomplete-chain", "wrong-conversation", "repeated-cursor", "missing-latest-page", "network-error"]);
 
-export function createChatGptIndexController({ window: win, bridgeUrl, onChange, cache = null, onDiagnostics = () => {} }) {
+export function createChatGptIndexController({ window: win, bridgeUrl, onChange, cache = null, onDiagnostics = () => {}, imagePlaceholder = "[Image]" }) {
   const doc = win.document;
   let index = null;
   let session = "";
@@ -35,6 +36,7 @@ export function createChatGptIndexController({ window: win, bridgeUrl, onChange,
   let authoritativeData = false;
   let started = 0;
   let timings = {};
+  let lastFailure = "";
   const currentRoute = () => `${win.location.origin}${win.location.pathname}`;
   const post = (command, detail = {}) => win.postMessage({ type: "polaris-conversation-index-command", command, ...detail,
     requestId: session, conversationId: chatGptConversationId(win.location.href) }, win.location.origin);
@@ -46,12 +48,12 @@ export function createChatGptIndexController({ window: win, bridgeUrl, onChange,
     processing = Promise.resolve(); win.clearTimeout(persistTimer);
     lease = ""; restoredScope = ""; reportedRevision = -1; savedRevision = -1; authoritativeData = false; timings = {};
     session = ""; scope = ""; cached = null; cacheKey = ""; retryAt = 0; observedTitle = "";
-    runId = -1; invalidRun = false;
+    runId = -1; invalidRun = false; lastFailure = "";
     nativeState = { phase: "loading", error: "" };
   }
   function start() {
     clear(); route = currentRoute();
-    index = createConversationIndex();
+    index = createConversationIndex({ imagePlaceholder });
     index.subscribe(() => { cached = null; onChange(); });
     session = win.crypto.randomUUID();
     started = performance.now();
@@ -93,6 +95,20 @@ export function createChatGptIndexController({ window: win, bridgeUrl, onChange,
       if (snapshot) { savedRevision = revision; void Promise.resolve(cache.write(owner, chatGptConversationId(win.location.href), writeLease, snapshot)).catch(() => {}); }
     }, 0);
   }
+  function reportReadFailure(reason, kind, details = {}) {
+    if (!index) return;
+    const code = READ_FAILURE_CODES.has(reason) || /^http-\d{3}$/.test(reason) ? reason : "unknown-error";
+    if (lastFailure === code) return;
+    lastFailure = code;
+    try {
+      const shared = kind === "shared-data" ? { kind,
+        ...(["shared-loader", "shared-session", "shared-api", "shared-html"].includes(details.stage) ? { stage: details.stage } : {}),
+        ...(Number.isInteger(details.httpStatus) && details.httpStatus >= 100 && details.httpStatus <= 599 ? { httpStatus: details.httpStatus } : {}),
+        ...(["json", "html", "script", "other"].includes(details.responseFormat) ? { responseFormat: details.responseFormat } : {}) } : {};
+      onDiagnostics({ ...timings, ...shared, source: /^\/share\//.test(win.location.pathname) ? "shared" : "conversation", outcome: "error",
+        reason: code, conversationLength: index.status().count, totalMs: performance.now() - started });
+    } catch { /* Diagnostics must not interrupt a failed read. */ }
+  }
   // Loaded and armed before any chat is open, so a clicked chat starts at once.
   function loadBridge() {
     if (script?.dataset.ready === "true") { if (wanted && !armed) { armed = true; post("arm"); } return; }
@@ -108,7 +124,7 @@ export function createChatGptIndexController({ window: win, bridgeUrl, onChange,
       });
       bridge.addEventListener("error", () => {
         if (disposed || script !== bridge) return;
-        index?.fail("bridge-unavailable"); bridge.remove(); script = null;
+        index?.fail("bridge-unavailable"); reportReadFailure("bridge-unavailable"); bridge.remove(); script = null;
       });
       (doc.head || doc.documentElement).appendChild(bridge);
     }
@@ -125,6 +141,7 @@ export function createChatGptIndexController({ window: win, bridgeUrl, onChange,
     }
     if (Number(data.runId) > runId) {
       runId = Number(data.runId); invalidRun = false; ingestion.abort(); ingestion = new AbortController(); processing = Promise.resolve();
+      lastFailure = "";
       preparationRun?.cancel();
       if (!lease) restoredScope = "";
       win.clearTimeout(persistTimer);
@@ -151,17 +168,22 @@ export function createChatGptIndexController({ window: win, bridgeUrl, onChange,
           if (signal.aborted || generation !== session) return;
           syncMounted();
         } else if (data.event === "complete" && !invalidRun) {
-          if (["native", "fallback"].includes(data.source)) timings.source = data.source;
+          if (["native", "fallback", "shared"].includes(data.source)) timings.source = data.source;
           if (Number.isFinite(data.readMs)) timings.readMs = data.readMs;
           if (Number.isFinite(data.historicalRequests)) timings.historicalRequests = data.historicalRequests;
           if (index.status().phase !== "complete") index.finish();
           prepareNativeList(); saveWhenReady();
         }
         else if (data.event === "loading") { invalidRun = false; index.begin(); }
-        else if (data.event === "error") { retryAt = Number(data.retryAt) || 0; index.fail(String(data.reason || "network-error")); }
+        else if (data.event === "error") {
+          retryAt = Number(data.retryAt) || 0;
+          const reason = String(data.reason || "network-error"); index.fail(reason); reportReadFailure(reason, data.kind, data);
+        }
       } catch (error) {
         if (signal.aborted || generation !== session) return;
-        invalidRun = true; index.fail(error.message === "incomplete-chain" ? "incomplete-chain" : "unsupported-format");
+        invalidRun = true;
+        const reason = error.message === "incomplete-chain" ? "incomplete-chain" : "unsupported-format";
+        index.fail(reason); reportReadFailure(reason);
       }
     });
   }
@@ -232,7 +254,7 @@ export function createChatGptIndexController({ window: win, bridgeUrl, onChange,
       message = outer[0];
     }
     if (!message.isConnected) return unavailable("not-mounted");
-    if (key === `index:${target.messageId}`) return { element: message, reason: "" };
+    if (key === `index:${target.messageId}` || target.imageKey) return { element: message, reason: "" };
     if (target.blockType === "table") {
       const tables = [...message.querySelectorAll("table")].filter((table) => {
         const row = table.tHead?.rows[0] || table.rows[0];
@@ -321,11 +343,13 @@ export function createChatGptIndexController({ window: win, bridgeUrl, onChange,
       if (!index || route !== currentRoute()) start();
     },
     enabled: () => Boolean(index),
-    // Complete mode is on, but the ChatGPT page has no conversation to read yet.
-    awaitingConversation: () => wanted && !index && CHATGPT_HOST.test(win.location.hostname),
+    // Settings pages have no conversation and must not prompt the user to pick one.
+    awaitingConversation: () => wanted && !index && CHATGPT_HOST.test(win.location.hostname)
+      && !/^\/settings(?:\/|$)/.test(win.location.pathname),
     title: titleFromPage,
     snapshot: () => index ? { ...index.status(), generation: session, retryAt, native: nativeState, timings: { ...timings } } : null,
     outline, syncMounted, resolveTarget, resolveLocation, ensureLocation,
+    exportConversation: () => index?.exportConversation() || null,
     async search(query, options = {}) {
       searchController?.abort(); searchController = new AbortController();
       const current = index; const generation = session;

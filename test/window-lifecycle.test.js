@@ -13,10 +13,16 @@ const [backgroundSource, deliverySource] = await Promise.all([
   readFile(new URL("../src/background.js", import.meta.url), "utf8"),
   readFile(new URL("../src/snapshot-delivery.js", import.meta.url), "utf8")
 ]);
+const backgroundImports = {};
+for (const match of backgroundSource.matchAll(/import\s+\{([^}]+)\}\s+from\s+"([^"]+)";/g)) {
+  const module = await import(new URL(`../src/${match[2].replace(/^\.\//, "")}`, import.meta.url));
+  for (const name of match[1].split(",").map(value => value.trim())) backgroundImports[name] = module[name];
+}
 const executableBackgroundSource = backgroundSource.replace(
   'import { snapshotDeliveryResult } from "./snapshot-delivery.js";\n',
   deliverySource.replaceAll("export ", "")
 ).replace('import { createConversationCacheHandler } from "./conversation-cache.js";\n', "")
+  .replace(/import\s+\{[^}]+\}\s+from\s+"[^"]+";\n/g, "")
   .replace("export function initializeBackground", "function initializeBackground") + "\ninitializeBackground();";
 
 function createEvent() {
@@ -131,6 +137,7 @@ async function runAction({ storedWindow, getError = null, updateError = null, sy
   };
 
   vm.runInNewContext(executableBackgroundSource, {
+    ...backgroundImports,
     chrome,
     createConversationCacheHandler,
     URL,
@@ -272,7 +279,7 @@ async function runSidePanelReady() {
     }
   };
 
-  vm.runInNewContext(executableBackgroundSource, { chrome, createConversationCacheHandler, URL, Number, Date, Promise, console });
+  vm.runInNewContext(executableBackgroundSource, { ...backgroundImports, chrome, createConversationCacheHandler, URL, Number, Date, Promise, console });
   runtimeMessage.emit({ type: "POLARIS_WINDOW_READY", windowType: "sidepanel" });
   await new Promise((resolve) => setTimeout(resolve, 0));
   return { local, sends };
@@ -401,4 +408,14 @@ test("系统 side panel 就绪时不会把宿主浏览器窗口登记为 Polaris
   assert.equal(local["polaris-window-id"], undefined);
   assert.equal(local["polaris-window-tab-id"], undefined);
   assert.deepEqual(sends, [42]);
+});
+
+test('Gemini read failures reload only the matching signed-in or shared conversation',async()=>{
+ const calls=await runAction({historyMode:'complete'});
+ for(const url of ['https://gemini.google.com/u/1/app/one','https://gemini.google.com/share/one']){
+  calls.sourceTab.url=url;
+  const result=await calls.command({type:'POLARIS_WINDOW_COMMAND',command:'reload-conversation',expectResult:true,expectedTabId:42,expectedRouteKey:url});
+  assert.equal(result.ok,true);
+ }
+ assert.deepEqual(calls.reloads,[42,42]);
 });

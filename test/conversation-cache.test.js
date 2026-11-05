@@ -21,6 +21,16 @@ test("gzip IndexedDB snapshots survive new cache instances and stay isolated by 
   assert.equal((await reopened.read("account:workspace", "other")).snapshot, null);
 });
 
+test("cached code blocks retain their language for safe Markdown export", async () => {
+  const indexedDB = new IDBFactory(); const cache = createConversationCache({ indexedDB });
+  const value = await snapshot("```html\n<img src=\"https://example.invalid/code\">\n```");
+  const { lease } = await cache.read("scope", "chat");
+  await cache.write("scope", "chat", lease, value);
+  const reopened = await createConversationCache({ indexedDB }).read("scope", "chat");
+  assert.equal(reopened.snapshot.records[0].blocks[0].language, "html");
+  assert.equal(reopened.snapshot.records[0].blocks[0].value, '<img src="https://example.invalid/code">');
+});
+
 test("a newer tab's lease prevents an older tab from overwriting its snapshot", async () => {
   const cache = createConversationCache({ indexedDB: new IDBFactory() });
   const first = await cache.read("scope", "chat"); const second = await cache.read("scope", "chat");
@@ -72,4 +82,17 @@ test("background cache rejects unknown identities, other pages and private windo
   const privateHandler = createConversationCacheHandler({ runtimeId: "extension", cache, incognito: true });
   assert.equal(await privateHandler(message, sender), null);
   assert.deepEqual(await handler({ operation: "clear" }, { id: "extension", url: "chrome-extension://extension/sidepanel.html" }), { ok: true });
+});
+
+test('Gemini cache validates the sender route and keeps provider and share namespaces separate',async()=>{
+ const cache=createConversationCache({indexedDB:new IDBFactory()});
+ const handler=createConversationCacheHandler({runtimeId:'extension',cache});
+ const scope='b'.repeat(64);const message={operation:'read',scope,conversationId:'gemini:app:one'};
+ const sender={id:'extension',tab:{url:'https://gemini.google.com/u/1/app/one'}};
+ assert.ok((await handler(message,sender)).lease);
+ assert.equal(await handler({...message,conversationId:'gemini:app:other'},sender),null);
+ assert.equal(await handler({...message,conversationId:'one'},sender),null);
+ assert.ok((await handler({...message,conversationId:'gemini:share:one'},{...sender,tab:{url:'https://gemini.google.com/share/one'}})).lease);
+ const privateSender={...sender,tab:{...sender.tab,incognito:true}};
+ assert.equal(await handler(message,privateSender),null);
 });

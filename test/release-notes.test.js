@@ -3,6 +3,24 @@ import assert from "node:assert/strict";
 
 import { isFeatureVersion, releaseNotesForUpdate } from "../src/release-notes.js";
 
+test("当前或未来版本缺失内置说明时提供中英文通用修复文案", () => {
+  for (const version of ["0.95.0", "0.96.0", "0.96.1", "99.0.0"]) {
+    const [note] = releaseNotesForUpdate(null, version, 1);
+    assert.equal(note.version, version.split(".").slice(0, 2).join("."));
+    assert.equal(note.isFallback, true);
+    assert.deepEqual(note.zh, { title: "优化与修复", changes: ["修复错误，提升体验。"] });
+    assert.deepEqual(note.en, { title: "Improvements and fixes", changes: ["Bug fixes and improvements."] });
+  }
+});
+
+test("缺失说明的版本不会冒用旧版本的功能描述", () => {
+  const notes = releaseNotesForUpdate("0.93.0", "0.96.0");
+  assert.deepEqual(notes.map((note) => note.version), ["0.96", "0.94"]);
+  assert.deepEqual(notes[0].zh.changes, ["修复错误，提升体验。"]);
+  assert.match(notes[1].zh.title, /侧栏/);
+  assert.equal(notes[1].isFallback, undefined);
+});
+
 test("DeepSeek 功能版本提供最终回答导航更新说明", () => {
   const note = releaseNotesForUpdate("0.64.0", "0.65.0")[0];
   assert.equal(note.version, "0.65");

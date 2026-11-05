@@ -10,6 +10,518 @@
 - Version update type must be declared by the user before recording a build.
 - After each build is recorded, confirm the build number and version with the user.
 
+## 396
+
+- Date: 2026-11-04
+- Version: 0.105.11
+- Summary: Restore visible reading progress before native conversation messages mount.
+- Notes: Confirm a conversation from API messages or mounted native text without waiting for the first history count; leave an unknown count blank. Gemini uses its final history list even while empty. Preserve empty-shell hiding, failed-read recovery and disabled host transitions. Keep the inline card sticky within the native scroll container so automatic scrolling cannot carry it out of view. Add packaged-content regressions for preparation before native messages mount and loading before the API returns.
+
+## 395
+
+- Date: 2026-11-04
+- Version: 0.105.10
+- Summary: Show the inline reading card directly in its final native conversation position.
+- Notes: Wait for native message nodes and their final history list instead of temporarily mounting in main or chat-window. Disable host entry animations and transitions while retaining reading-step spinners, background loading and native rerender recovery.
+
+## 394
+
+- Date: 2026-11-04
+- Version: 0.105.9
+- Summary: Defer the inline full-conversation reading card until messages have been read.
+- Notes: Keep zero-message requests running with sidepanel loading state, but do not mount a website progress card. Show the card after the first messages arrive, clear it when switching conversations, and preserve empty-failure recovery and both reading steps.
+
+## 393
+
+- Date: 2026-11-04
+- Version: 0.105.8
+- Summary: Refine inline reading status placement using the native Gemini history scroller.
+- Notes: Anchor before messages mount, limit the card to 560px, and use 48px top spacing with 24px content padding to separate it from native top actions. Retain normal flow, focus and plugin compatibility.
+
+## 392
+
+- Date: 2026-11-04
+- Version: 0.105.7
+- Summary: Clarify official OpenAI API and OAuth authorization boundaries in the privacy policy.
+- Notes: State that current website-history reading does not offer Responses inference or ChatGPT plan usage. Explain that OAuth plan permission does not grant conversation-history access and that local processing or user consent does not authorize access methods restricted by provider terms.
+
+## 391
+
+- Date: 2026-11-04
+- Version: 0.105.6
+- Summary: Simplify the export dialog footer to one export button and move closing to the top-right icon.
+- Notes: Remove download-started feedback below the action; show retryable errors above format choices only when needed.
+
+## 390
+
+- Date: 2026-11-04
+- Version: 0.105.5
+- Summary: Describe export attribution as local export instead of content generation.
+- Notes: Update both Markdown and HTML footers in Chinese and English while retaining the published app name and centered HTML alignment. Keep a concise no-upload statement without claiming that no local storage occurs.
+
+## 389
+
+- Date: 2026-11-04
+- Version: 0.105.4
+- Summary: Center inline reading status within the native conversation list and center HTML export attribution.
+- Notes: Use the message-list container as the horizontal alignment reference, retain normal flow and existing vertical placement, and preserve Markdown attribution formatting.
+
+## 388
+
+- Date: 2026-11-04
+- Version: 0.105.3
+- Summary: Clarify the privacy policy's independent-tool status, third-party service boundaries and content-use responsibilities.
+- Notes: Identify provider-owned trademarks; distinguish website-session history access from official developer API integration and provider permission. Explain separate provider policies, content rights and compatibility dependencies while preserving mandatory user rights. Use "user-visible" for conversation content so private chats are not described as publicly shared.
+
+## 387
+
+- Date: 2026-11-04
+- Version: 0.105.2
+- Summary: Harden complete-conversation reading and local exports, and align privacy disclosures with actual behavior.
+- Validation: Syntax checks for 84 scripts, production build and 705 tests pass. WORK extension reloaded as 0.105.2(387); live rate-limit behavior and store-dashboard declarations are not part of automated test coverage.
+- Notes: Apply server cooldowns to automatic and manual reads; project temporary ChatGPT snapshots before retention and expire them after 60 seconds; build Markdown from safe content while preserving code languages. Explain synchronized reading preferences, cache retention, full-conversation copying and local file export. Includes the concurrent inline reading-status changes from build 386.
+
+## 386
+
+- Date: 2026-11-04
+- Version: 0.105.1
+- Summary: Replace the full-page reading cover with an inline native-page status component.
+- Notes: Keep two-step reading progress and recovery actions while removing fixed positioning, maximum z-index, main inert/busy mutation, automatic focus and viewport tracking. Recover the owned Shadow DOM node after native rerenders without modifying other extensions.
+
+## 385
+
+- Date: 2026-11-04
+- Version: 0.105.0
+- Summary: Complete Gemini history parity with native ID normalization, streamed-response refresh, incremental pagination, scoped caching, image and attachment indexing, native readiness and retry recovery.
+- Validation: 338-turn share snapshot retains 676 messages and 3 user images; Dia WORK verified the complete share read, cache restoration and a signed-in two-message read. Native long-distance jumps and real streamed generation still require browser acceptance.
+- Notes: Includes the concurrent export-attribution changes from build 384. Maker clicks remain in the native conversation.
+
+## 384
+
+- Date: 2026-11-04
+- Version: 0.104.0
+- Summary: Add published-app attribution to Markdown and HTML conversation exports.
+- Notes: Resolve the name from the runtime manifest; localize and escape the footer while leaving copied text unchanged.
+
+## 383
+
+- Date: 2026-11-04
+- Version: 0.103.0
+- Summary: Align Gemini history with live refresh, account-scoped cache, media projection, native readiness and precise anchors, incremental history ingestion, retry cooldown and diagnostics.
+- Notes: Maker navigation remains in the native conversation. Only projected content is persisted; credentials remain in the page context.
+
+## 382
+
+- Date: 2026-11-04
+- Version: 0.102.1
+- Summary: Limit conversation copying to Outline and align the export dialog with Polaris Clay.
+- Notes: Use a single Export title with Newsreader typography, shared spacing tokens, and standard button states; remove the copied eyebrow.
+
+## 382
+
+- Date: 2026-11-04
+- Version: 0.102.1
+- Summary: Keep Gemini Maker clicks in the native conversation; remove automatic Outline navigation and load unmounted targets through the host scroll container.
+- Notes: Cancel loading on conversation changes or user input; report unavailable or ambiguous targets without changing views.
+
+## 381
+
+- Date: 2026-11-04
+- Version: 0.102.0
+- Summary: Move conversation copying to the content toolbar and offer Markdown and HTML export after copying.
+- Notes: Chapter menus retain chapter-only copying. Export uses source messages independent of chapter focus, filters and folding; incomplete indexes are blocked and DOM sources identify their loaded-content scope. PDF is not offered.
+
+## 380
+
+- Date: 2026-11-04
+- Version: 0.101.0
+- Summary: Add Gemini shared and signed-in conversation indexing, paginated history, full-text search, and virtualized chapter reading.
+- Validation: Shared snapshot verified with 676 messages; signed-in RPC covered by pagination tests, pending authenticated browser acceptance.
+
+## 379
+
+- Date: 2026-11-04
+- Version: 0.100.5
+- Summary: Remove the sidebar dot fade for uniform contrast across the background.
+
+## 378
+
+- Date: 2026-11-04
+- Version: 0.100.4
+- Summary: Strengthen sidebar dots using the design system warm-neutral strong-border token.
+- Notes: Preserve 22px spacing, 1px radius, and fading; inherit light and dark theme colors.
+
+## 377
+
+- Date: 2026-11-04
+- Version: 0.100.3
+- Summary: Add a right arrow to the recognition hint to signal navigation to Settings.
+
+## 376
+
+- Date: 2026-11-04
+- Version: 0.100.2
+- Summary: Render compact content-recognition guidance as a Maker row in the virtual list.
+- Notes: Show after reply content exists without recognized entries; remove when recognized and respect collapsed groups.
+
+## 375
+
+- Date: 2026-11-04
+- Version: 0.100.1
+- Summary: Guide unrecognized-reply feedback to Content recognition settings without mentioning TOC.
+
+## 374
+
+- Date: 2026-11-04
+- Version: 0.100.0
+- Summary: Guide users to display settings and Outline when TOC has no reply entries.
+- Notes: Explain that TOC does not show body text; provide direct settings and Outline actions.
+
+## 373
+
+- Date: 2026-11-04
+- Version: 0.99.13
+- Summary: Add a subtle tonal Clay gradient to the logo background for depth.
+- Notes: Preserve the ivory mark and regenerate all PNG icon sizes from the SVG source.
+
+## 372
+
+- Date: 2026-11-04
+- Version: 0.99.12
+- Summary: Match Outline hover colors to TOC using the shared muted background token.
+- Notes: Apply consistent row, disclosure, action, and menu hover colors in both themes.
+
+## 371
+
+- Date: 2026-11-04
+- Version: 0.99.11
+- Summary: Anchor action tips above the chapter menu with an 8px gap and viewport bounds.
+
+## 370
+
+- Date: 2026-11-04
+- Version: 0.99.10
+- Summary: Show chapter action feedback in a temporary external tip and add menu icons.
+
+## 369
+
+- Date: 2026-11-04
+- Version: 0.99.9
+- Summary: Keep outline row actions visible and clickable by default.
+- Notes: Remove conflicting hover visibility rules that left branch actions hidden.
+
+## 368
+
+- Date: 2026-11-04
+- Version: 0.99.8
+- Summary: Share the outline marker column between bullets and disclosure arrows.
+- Notes: Move branch actions to the row end; preserve keyboard and touch access. Use 16px card padding and nesting.
+
+## 367
+
+- Date: 2026-11-04
+- Version: 0.99.7
+- Summary: Match the Device MCP dot grid with 1px radius dots, 22px spacing, and a fading mask.
+- Notes: Replace scaled raster texture with CSS; adapt dot color for dark mode.
+
+## 366
+
+- Date: 2026-11-04
+- Version: 0.99.6
+- Summary: Double sidebar dot spacing and remove the header logo border.
+- Notes: Increase the background tile from 12px to 24px in both themes.
+
+## 365
+
+- Date: 2026-11-03
+- Version: 0.99.5
+- Summary: Renames the upgrade card heading to Get Pro.
+- Notes: Replaces Go Pro in initial rendering and membership refreshes. Preserves existing styling, purchase actions and the activated Polaris Pro heading.
+
+## 364
+
+- Date: 2026-11-03
+- Version: 0.99.4
+- Summary: Moves the Pro pearl gradient into a shared design token.
+- Notes: Adds `--polaris-pro-pearl` to the shared tokens and content styles, and points the Pro entry CTA and pricing closing CTA at it instead of repeating the gradient. Keeps the Recap-style lavender-to-white-to-cream look unchanged. Adds tests for the token and its two uses.
+
+## 363
+
+- Date: 2026-11-03
+- Version: 0.99.3
+- Summary: Replaces the extension icon with the minimal Clay outline-star mark.
+- Notes: Adds `public/icons/polaris-icon.svg` as the source: a Clay tile with an ivory star bullet, one heading bar and one indented sub-heading bar. Re-renders the 16, 32, 48, 96, 128, 512 and 1024 PNG icons from it, drawing 16 and 32 full-bleed for toolbar legibility. Drops the rainbow gradient border and colored list dots. Adds tests for the source colors and PNG dimensions.
+
+## 362
+
+- Date: 2026-11-03
+- Version: 0.99.2
+- Summary: Restores dotted Pro card texture and the original light-gradient CTA backgrounds.
+- Notes: Adds the existing 7px dot texture to the closing card in both themes and restores lavender-to-white-to-warm-cream backgrounds for the Pro entry and closing CTA. Removes page-level dots from Settings and its subpages while keeping card-local texture. Preserves the Clay palette, typography, layout and purchase actions.
+
+## 361
+
+- Date: 2026-11-03
+- Version: 0.99.1
+- Summary: Unifies Polaris colors on the Clay terracotta scale and keeps the Lora wordmark for full brand names.
+- Notes: Replaces the indigo accent and zinc neutrals in shared tokens and content styles with Clay accents and warm Paper/Ink neutrals, so the page navigator, settings panel and sidepanel share one palette. Removes duplicated color overrides from the sidepanel, maps hardcoded Pro and pricing colors to Clay tokens, drops the lavender CTA gradient, and fixes white plan-selector highlights in dark mode. Renders "Polaris Pro" as one Lora SemiBold Italic wordmark and sets the Pro card title in Lora. Separates secondary and tertiary text colors.
+
+## 360
+
+- Date: 2026-11-03
+- Version: 0.99.0
+- Summary: Adds local brand/UI typography and rounded, animated pricing plans.
+- Notes: Uses Lora SemiBold Italic for Polaris wordmarks, Inter for app UI and Newsreader for pricing hero titles, plan names and the Pro edition label. Bundles Latin WOFF2 fonts with OFL licenses. Rounds Pro's outer card and inner content panel, animates the Free/Pro selector and card transitions, and respects reduced-motion preferences. Uses a gray selector with a white sliding highlight and a 44px trial strip; deadline and Free-transition disclosure appear below the hero.
+
+## 359
+
+- Date: 2026-11-03
+- Version: 0.98.1
+- Summary: Refines the trial banner to match the Polaris landing page navigation.
+- Notes: Uses an inset neutral surface, 16px corners, fine outline and soft shadow inspired by the live landing header. Terracotta status and compact countdown chips preserve the product accent across light/dark themes and narrow sidebars.
+
+## 358
+
+- Date: 2026-11-03
+- Version: 0.98.0
+- Summary: Highlights the trial countdown in a terracotta banner below pricing navigation.
+- Notes: Shows days, hours and minutes using the server clock offset, retains the exact deadline and automatic Free transition notice, and updates in place without resetting plan selection or focus. Expired/invalid countdowns are hidden; Free, Pro and license forms omit the banner. Adapts to narrow sidebars and both themes.
+
+## 357
+
+- 套餐选择：新增 Free / Pro 选择器；标语使用 Get long conversation like a pro.。
+
+- Date: 2026-11-03
+- Version: 0.97.0
+- Summary: Adds reference-led pricing typography and fixes entry routing for unfinished orders.
+- Notes: Centers a serif pricing headline, enlarges prices and adds a terracotta Pro banner, authoritative savings badge and pill actions. Settings always opens pricing; unfinished purchases reopen the existing Stripe checkout instead of automatically entering a confirmation/error screen. Explicit payment confirmation and paid activation retries remain available. Pricing uses the shared settings navigation and localized Choose your plan title.
+
+
+## 356
+
+- Date: 2026-11-03
+- Version: 0.96.1
+- Summary: Uses localized bug-fix copy when bundled release notes are missing.
+- Notes: Replaces unavailable-note headings and messages with Improvements and fixes / 优化与修复 and Bug fixes and improvements. / 修复错误，提升体验。 Automatic notices, manual review and Settings share the same fallback; existing version matching and patch-notification behavior remain intact. Adds regression coverage for missing current/future notes, historical version labels and both notice languages.
+
+
+## 355
+
+- Date: 2026-11-03
+- Version: 0.96.0
+- Summary: Refines pricing hierarchy and adds a closing purchase card.
+- Notes: Places plan actions before features, softens the trial notice, aligns comparison columns and refines FAQ disclosures. A Polaris star card after FAQs exposes Buy now with server-owned pricing; pending purchases, activation retries and Pro status share the existing guarded action flow.
+
+## 354
+
+- Date: 2026-11-03
+- Version: 0.95.0
+- Summary: Replaces the upgrade dialog with a responsive full-page Free/Pro comparison.
+- Notes: Keeps Polaris colors and the settings Pro card; adds server-priced plan cards, feature comparison and FAQs. Payment progress, activation, redemption, recovery and platform selection share the page; device deactivation remains a confirmation dialog. Restores source scroll and keyboard focus, and preserves pending purchases when pricing is unavailable.
+
+## 353
+
+- Date: 2026-11-03
+- Version: 0.94.1
+- Summary: Scales Pro card typography to match the settings menu.
+- Notes: Reduces the card title to 18px and the button label to 13px, both at weight 600. Preserves the star, card styling, 48px button target and existing membership/purchase actions.
+
+## 352
+
+- Date: 2026-11-03
+- Version: 0.94.0
+- Summary: Matches the sidebar background and card surfaces to the supplied Cloudflare reference.
+- Notes: Samples a repeating dot tile from the reference, adds a neutral light/dark surface palette, uses outlined assistant cards and gray user bubbles, and gives Outline an opaque reading surface. Preserves existing navigation, content, terracotta active states and the Pro membership card.
+
+## 351
+
+- Date: 2026-11-03
+- Version: 0.93.0
+- Summary: Adds a terracotta Pro entry card to the settings home.
+- Notes: Replaces the Pro menu row with a persistent card using Recap's dotted surface, pearl button and original rounded five-point star with reduced-motion support. Free and trial users can open the existing purchase window; pending orders open progress, while Pro displays membership status and opens license details. Prices remain server-owned. Includes localized labels and focus restoration.
+
+## 350
+
+- Date: 2026-11-03
+- Version: 0.92.0
+- Summary: Adds a Discord community entry to Feedback.
+- Notes: Places a packaged Discord icon beside X and Xiaohongshu, opens the supplied invitation in a new tab, and includes Chinese and English accessible labels.
+
+## 349
+
+- Date: 2026-11-03
+- Version: 0.91.1
+- Summary: Matches the settings back button background to the settings entry.
+- Notes: Reuses the settings entry's circular background and border tokens in both themes, preserving back navigation and layout.
+
+## 348
+
+- Date: 2026-11-02
+- Version: 0.91.0
+- Summary: Adds current Maker location to the scroll toolbar.
+- Notes: The TOC toolbar locates and focuses the active Maker within the sidepanel, including off-screen virtual rows. Clears TOC search when locating, disables without an available target, and retains the Outline edge controls. Includes Chinese and English labels and reduced-motion handling. Local checks and build pass; live Dia WORK acceptance is not claimed.
+
+## 347
+
+- Date: 2026-10-30
+- Version: 0.90.2
+- Summary: Verifies Stripe sandbox fulfillment and fixes post-activation settings and expired price quotes.
+- Notes: Completes a real sandbox Checkout, signed Webhook fulfillment, idempotent activation, cross-installation redemption, deactivation/reactivation and refund revocation against the test Worker/D1. Live redemption displays Pro in Dia WORK. Settings actions become usable immediately after activation; expired offers require refreshed server pricing and changed quotes cannot silently create higher-price orders. Transactional email is still unconfigured; no production payments or store releases are enabled.
+
+## 346
+
+- Date: 2026-10-30
+- Version: 0.90.1
+- Summary: Makes the test billing deployment compatible with the existing D1 schema.
+- Notes: Namespaces billing tables without modifying legacy tables, adds a repeatable migration regression test, bounds request streams, pins project-local Wrangler and adds billing scripts. Reuses the verified test D1 and configures sandbox prices/Webhook. Trial and plan API smoke tests pass remotely; real Checkout acceptance still awaits the server-side Stripe test API key.
+
+## 345
+
+- Date: 2026-10-30
+- Version: 0.90.0
+- Summary: Connects Polaris Pro purchase and license flows to the extension.
+- Notes: Adds the localized Pro and license settings page, onboarding handoff, bounded purchase polling, redeem/recovery/deactivation, local-only installation credentials and cached entitlement validation. Initialized Free installations use two replaceable platforms without long-conversation indexing. Cached access checks do not block page navigation on the network. The test Worker still requires deployment authentication and valid Stripe test configuration; live payment acceptance is not claimed.
+
+## 344
+
+- Date: 2026-10-30
+- Version: 0.89.0
+- Summary: Adds an isolated Polaris Pro test billing Worker and browser adapter.
+- Notes: Implements server-owned trial pricing, test-only Stripe Checkout, signed fulfillment, per-installation licensing and an encrypted email outbox. Adds HTTP-level tests. Existing extension behavior is unchanged; remote deployment and Stripe sandbox acceptance remain pending authentication and configuration. Interactive design previews stay local.
+
+## 343
+
+- Date: 2026-10-30
+- Version: 0.88.2
+- Summary: Moves ChatGPT pick-a-chat guidance into the sidepanel.
+- Notes: Publishes the awaiting-conversation state to the sidepanel and replaces its waiting skeleton with localized guidance in Table of Contents and Outline. Removes the floating host-page notice. Choosing a conversation restores reading, while settings and billing pages stay free of this guidance.
+
+## 342
+
+- Date: 2026-10-30
+- Version: 0.88.1
+- Summary: Hides the pick-a-chat notice on ChatGPT settings pages.
+- Notes: Complete mode excludes /settings and its subroutes, including billing and account pages, from the awaiting-conversation notice. Entering settings removes an existing notice or reading cover; returning to the home page or a conversation preserves normal guidance and full reading.
+
+## 341
+
+- Date: 2026-10-28
+- Version: 0.88.0
+- Summary: Removes the search scope selector and uses full-conversation fuzzy search.
+- Notes: Full-history search always covers message bodies. Matching follows the existing ordered-character fuzzy rules, ignoring whitespace, case and width differences, with original-text highlights and source navigation preserved.
+
+## 340
+
+- Date: 2026-10-28
+- Version: 0.87.0
+- Summary: Indexes user image attachments and preserves full reading across tab and conversation switches.
+- Notes: Recognized user images retain ordered labels and navigation targets without loading image resources. The existing reading cover appears while waiting; refresh is offered only after a returned failure. Background tabs and BFCache retain the active index. Recent complete conversation snapshots are reused in bounded page memory; explicit retry and observed identity/workspace changes invalidate reuse. Live Dia acceptance remains pending.
+
+## 339
+
+- Date: 2026-10-28
+- Version: 0.86.0
+- Summary: Shows all indexed conversation groups directly without the earlier-groups summary.
+- Notes: Full-history TOC snapshots no longer apply the recent-user-group display limit. Every indexed question and its image labels enters the existing virtual list in source order; explicit question folding still works. Adds packaged-entry regressions for original and shared chats with 179 question groups and 358 image labels, including a stored recent-group limit of one. Image tags require no resource downloads, and the existing large-list checks continue to bound mounted DOM.
+
+## 338
+
+- Date: 2026-10-28
+- Version: 0.85.7
+- Summary: Connects indexed shared-chat Image entries to ChatGPT's native virtual-list navigation.
+- Notes: The real WORK page reproduced `locate_request: not-mounted`; the bridge unconditionally rejected shared reveal requests and the native navigator recognized only `/c/` routes. Shared routes now ask the existing host virtual list to mount the indexed message, then reuse DOM location and highlighting. They do not run the private history loader, fetch images, or wait for image rendering. Covers grouped image message IDs, native message/virtual handles, repeated-click cancellation, source changes and original-conversation navigation. Live acceptance of build 338 remains pending.
+
+## 337
+
+- Date: 2026-10-28
+- Version: 0.85.6
+- Summary: Reads shared chats when the logged-in route returns a reload instruction instead of conversation data.
+- Notes: Live Dia WORK evidence identified HTTP 202 SingleFetchRedirect from the `.data` loader, HTML without a conversation snapshot, and the host's successful `/backend-api/share/<shareId>` request. The reader recognizes that exact reload protocol and uses the existing page session for the share API. Validates the share ID and full branch, stops on access or identity failures, and discards late responses after source changes. Adds fixed response-stage diagnostics and a 10,000-message mixed-image integration check for virtual mounts, scrolling, collapse/reopen, cache, search, copy and source navigation with zero image requests. Live acceptance of this build remains pending.
+
+## 336
+
+- Date: 2026-10-28
+- Version: 0.85.5
+- Summary: Uses a dedicated shared-conversation server reader for the route's raw data response.
+- Notes: Requests the verified share `.data` loader route and decodes its serialized table directly, keeping HTML as a bounded compatibility fallback. Validates share identity and complete branches, cancels old-source responses, and does not use the authenticated private history loader. Removes the unaccepted React-internal model reader and hydration polling from build 335. The captured live loader response reproduces unsupported-format in the old decoder and now yields 384 public messages and 110 image labels. Live Dia acceptance remains separate.
+
+## 335
+
+- Date: 2026-10-28
+- Version: 0.85.4
+- Summary: Reuses the active shared-chat route's complete server model instead of depending on refetched HTML.
+- Notes: Reads the validated conversationData/serverResponse.data used by the host route, including after inline loader scripts are removed. Requires matching route and payload IDs and a unique snapshot; normalizes copied nodes without mutating host state. An unsupported refetch can wait up to 12 seconds for hydration, with source changes and disabling cancelling the timer. A fresh server-model replay retains 384 visible messages and 110 image labels with zero extra requests. Browser acceptance remains separate.
+
+## 334
+
+- Date: 2026-10-28
+- Version: 0.85.3
+- Summary: Falls back to the current page's complete server snapshot when a shared-chat refetch returns an unsupported format.
+- Notes: Decodes the existing loader stream without relying on mounted messages or downloading images. Requires the exact share ID and a complete active branch, preventing stale SPA routes from supplying another conversation. Adds a bridge-to-index/cover regression for recovery from an unreadable refetch. The fresh public sample retains 384 visible messages and 110 image labels; live Dia acceptance remains separate.
+
+## 333
+
+- Date: 2026-10-28
+- Version: 0.85.2
+- Summary: Records safe full-conversation read failure codes in downloadable diagnostics.
+- Notes: Covers bridge loading, HTTP failures, and invalid server snapshots. Includes elapsed time and message count, redacts unknown details, and ignores duplicate and stale-source failures. This build adds evidence collection for the unresolved live shared-conversation failure; it does not claim browser acceptance.
+
+## 332
+
+- Date: 2026-10-27
+- Version: 0.85.1
+- Summary: Fixes missing Image labels in shared chats when Follow ChatGPT mode is selected.
+- Notes: Adds already displayed AI images to DOM-based directories, including pure image turns without legacy author wrappers or Markdown. Keeps multiple labels in message order, excludes user attachments, avatars, and hidden duplicates, and adds no image downloads. Complete mode continues to read unmounted images from the server. Covers the packaged content entrypoint so the regression cannot hide behind index-only tests.
+
+## 331
+
+- Date: 2026-10-27
+- Version: 0.85.0
+- Summary: Shows Image labels for every indexed AI image without rendering or downloading previews.
+- Notes: Preserves complete original/shared conversation image metadata, mixed-content order, search/copy descriptions, cache restore, and source-message navigation. Removes image resolution, sampling, quality/quantity settings, and image download authentication. Keeps 10,000 image entries virtualized as text labels. Fixes Gemini initialization when body disappears during asynchronous configuration loading by observing the stable document root.
+
+## 330
+
+- Date: 2026-10-27
+- Version: 0.84.2
+- Summary: Restores AI image replies in the full-history TOC with lazy previews and original-image links.
+- Notes: Includes pure image-tool replies and inline Markdown images in TOC order, preserves descriptors through grouping and snapshots, and uses the existing image queue for previews. Resolves sandbox images through message-bound normal/shared endpoints without mixing identical paths across replies. The supplied server sample produces 110 TOC images: 103 attachment parts and 7 Markdown images. Covers 10,000 TOC images, collapse/reopen, and late responses after source changes.
+
+## 329
+
+- Date: 2026-10-27
+- Version: 0.84.1
+- Summary: Uses neutral gray backgrounds for Outline collapse controls and image placeholders.
+- Notes: Replaces the accent-tinted collapse hover and image loading/error backgrounds with the existing subtle background token, including its dark-theme counterpart.
+
+## 328
+
+- Date: 2026-10-27
+- Version: 0.84.0
+- Summary: Reads complete shared-conversation history, including AI image messages, from the server.
+- Notes: Decodes the share response's serialized loader snapshot without executing scripts or relying on mounted DOM. Restores the active message branch, filters hidden/tool text, and supplies the shared-conversation context when resolving original images. Keeps anonymous shares in memory without guessing an account scope for persistent storage. The supplied sample preserves all 103 visible AI image parts in its selected branch.
+
+## 327
+
+- Date: 2026-10-27
+- Version: 0.83.1
+- Summary: Shows floating scroll controls only alongside populated TOC and Outline lists.
+- Notes: Hides controls on settings pages, empty lists, and other non-list states. Tracks actual rendered rows, including virtual TOC lists and Outline search results, and restores the group when rows reappear.
+
+## 326
+
+- Date: 2026-10-27
+- Version: 0.83.0
+- Summary: Reads AI reply images in the full-conversation Reading view.
+- Notes: Preserves Markdown and attachment images, including visible image-tool results, in reply order. Resolves original URLs near the viewport with four concurrent requests, retains retryable image placeholders, and opens originals in a new tab. Keeps image descriptors in versioned snapshots while excluding generated URLs, credentials, hidden messages, and tool logs. Covers cache restore, source changes, URL refresh, and 10,000 virtual image rows.
+
+## 325
+
+- Date: 2026-10-27
+- Version: 0.82.1
+- Summary: Hides the floating scroll controls until a conversation is read.
+- Notes: Hides the group on unsupported pages, while waiting for a conversation, during loading, and after reading fails. Restores it when conversation content is ready and removes the reserved bottom space while hidden.
+
 ## 324
 
 - Date: 2026-10-27

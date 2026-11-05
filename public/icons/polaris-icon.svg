@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-16 -16 544 544" width="544" height="544">
+  <!-- Polaris C1: star bullet for a heading row plus one indented sub-row, on a Clay tile. -->
+  <defs>
+    <linearGradient id="clay-depth" x1="0%" y1="0%" x2="15%" y2="100%">
+      <stop offset="0" stop-color="#CC7652"/>
+      <stop offset="0.48" stop-color="#B85C3A"/>
+      <stop offset="1" stop-color="#984529"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="116" fill="url(#clay-depth)"/>
+  <path fill="#FFF7EF" d="M168 124Q177.5 190.5 244 200Q177.5 209.5 168 276Q158.5 209.5 92 200Q158.5 190.5 168 124Z"/>
+  <rect x="276" y="166" width="140" height="68" rx="34" fill="#FFF7EF"/>
+  <rect x="204" y="288" width="212" height="68" rx="34" fill="#FFF7EF"/>
+</svg>

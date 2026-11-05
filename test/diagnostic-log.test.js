@@ -80,3 +80,10 @@ test("诊断日志序列化始终输出有效 JSON", () => {
   assert.equal(parsed.events[0].errorName, "TypeError");
   assert.equal(parsed.events[0].stack, undefined);
 });
+
+test("分享读取诊断保留响应阶段、状态码与固定格式，不保留响应正文或凭证", () => {
+  const log = createDiagnosticLog({ storage: createStorage() });
+  log.record("conversation_read", { kind: "shared-data", stage: "shared-loader", httpStatus: 202, responseFormat: "script", body: "private", accessToken: "private" });
+  assert.deepEqual(Object.fromEntries(Object.entries(log.snapshot().events[0]).filter(([key]) => !["timestamp", "type"].includes(key))),
+    { kind: "shared-data", stage: "shared-loader", httpStatus: 202, responseFormat: "script" });
+});

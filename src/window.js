@@ -1,5 +1,9 @@
+import { createBackIcon, createPageNavigation } from "./sidepanel-navigation.js";
+import { billingAllowsIndex, billingAllowsPlatform } from "./billing-access.js";
+import { createSidepanelBilling } from "./sidepanel-billing.js";
 import { createI18n } from "./i18n.js";
 import { createSidepanelChapterReader } from "./sidepanel-chapter-reader.js";
+import { createSidepanelConversationExport } from "./sidepanel-conversation-export.js";
 import { matchesSearch } from "./window-search.js";
 import { bindSearchInput } from "./search-input.js";
 import { sendRuntimeMessage } from "./runtime-message.js";
@@ -16,7 +20,33 @@ export function initializeSidepanel() {
   const SYSTEM_THEME_QUERY = "(prefers-color-scheme: dark)";
   const root = document.getElementById("polaris-window");
   const { locale, t } = createI18n();
-  const settingsDestinations = ["preferences", "help", "feedback", "updates", "about"];
+  let billingPage = null;
+  let billingOrigin = null;
+  const billing = createSidepanelBilling({ document, chrome, locale, onChange: () => render(),
+    onOpenPage(page) {
+      billingOrigin = { scrollY: window.scrollY, focus: document.activeElement };
+      billingPage = page;
+      document.body.classList.add("billing-open");
+      root.hidden = true;
+      root.inert = true;
+      scrollControls.hidden = true;
+      root.after(page);
+      window.scrollTo({ top: 0, behavior: "auto" });
+    },
+    onClosePage() {
+      const origin = billingOrigin;
+      billingPage = null; billingOrigin = null;
+      document.body.classList.remove("billing-open");
+      root.hidden = false; root.inert = false; scrollControls.hidden = false;
+      render();
+      // The reader stays mounted; reconcile new entitlements before restoring position.
+      window.scrollTo({ top: origin?.scrollY || 0, behavior: "auto" });
+      if (origin?.focus?.isConnected) origin.focus.focus({ preventScroll: true });
+      else if (origin?.focus?.dataset.settingsFocus) root.querySelector(`[data-settings-focus="${origin.focus.dataset.settingsFocus}"]`)?.focus({ preventScroll: true });
+      updateScrollControls();
+    }
+  });
+  const settingsDestinations = ["preferences", "license", "help", "feedback", "updates", "about"];
   const supportedPlatforms = SUPPORTED_PLATFORMS;
   const state = {
     snapshot: null,
@@ -28,7 +58,6 @@ export function initializeSidepanel() {
     returnScrollY: 0,
     returnFocusTarget: "",
     markerQuery: "",
-    searchScope: "full",
     fullSearch: { key: "", items: [], total: 0, hasMore: false, loading: false },
     chapterQuery: "",
     chaptersStatus: "idle",
@@ -84,6 +113,17 @@ export function initializeSidepanel() {
       }
     }
   });
+  const conversationExport = createSidepanelConversationExport({ document, locale, appName: chrome.runtime.getManifest().name,
+    async onRead() {
+      const routeKey = state.routeKey; const tabId = state.sourceTabId;
+      const generation = state.snapshot?.conversationIndex?.generation;
+      const result = await chrome.runtime.sendMessage({ type: "POLARIS_WINDOW_COMMAND", command: "get-conversation-export",
+        expectedTabId: tabId, expectedRouteKey: routeKey, generation, expectResult: true });
+      if (!result?.ok || state.sourceTabId !== tabId || state.routeKey !== routeKey
+        || state.snapshot?.conversationIndex?.generation !== generation) throw new Error("Source unavailable");
+      return result;
+    }
+  });
   let sourceRetryTimer = 0;
   let virtualMarkers = null;
   let virtualMarkerElement = null;
@@ -98,7 +138,47 @@ export function initializeSidepanel() {
     return Math.max(0, scroller.scrollHeight - (document.documentElement.clientHeight || window.innerHeight));
   }
 
+  function activeMakerItem() {
+    const key = state.snapshot?.activeMarkerKey;
+    return key ? state.snapshot?.markerItems?.find((item) => item.markerKey === key) : null;
+  }
+
+  function locateActiveMaker() {
+    const item = activeMakerItem();
+    if (state.activeTab !== "navigation" || !item) return;
+    if (state.markerQuery) {
+      state.markerQuery = "";
+      render();
+    }
+    if (virtualMarkers) {
+      virtualMarkers.scrollToKey(item.key, { focus: true });
+      return;
+    }
+    const target = Array.from(root.querySelectorAll(".maker-list > .maker-card"))
+      .find((row) => row.dataset.markerRenderKey === item.key);
+    if (!target) return;
+    target.focus({ preventScroll: true });
+    const headerBottom = root.querySelector(".window-header").getBoundingClientRect().bottom;
+    window.scrollTo({
+      top: Math.max(0, window.scrollY + target.getBoundingClientRect().top - headerBottom - 12),
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth"
+    });
+  }
+
   function updateScrollControls() {
+    if (billingPage) { scrollControls.hidden = true; return; }
+    if (!document?.documentElement) return;
+    const current = scrollControls.querySelector('[data-scroll-action="current"]');
+    current.hidden = state.activeTab !== "navigation";
+    current.disabled = !activeMakerItem();
+    const listRow = state.activeTab === "navigation"
+      ? root.querySelector('.window-body > .navigation-panel > .maker-list .maker-card')
+      : state.activeTab === "chapters"
+        ? root.querySelector('.window-body > .chapter-tree-reader > .chapter-tree-list .chapter-tree-node')
+        : null;
+    scrollControls.hidden = !listRow && !(virtualMarkers && !current.hidden && !current.disabled);
+    root.classList.toggle("has-scroll-controls", !scrollControls.hidden);
+    if (scrollControls.hidden) return;
     const maxScrollY = maxWindowScrollY();
     scrollControls.querySelector('[data-scroll-edge="top"]').disabled = maxScrollY <= 1 || window.scrollY <= 1;
     scrollControls.querySelector('[data-scroll-edge="bottom"]').disabled = window.scrollY >= maxScrollY - 1;
@@ -106,12 +186,14 @@ export function initializeSidepanel() {
 
   function createScrollControls() {
     const group = element("div", "window-scroll-controls");
+    group.hidden = true;
     group.setAttribute("role", "group");
     group.setAttribute("aria-label", t("scroll.label"));
-    for (const edge of ["top", "bottom"]) {
+    for (const edge of ["top", "current", "bottom"]) {
       const button = element("button", "window-scroll-button");
       button.type = "button";
-      button.dataset.scrollEdge = edge;
+      if (edge === "current") button.dataset.scrollAction = edge;
+      else button.dataset.scrollEdge = edge;
       button.title = t(`scroll.${edge}`);
       button.setAttribute("aria-label", button.title);
       button.disabled = true;
@@ -124,10 +206,13 @@ export function initializeSidepanel() {
       icon.setAttribute("stroke-linejoin", "round");
       icon.setAttribute("aria-hidden", "true");
       const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      path.setAttribute("d", edge === "top" ? "M12 19V7m-5 5 5-5 5 5M5 4h14" : "M12 5v12m-5-5 5 5 5-5M5 20h14");
+      path.setAttribute("d", edge === "current"
+        ? "M12 3v3m0 12v3M3 12h3m12 0h3M18 12a6 6 0 1 1-12 0 6 6 0 0 1 12 0M14 12a2 2 0 1 1-4 0 2 2 0 0 1 4 0"
+        : edge === "top" ? "M12 19V7m-5 5 5-5 5 5M5 4h14" : "M12 5v12m-5-5 5 5 5-5M5 20h14");
       icon.appendChild(path);
       button.appendChild(icon);
       button.addEventListener("click", () => {
+        if (edge === "current") { locateActiveMaker(); return; }
         window.scrollTo({
           top: edge === "top" ? 0 : maxWindowScrollY(),
           behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth"
@@ -147,6 +232,8 @@ export function initializeSidepanel() {
   function showIndexNotice(reason) {
     document.querySelector('.index-notice')?.remove();
     const copies = {
+      "authentication-required": ["登录状态尚未就绪，请刷新 Gemini 页面后重试。", "Your sign-in session is not ready. Refresh Gemini and try again."],
+      "conversation-unavailable": ["暂时无法读取这个会话，请确认链接仍可访问后重试。", "This conversation could not be read. Check that the link is accessible and try again."],
       "not-mounted": ["消息已读取，但暂时无法打开正文，请重试。", "The message has been read, but its content could not be opened. Please try again."],
       "native-list-unavailable": ["暂时无法接入这版 ChatGPT 的历史列表，请刷新页面后重试。", "This ChatGPT history list is not supported yet. Refresh the page and try again."],
       "native-load-failed": ["历史原文读取失败，请稍后重试。", "Earlier messages could not be loaded. Please try again."],
@@ -180,7 +267,7 @@ export function initializeSidepanel() {
 
   function requestFullSearch(append = false) {
     const index = state.snapshot?.conversationIndex;
-    if (!index || state.searchScope !== "full" || !state.markerQuery.trim()) return;
+    if (!index || !state.markerQuery.trim()) return;
     const key = JSON.stringify([state.sourceTabId, state.routeKey, index.generation, index.revision, state.markerQuery]);
     if (!append && state.fullSearch.key === key) return;
     const offset = append ? state.fullSearch.items.length : 0;
@@ -300,21 +387,6 @@ export function initializeSidepanel() {
     return icon;
   }
 
-  function createBackIcon() {
-    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    icon.setAttribute("viewBox", "0 0 24 24");
-    icon.setAttribute("fill", "none");
-    icon.setAttribute("stroke", "currentColor");
-    icon.setAttribute("stroke-width", "2");
-    icon.setAttribute("stroke-linecap", "round");
-    icon.setAttribute("stroke-linejoin", "round");
-    icon.setAttribute("aria-hidden", "true");
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    path.setAttribute("d", "m15 18-6-6 6-6");
-    icon.appendChild(path);
-    return icon;
-  }
-
   function applyTheme(snapshot) {
     let theme = snapshot?.theme === "dark" ? "dark" : "light";
     try {
@@ -342,6 +414,7 @@ export function initializeSidepanel() {
   }
 
   function render() {
+    if (billingPage) { applyTheme(state.snapshot || {}); return; }
     if (state.activeTab !== "navigation") resetVirtualMarkers();
     const snapshot = state.snapshot || { markerItems: [], hasConversation: false, supportedRoute: false };
     const isLoading = !state.snapshot;
@@ -359,6 +432,16 @@ export function initializeSidepanel() {
     syncSourceRetry(state.snapshot);
     if (state.activeTab !== "chapters") chapterReader?.suspend();
     const body = renderBody(snapshot, { isLoading, existingBody });
+    const showConversationActions = state.activeTab === "chapters" && snapshot.hasConversation && !snapshot.conversationAwaiting
+      && billingAllowsPlatform(billing.getView(), snapshot.platform);
+    const exportReady = Boolean(showConversationActions && !isLoading && !snapshot.loading && !snapshot.conversationLoading && !snapshot.conversationStalled
+      && (!snapshot.conversationIndex || snapshot.conversationIndex.phase === "complete"));
+    conversationExport.update({ key: `${state.sourceTabId}:${state.routeKey}:${snapshot.conversationIndex?.generation || "dom"}`,
+      enabled: exportReady, complete: Boolean(snapshot.conversationIndex) });
+    if (showConversationActions) {
+      if (body.firstElementChild !== conversationExport.element) body.prepend(conversationExport.element);
+    }
+    else conversationExport.element.remove();
     const header = renderHeader(snapshot);
     const oldHeader = root.querySelector(":scope > .window-header");
     if (existingBody === body && oldHeader) {
@@ -437,6 +520,7 @@ export function initializeSidepanel() {
   }
 
   function openSettingsPage(page) {
+    if (page === "license") { billing.open(); return; }
     if (page !== "menu" && !settingsDestinations.includes(page)) return;
     state.settingsScrollByPage.set(state.settingsPage, window.scrollY);
     if (page !== "menu") state.settingsReturnPage = page;
@@ -459,15 +543,12 @@ export function initializeSidepanel() {
   function renderHeader(snapshot) {
     const header = element("header", "window-header");
     if (state.activeTab === "settings") {
-      const settingsNav = element("div", "window-settings-nav");
-      const back = element("button", "window-settings-back");
-      back.type = "button";
-      back.dataset.settingsFocus = "back";
-      back.setAttribute("aria-label", state.settingsPage === "menu" ? t("settings.backToContent") : t("settings.backToMenu"));
-      back.title = back.getAttribute("aria-label");
-      back.appendChild(createBackIcon());
-      back.addEventListener("click", backFromSettings);
-      settingsNav.append(back, element("h1", "window-settings-nav-title", t(`settings.page.${state.settingsPage}`)));
+      const settingsNav = createPageNavigation(document, {
+        title: t(`settings.page.${state.settingsPage}`),
+        backLabel: state.settingsPage === "menu" ? t("settings.backToContent") : t("settings.backToMenu"),
+        onBack: backFromSettings
+      });
+      settingsNav.querySelector("button").dataset.settingsFocus = "back";
       header.appendChild(settingsNav);
       return header;
     }
@@ -476,7 +557,7 @@ export function initializeSidepanel() {
     const icon = element("img", "window-logo");
     icon.src = chrome.runtime.getURL("icons/gpt-voyager-icon-96.png");
     icon.alt = "";
-    brand.append(icon, element("div", "window-title", "Polaris"));
+    brand.append(icon, element("div", "window-title polaris-wordmark", "Polaris"));
     identity.append(brand);
     const meta = element("div", "window-meta");
     const platformData = activePlatform(snapshot);
@@ -512,17 +593,7 @@ export function initializeSidepanel() {
 
     const search = element("div", "window-search");
     const isChapterSearch = state.activeTab === "chapters";
-    const isFullSearch = !isChapterSearch && snapshot.conversationIndex && state.searchScope === "full";
-    if (!isChapterSearch && snapshot.conversationIndex) {
-      const scope = element("select", "index-search-scope");
-      scope.setAttribute("aria-label", locale === "zh" ? "搜索范围" : "Search scope");
-      for (const [value, text] of [["full", locale === "zh" ? "全文" : "Full text"], ["titles", locale === "zh" ? "目录" : "Titles"]]) {
-        const option = element("option", "", text); option.value = value; scope.append(option);
-      }
-      scope.value = state.searchScope;
-      scope.addEventListener("change", () => { state.searchScope = scope.value; state.fullSearch.key = ""; render(); });
-      search.append(scope);
-    }
+    const isFullSearch = !isChapterSearch && snapshot.conversationIndex;
     search.setAttribute("aria-label", isChapterSearch
       ? (locale === "zh" ? "搜索章节" : "Search chapters")
       : isFullSearch ? (locale === "zh" ? "搜索全部消息" : "Search all messages") : (locale === "zh" ? "搜索 Maker" : "Search Makers"));
@@ -658,11 +729,21 @@ export function initializeSidepanel() {
     body.classList.toggle("is-mode-transition", state.isChangingMode);
     if (state.activeTab === "settings") {
       const panel = renderSettings(snapshot, body.querySelector(":scope > .settings-panel"));
-      if (body.firstElementChild !== panel) body.replaceChildren(panel);
+      if (panel.parentElement !== body) body.replaceChildren(panel);
       return body;
     }
+    if (!billingAllowsPlatform(billing.getView(), snapshot.platform) && snapshot.platform && snapshot.platform !== "default") {
+      const panel = element("section", "settings-section billing-settings");
+      panel.append(element("h2", "settings-section-title", locale === "zh" ? "选择免费使用的平台" : "Choose your free platforms"));
+      panel.append(element("p", "billing-copy", locale === "zh" ? "Free 可同时使用两个平台，也可以升级 Pro 使用全部平台。" : "Free includes two platforms at a time. Upgrade to Pro for every platform."));
+      const choose = element("button", "settings-diagnostic-primary billing-action", locale === "zh" ? "选择或更换平台" : "Choose or change platforms");
+      choose.type = "button"; choose.addEventListener("click", () => billing.open("platforms"));
+      const upgrade = element("button", "secondary-button billing-action", locale === "zh" ? "了解 Pro" : "Explore Pro");
+      upgrade.type = "button"; upgrade.addEventListener("click", () => billing.open());
+      panel.append(choose, upgrade); body.replaceChildren(panel); return body;
+    }
     if (state.activeTab === "chapters") {
-      const needsConversation = isLoading || snapshot.loading || !snapshot.hasConversation;
+      const needsConversation = isLoading || snapshot.loading || snapshot.conversationAwaiting || !snapshot.hasConversation;
       if (needsConversation) chapterReader.suspend();
       const panel = needsConversation
         ? renderNavigation(snapshot, {
@@ -670,28 +751,63 @@ export function initializeSidepanel() {
             existingPanel: canReuseBody ? body.querySelector(":scope > .navigation-panel") : null
           })
         : renderChapters(snapshot);
-      if (body.firstElementChild !== panel) body.replaceChildren(panel);
+      if (panel.parentElement !== body) body.replaceChildren(panel);
       return body;
     }
     const existingPanel = canReuseBody ? body.querySelector(":scope > .navigation-panel") : null;
     const panel = renderNavigation(snapshot, { isLoading, existingPanel });
-    if (body.firstElementChild !== panel || body.childElementCount !== 1) {
+    if (panel.parentElement !== body || body.lastElementChild !== panel) {
       body.replaceChildren(panel);
     }
     return body;
   }
 
+  function withRecognitionHints(items, snapshot) {
+    if (state.markerQuery.trim()) return items;
+    const groups = new Set(snapshot.recognitionHintGroups || []);
+    const title = locale === "zh"
+      ? "未识别到目录项，可在设置中调整 Content recognition。"
+      : "No entries recognized. Adjust Content recognition in Settings.";
+    const result = [];
+    for (const item of items) {
+      result.push(item);
+      if (item.type === "user" && item.isExpanded && groups.has(item.groupKey)) {
+        result.push({ key: `recognition:${item.groupKey}`, type: "recognition", groupKey: item.groupKey, title });
+      }
+    }
+    if (groups.has("") && !items.some((item) => item.type === "user")) {
+      result.push({ key: "recognition:orphan", type: "recognition", title });
+    }
+    return result;
+  }
+
+  function openContentRecognition() { openSettings(); openSettingsPage("preferences"); }
+
   function renderNavigation(snapshot, { isLoading = false, existingPanel = null } = {}) {
     const panel = existingPanel instanceof HTMLElement
       ? existingPanel
       : element("div", "navigation-panel");
-    if (snapshot.conversationIndex && snapshot.hasConversation && !snapshot.conversationLoading && !snapshot.conversationStalled) {
+    if (snapshot.conversationAwaiting) {
+      resetVirtualMarkers(); windowMarkerListReconciler.reset(); markerStreamingIndicator.reset();
+      if (!panel.querySelector(":scope > .conversation-awaiting")) {
+        const guide = element("div", "empty-state empty-state-compact conversation-awaiting");
+        guide.setAttribute("role", "status");
+        guide.append(element("h2", "empty-title", locale === "zh" ? "选择一个会话开始读取" : "Pick a chat to start reading"));
+        guide.append(element("p", "empty-copy", locale === "zh"
+          ? `展开 ${snapshot.platform === "gemini" ? "Gemini" : "ChatGPT"} 左侧边栏，再选择一个会话。Polaris 会读取其中的全部消息。`
+          : `Open the ${snapshot.platform === "gemini" ? "Gemini" : "ChatGPT"} sidebar and pick a chat. Polaris reads every message in it.`));
+        panel.replaceChildren(guide);
+      }
+      return panel;
+    }
+    const readFailed = ["error", "partial"].includes(snapshot.conversationIndex?.phase) || snapshot.conversationIndex?.native?.phase === "error";
+    const emptyFailure = readFailed && !Number(snapshot.conversationIndex?.count);
+    if (snapshot.conversationIndex && snapshot.hasConversation && !snapshot.conversationLoading && !emptyFailure) {
       windowMarkerListReconciler.reset(); markerStreamingIndicator.reset();
       const searching = Boolean(state.markerQuery.trim());
-      if (searching && state.searchScope === "full") requestFullSearch();
-      const items = !searching ? snapshot.markerItems || []
-        : state.searchScope === "full" ? state.fullSearch.items
-          : filterItems(snapshot.allMarkerItems || snapshot.markerItems || [], state.markerQuery);
+      if (searching) requestFullSearch();
+      const items = !searching ? withRecognitionHints(snapshot.markerItems || [], snapshot)
+        : state.fullSearch.items;
       let list = panel.querySelector(':scope > .maker-list');
       if (!list) { list = element("div", "maker-list"); panel.replaceChildren(list); }
       if (virtualMarkerElement !== list) {
@@ -701,10 +817,10 @@ export function initializeSidepanel() {
       virtualMarkers.setItems(items);
       panel.querySelector(':scope > .index-list-status')?.remove();
       const status = element("div", "index-list-status"); status.setAttribute("role", "status");
-      status.textContent = searching && state.searchScope === "full"
+      status.textContent = searching
         ? state.fullSearch.loading ? (locale === "zh" ? "正在搜索…" : "Searching…") : (locale === "zh" ? `${state.fullSearch.total} 条消息匹配` : `${state.fullSearch.total} matching messages`)
         : indexStatusText(snapshot.conversationIndex);
-      if (searching && state.searchScope === "full" && state.fullSearch.hasMore) {
+      if (searching && state.fullSearch.hasMore) {
         const more = element("button", "secondary-button", locale === "zh" ? "加载更多结果" : "More results"); more.type = "button"; more.disabled = state.fullSearch.loading;
         more.addEventListener("click", () => { requestFullSearch(true); render(); }); status.append(more);
       }
@@ -714,22 +830,22 @@ export function initializeSidepanel() {
     resetVirtualMarkers();
     const awaitingConversation = !snapshot.hasConversation
       && (snapshot.supportedRoute || activePlatform(snapshot));
-    if (isLoading || snapshot.loading || snapshot.conversationLoading || snapshot.conversationStalled || awaitingConversation) {
+    if (isLoading || snapshot.loading || snapshot.conversationLoading || snapshot.conversationStalled || readFailed || awaitingConversation) {
       windowMarkerListReconciler.reset();
       markerStreamingIndicator.reset();
-      const isReading = !snapshot.conversationStalled && Boolean(isLoading || snapshot.loading || snapshot.conversationLoading
+      const isReading = !readFailed && Boolean(isLoading || snapshot.loading || snapshot.conversationLoading
         || (snapshot.supportedRoute && isPotentialConversationRoute(snapshot.routeKey)));
       const loading = panel.querySelector(":scope > .conversation-skeleton") || renderConversationSkeleton();
       loading.classList.toggle("is-reading", isReading);
-      const copy = snapshot.conversationStalled
+      const copy = readFailed
         ? (locale === "zh" ? "没有读取到这个会话，请刷新页面后重试" : "Couldn't read this chat. Refresh the page and try again.")
         : isReading
         ? (locale === "zh" ? "正在读取会话…" : "Reading conversation…")
         : (locale === "zh" ? "等待会话…" : "Waiting for a conversation…");
       const status = loading.querySelector(".conversation-skeleton-status");
       if (status.textContent !== copy) status.textContent = copy;
-      const canReload = snapshot.config?.chatgptHistoryMode === "complete" && snapshot.conversationStalled
-        && snapshot.platform === "chatgpt" && isPotentialConversationRoute(snapshot.routeKey);
+      const canReload = snapshot.config?.chatgptHistoryMode === "complete" && readFailed
+        && ["chatgpt", "gemini"].includes(snapshot.platform) && isPotentialConversationRoute(snapshot.routeKey);
       let reload = loading.querySelector(".conversation-read-reload");
       if (!canReload) reload?.remove();
       else if (!reload) {
@@ -765,7 +881,7 @@ export function initializeSidepanel() {
       return panel;
     }
 
-    const items = snapshot.markerItems || [];
+    const items = withRecognitionHints(snapshot.markerItems || [], snapshot);
     if (!items.length) {
       windowMarkerListReconciler.reset();
       markerStreamingIndicator.reset();
@@ -823,17 +939,17 @@ export function initializeSidepanel() {
     row.indexItem = item;
     row.className = `maker-card maker-card-${item.type === "result" ? "ai index-search-result" : item.type}${item.isExpanded ? " is-expanded" : ""}${item.markerKey && item.markerKey === state.snapshot?.activeMarkerKey ? " is-active" : ""}`;
     row.dataset.markerRenderKey = item.key;
-    row.setAttribute("aria-label", item.title || item.preview || "Maker");
-    const signature = JSON.stringify([item.title, item.preview, item.parts, item.count, item.isExpanded, item.remainder]);
+    row.setAttribute("aria-label", item.image ? (locale === "zh" ? "图片" : "Image") : item.title || item.preview || "Maker");
+    const signature = JSON.stringify([item.title, item.preview, item.parts, item.count, item.isExpanded, item.remainder, item.image]);
     if (row.dataset.indexSignature === signature) return;
     row.dataset.indexSignature = signature;
     const copy = element("span", "maker-copy");
     if (item.type === "result") {
-      copy.append(element("span", "index-result-meta", `${item.role === "user" ? (locale === "zh" ? "你" : "You") : "ChatGPT"} · ${item.count}`));
+      copy.append(element("span", "index-result-meta", `${item.role === "user" ? (locale === "zh" ? "你" : "You") : (state.snapshot?.platform === "gemini" ? "Gemini" : "ChatGPT")} · ${item.count}`));
       const snippet = element("span", "index-result-snippet");
       for (const part of item.parts || []) snippet.append(element(part.match ? "mark" : "span", "", part.text));
       copy.append(snippet);
-    } else copy.append(element("span", "maker-title", item.title || item.preview || "Maker"));
+    } else copy.append(element("span", "maker-title", item.image ? (locale === "zh" ? "图片" : "Image") : item.title || item.preview || "Maker"));
     row.replaceChildren(copy);
     if (item.type === "user" || item.type === "fold") {
       const chevron = element("span", "maker-chevron"); chevron.setAttribute("aria-hidden", "true"); row.append(chevron);
@@ -842,10 +958,12 @@ export function initializeSidepanel() {
   }
 
   function renderIndexedRow(item) {
-    const row = element("button", "maker-card"); row.type = "button";
+    const row = element("button", "maker-card");
+    row.type = "button";
     row.addEventListener("click", () => {
       const current = row.indexItem;
-      if (current.type === "user") send({ command: "toggle-user-group", groupKey: current.groupKey });
+      if (current.type === "recognition") openContentRecognition();
+      else if (current.type === "user") send({ command: "toggle-user-group", groupKey: current.groupKey });
       else if (current.type === "fold") send({ command: "toggle-fold-group", foldKey: current.foldKey });
       else if (current.type === "earlier") send({ command: "toggle-earlier-groups" });
       else void locateIndexed(current.markerKey).catch(showIndexNotice);
@@ -855,7 +973,7 @@ export function initializeSidepanel() {
   }
 
   function indexStatusText(index) {
-    if (!index) return locale === "zh" ? "仅显示 ChatGPT 页面上已加载的内容" : "Showing messages already loaded in ChatGPT";
+    if (!index) return locale === "zh" ? "仅显示页面上已加载的内容" : "Showing messages already loaded on the page";
     const count = Number(index.count) || 0;
     if (index.phase === "complete") return locale === "zh" ? `已读取全部 ${count} 条消息` : `All ${count} messages have been read`;
     if (["partial", "error"].includes(index.phase)) return locale === "zh" ? `已读取 ${count} 条消息，部分历史暂时无法读取` : `${count} messages are ready. Some earlier messages could not be read.`;
@@ -872,13 +990,16 @@ export function initializeSidepanel() {
     const cards = element("fieldset", "index-mode-cards");
     const legend = element("legend", "sr-only", locale === "zh" ? "读取范围" : "Messages to read"); cards.append(legend);
     for (const [mode, title, description] of [
-      ["default", locale === "zh" ? "跟随 ChatGPT" : "Follow ChatGPT", locale === "zh" ? "只显示页面上已加载的内容。向上滚动 ChatGPT 可查看更多。" : "Show the messages already on the page. Scroll up in ChatGPT to see more."],
-      ["complete", locale === "zh" ? "读取完整对话" : "Read the whole conversation", locale === "zh" ? "自动读取全部历史消息，生成完整目录，并支持搜索所有消息。" : "Read all messages in this chat for a complete outline and search across the whole conversation."]
+      ["default", locale === "zh" ? "跟随页面" : "Follow the page", locale === "zh" ? "只显示页面上已加载的内容。向上滚动页面可查看更多。" : "Show the messages already on the page. Scroll up on the page to see more."],
+      ["complete", locale === "zh" ? "读取完整对话" : "Read the whole conversation", locale === "zh" ? "自动读取 ChatGPT 和 Gemini 会话的全部历史消息，生成完整目录并支持全文搜索。此设置适用于后续会话；开启浏览器同步后，也会在其他已登录浏览器生效。" : "Automatically read full ChatGPT and Gemini conversations for outline and search. Applies to future chats and, with browser sync enabled, your other signed-in browsers."]
     ]) {
       const card = element("label", "index-mode-card");
       const input = document.createElement("input"); input.type = "radio"; input.name = "chatgpt-history-mode"; input.value = mode;
       input.dataset.settingsFocus = `history-${mode}`;
       input.addEventListener("change", () => {
+        if (input.checked && mode === "complete" && !billingAllowsIndex(billing.getView())) {
+          input.checked = false; billing.open(); return;
+        }
         if (input.checked) send({ command: "update-config", patch: { chatgptHistoryMode: mode } });
       });
       const copy = element("span", "index-mode-copy"); copy.append(element("strong", "", title), element("span", "", description));
@@ -888,8 +1009,8 @@ export function initializeSidepanel() {
     const retry = settingsCommandButton(locale === "zh" ? "重新读取" : "Read again", "retry-conversation-index"); retry.dataset.indexRetry = "true";
     section.append(retry);
     section.append(element("p", "index-current-status", locale === "zh"
-      ? "完整对话会在本机缓存，最多占用 100 MiB，不会同步。重新打开时仍会校验最新内容并等待正文准备好。"
-      : "Complete conversations are cached on this device, up to 100 MiB, without sync. Reopening still checks current content and waits for the conversation to be ready."));
+      ? "完整对话会在本机缓存，最多占用 100 MiB，不会同步。关闭页面或切换读取模式不会删除缓存，可通过下方按钮清除。重新打开时仍会校验最新内容并等待正文准备好。"
+      : "Complete conversations are cached locally, up to 100 MiB, without sync. Closing the page or changing the reading mode does not delete the cache; use the button below to clear it. Reopening checks current content and waits for the conversation to be ready."));
     const clearCache = element("button", "secondary-button", locale === "zh" ? "清除会话缓存" : "Clear conversation cache");
     clearCache.type = "button"; clearCache.dataset.settingsFocus = "clear-conversation-cache";
     const cacheStatus = element("p", "index-cache-status"); cacheStatus.setAttribute("role", "status");
@@ -911,10 +1032,10 @@ export function initializeSidepanel() {
     const section = panel.matches(".index-settings") ? panel : panel.querySelector(".index-settings");
     if (!section) return;
     section.querySelector(".index-current-title").textContent = snapshot.conversationTitle || (locale === "zh" ? "当前对话" : "Current chat");
-    section.querySelector(".index-current-status").textContent = snapshot.platform !== "chatgpt"
-      ? (locale === "zh" ? "读取完整对话目前支持 ChatGPT" : "Reading the whole conversation is currently available for ChatGPT") : indexStatusText(index);
+    section.querySelector(".index-current-status").textContent = !["chatgpt", "gemini"].includes(snapshot.platform)
+      ? (locale === "zh" ? "读取完整对话目前支持 ChatGPT 和 Gemini" : "Reading the whole conversation is currently available for ChatGPT and Gemini") : indexStatusText(index);
     section.querySelectorAll('input[type="radio"]').forEach((input) => {
-      input.checked = input.value === (snapshot.config?.chatgptHistoryMode || "default");
+      input.checked = input.value === (billingAllowsIndex(billing.getView()) ? snapshot.config?.chatgptHistoryMode || "default" : "default");
       input.closest("label").classList.toggle("is-selected", input.checked);
     });
     const progress = section.querySelector("progress");
@@ -1048,6 +1169,7 @@ export function initializeSidepanel() {
     }
     button.addEventListener("click", () => {
       const itemType = button.dataset.itemType;
+      if (itemType === "recognition") openContentRecognition();
       if (itemType === "ai") send({ command: "jump-to-marker", markerKey: button.dataset.markerKey || "" });
       if (itemType === "user") send({ command: "toggle-user-group", groupKey: button.dataset.groupKey || "" });
       if (itemType === "fold") send({ command: "toggle-fold-group", foldKey: button.dataset.foldKey || "" });
@@ -1058,7 +1180,7 @@ export function initializeSidepanel() {
   }
 
   function renderChapters(snapshot) {
-    return chapterReader.update({
+    const view = chapterReader.update({
       conversationKey: `${state.sourceTabId}:${state.routeKey}:${snapshot.conversationIndex?.generation || "dom"}`,
       nodes: state.treeChapters,
       preferredKey: snapshot.activeMarkerKey,
@@ -1067,6 +1189,7 @@ export function initializeSidepanel() {
       virtualized: Boolean(snapshot.conversationIndex),
       contentRevision: snapshot.conversationIndex?.revision || 0
     });
+    return view;
   }
 
   function renderSettings(snapshot, existingPanel) {
@@ -1076,10 +1199,14 @@ export function initializeSidepanel() {
     }
     const panel = state.settingsPage === "preferences" ? renderSettingsPreferences(snapshot) : element("div", "settings-panel");
     panel.dataset.settingsPage = state.settingsPage;
+    if (state.settingsPage === "license") billing.mountSettings(panel);
     if (state.settingsPage === "menu") {
+      const entry = element("section", "settings-pro-entry");
+      billing.mountSettingsEntry(entry);
+      panel.appendChild(entry);
       const menu = element("nav", "settings-section settings-menu settings-home-menu");
       menu.setAttribute("aria-label", t("settings.page.menu"));
-      for (const page of settingsDestinations) {
+      for (const page of settingsDestinations.filter((page) => page !== "license")) {
         const row = element("button", "settings-menu-row");
         row.type = "button";
         row.dataset.settingsDestination = page;
@@ -1100,6 +1227,7 @@ export function initializeSidepanel() {
   function createSettingsMenuIcon(page) {
     // Preferences and updates use Lucide paths from Iconify; see icons/LICENSE-lucide.txt.
     const paths = {
+      license: ["M12 3 3 7v5c0 5 4 8 9 10 5-2 9-5 9-10V7l-9-4Z", "m8 12 3 3 5-6"],
       preferences: ["M10 5H3m9 14H3M14 3v4m2 10v4m5-9h-9m9 7h-5m5-14h-7m-6 5v4m0-2H3"],
       help: ["M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18", "M9.5 9a2.5 2.5 0 0 1 5 0c0 2-2.5 2.5-2.5 4 M12 17h.01"],
       feedback: ["M4 5h16v12H8l-4 3V5Z"],
@@ -1284,7 +1412,7 @@ export function initializeSidepanel() {
     link.target = "_blank";
     link.rel = "noopener noreferrer";
     link.dataset.settingsFocus = focusKey;
-    const icon = createBackIcon();
+    const icon = createBackIcon(document);
     icon.classList.add("settings-external-icon");
     icon.querySelector("path").setAttribute("d", "M15 3h6v6m0-6-9 9M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5");
     if (leadingIcon) link.append(leadingIcon, element("span", "settings-menu-label", label));
@@ -1310,7 +1438,8 @@ export function initializeSidepanel() {
     links.setAttribute("aria-label", t("contact.label"));
     for (const [brand, href] of [
       ["x", "https://x.com/JefferyHo_"],
-      ["xiaohongshu", "https://xhslink.com/m/3wXO9kRBrLO"]
+      ["xiaohongshu", "https://xhslink.com/m/3wXO9kRBrLO"],
+      ["discord", "https://discord.gg/cdrM7Xqmzh"]
     ]) {
       const label = t(`settings.feedback.${brand}`);
       const link = element("a", "settings-feedback-icon-link");
@@ -1347,7 +1476,7 @@ export function initializeSidepanel() {
     icon.width = 40;
     icon.height = 40;
     const manifest = chrome.runtime.getManifest();
-    identity.append(icon, element("h2", "settings-app-name", "Polaris"), element("p", "settings-app-version", manifest.version_name || manifest.version));
+    identity.append(icon, element("h2", "settings-app-name polaris-wordmark", "Polaris"), element("p", "settings-app-version", manifest.version_name || manifest.version));
     panel.appendChild(identity);
     const credit = element("p", "settings-about-copy");
     const [creditStart, creditEnd] = t("settings.about.developerCredit").split("{heart}");
@@ -1435,6 +1564,7 @@ export function initializeSidepanel() {
       const platform = activePlatform(message.snapshot);
       if (message.snapshot.supportedRoute && platform && state.lastUsedPlatform !== platform.key) {
         state.lastUsedPlatform = platform.key;
+        billing.rememberPlatform(platform.key);
         void rememberPlatform(chrome, platform.key).catch((error) => {
           console.warn("[Polaris] Last-used platform could not be saved.", error);
         });
@@ -1472,8 +1602,9 @@ export function initializeSidepanel() {
     }
   });
 
-  const onboarding = createSidepanelOnboarding({ document, chrome, locale, t, platforms: supportedPlatforms });
+  const onboarding = createSidepanelOnboarding({ document, chrome, locale, t, platforms: supportedPlatforms, onAutomaticDismiss: () => billing.afterOnboarding() });
   createSidepanelReleaseNotice({ document, chrome, locale, t, autoShowGate: onboarding.ready.then((shown) => !shown) });
+  void onboarding.ready.then((shown) => { if (!shown) void billing.initialPrompt(); });
   render();
   startThemeObserver();
   startSourceObserver();
@@ -1487,11 +1618,16 @@ export function initializeSidepanel() {
     updateScrollControls();
   }, { passive: true });
   window.addEventListener("resize", updateScrollControls);
+  new window.MutationObserver(updateScrollControls).observe(root, { childList: true, subtree: true });
   if (typeof window.ResizeObserver === "function") {
     new window.ResizeObserver(updateScrollControls).observe(root);
   }
   window.addEventListener("keydown", (event) => {
     if (document.querySelector("dialog[open]")) return;
+    if (billing.isOpen()) {
+      if (event.key === "Escape") { event.preventDefault(); billing.back(); }
+      return;
+    }
     if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "f") {
       event.preventDefault();
       if (event.shiftKey) {

@@ -25,6 +25,18 @@ export function createSidepanelChapterReader({ document: doc, locale, onLocate, 
   const loadingChapters = new Set();
   const loadedChapters = new Map();
   const root = make("div", "chapter-tree-reader");
+  const tip = make("div", "chapter-action-tip");
+  tip.setAttribute("role", "status");
+  tip.setAttribute("aria-live", "polite");
+  let tipTimer;
+  function hideTip() { win.clearTimeout(tipTimer); tip.remove(); }
+  function showTip(text) {
+    hideTip();
+    doc.body.appendChild(tip);
+    tip.textContent = text;
+    positionMenu();
+    tipTimer = win.setTimeout(hideTip, 2200);
+  }
   const menu = make("div", "chapter-node-menu");
   menu.setAttribute("role", "menu");
   menu.setAttribute("aria-label", label("章节操作", "Chapter actions"));
@@ -34,6 +46,12 @@ export function createSidepanelChapterReader({ document: doc, locale, onLocate, 
     node.className = className;
     node.textContent = text;
     return node;
+  }
+  function appendImageLabel(parent, image) {
+    const node = make(image.imageKey ? "button" : "span", "chapter-image-label", label("图片", "Image"));
+    if (image.alt) node.title = image.alt;
+    if (image.imageKey) { node.type = "button"; node.addEventListener("click", () => void onLocate(`index:${image.imageKey}`)); }
+    parent.append(node);
   }
   function button(className, text, action) {
     const node = make("button", className, text);
@@ -57,6 +75,7 @@ export function createSidepanelChapterReader({ document: doc, locale, onLocate, 
     const key = state.menu;
     state.menu = "";
     menu.remove();
+    hideTip();
     root.querySelectorAll(".is-menu-open").forEach((row) => row.classList.remove("is-menu-open"));
     const trigger = bullet(key);
     trigger?.setAttribute("aria-expanded", "false");
@@ -68,8 +87,14 @@ export function createSidepanelChapterReader({ document: doc, locale, onLocate, 
     const rect = trigger.getBoundingClientRect();
     const size = menu.getBoundingClientRect();
     const left = Math.max(8, Math.min(rect.left, win.innerWidth - size.width - 8));
-    const top = rect.bottom + size.height + 8 <= win.innerHeight
+    let top = rect.bottom + size.height + 8 <= win.innerHeight
       ? rect.bottom + 4 : Math.max(8, rect.top - size.height - 4);
+    if (tip.isConnected) {
+      const tipSize = tip.getBoundingClientRect();
+      top = Math.min(Math.max(top, tipSize.height + 16), Math.max(8, win.innerHeight - size.height - 8));
+      tip.style.left = `${Math.max(8, Math.min(left + (size.width - tipSize.width) / 2, win.innerWidth - tipSize.width - 8))}px`;
+      tip.style.top = `${Math.max(8, top - tipSize.height - 8)}px`;
+    }
     menu.style.left = `${left}px`;
     menu.style.top = `${top}px`;
   }
@@ -87,33 +112,37 @@ export function createSidepanelChapterReader({ document: doc, locale, onLocate, 
     bullet(node.markerKey)?.setAttribute("aria-expanded", "true");
     bullet(node.markerKey)?.closest(".chapter-node-row")?.classList.add("is-menu-open");
     menu.replaceChildren();
-    const status = make("div", "chapter-menu-status");
-    status.setAttribute("role", "status");
-    const action = (text, handler, disabled = false) => {
+    const action = (text, iconPath, handler, disabled = false) => {
       const item = button("chapter-menu-item", text, async () => {
         item.disabled = true;
         try {
           await handler();
         } catch {
-          if (state.menu === node.markerKey) status.textContent = label("操作失败，请重试", "Action failed. Try again.");
+          if (active) showTip(label("操作失败，请重试", "Action failed. Try again."));
         } finally { item.disabled = disabled; }
       });
+      const icon = doc.createElementNS("http://www.w3.org/2000/svg", "svg");
+      icon.setAttribute("viewBox", "0 0 24 24");
+      icon.setAttribute("aria-hidden", "true");
+      icon.setAttribute("focusable", "false");
+      const path = doc.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", iconPath);
+      icon.appendChild(path);
+      item.prepend(icon);
       item.setAttribute("role", "menuitem");
       item.disabled = disabled;
       menu.appendChild(item);
     };
-    if (state.focus !== node.markerKey) action(label("进入当前节点", "Focus this chapter"), () => navigate(node.markerKey));
-    action(label("定位原文", "Locate in conversation"), async () => {
+    if (state.focus !== node.markerKey) action(label("进入当前节点", "Focus this chapter"), "M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5M8 12h8m-4-4 4 4-4 4", () => navigate(node.markerKey));
+    action(label("定位原文", "Locate in conversation"), "M12 2v4m0 12v4M2 12h4m12 0h4M19 12a7 7 0 1 1-14 0 7 7 0 0 1 14 0M12 10v4m-2-2h4", async () => {
       await onLocate(node.sourceKey);
       closeMenu();
     }, !node.sourceKey);
     const copy = async (key) => {
       await onCopy(virtualized && onLoadChapter ? (await onLoadChapter(key, "text")).text : chapterTreeText(state.nodes, key));
-      if (state.menu === node.markerKey) status.textContent = label("已复制", "Copied");
+      if (active) showTip(label("已复制", "Copied"));
     };
-    action(label("复制本章", "Copy chapter"), () => copy(node.markerKey));
-    action(label("复制全文", "Copy full text"), () => copy(""));
-    menu.appendChild(status);
+    action(label("复制本章", "Copy chapter"), "M9 9h12v12H9zM5 15H3V3h12v2", () => copy(node.markerKey));
     doc.body.appendChild(menu);
     positionMenu();
     if (focusFirst) menu.querySelector("button:not(:disabled)")?.focus({ preventScroll: true });
@@ -162,10 +191,10 @@ export function createSidepanelChapterReader({ document: doc, locale, onLocate, 
         }
         return content;
       }
-      if (part.ast) appendIndexedChapterBlock(content, part.ast, doc);
+      if (part.ast) appendIndexedChapterBlock(content, part.ast, doc, appendImageLabel);
       else {
-        const parsed = new win.DOMParser().parseFromString(part.html || "", "text/html");
-        appendSanitizedChapterContent(content, parsed.body, doc, doc.baseURI);
+        const template = doc.createElement("template"); template.innerHTML = part.html || "";
+        appendSanitizedChapterContent(content, template.content, doc, doc.baseURI, appendImageLabel);
         if (!part.html) content.textContent = part.text || "";
       }
       content.querySelectorAll("table, pre").forEach((element) => {
@@ -327,6 +356,7 @@ export function createSidepanelChapterReader({ document: doc, locale, onLocate, 
       if (currentKey !== conversationKey) {
         if (virtualized) sessions.clear();
         closeMenu(false);
+        hideTip();
         pendingRender = false;
         hoveredKey = "";
         currentKey = conversationKey;
@@ -361,6 +391,7 @@ export function createSidepanelChapterReader({ document: doc, locale, onLocate, 
       state.scrollY = win.scrollY;
       closeMenu(false);
       active = false;
+      hideTip();
       virtualList?.dispose(); virtualList = null;
     }
   };

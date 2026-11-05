@@ -1,4 +1,4 @@
-/* Shared Polaris tokens. One neutral scale, one accent, 6/8/12 radii, 4px spacing. */
+/* Shared Polaris tokens. Warm Paper neutrals, one Clay accent scale, 6/8/12 radii, 4px spacing. */
 
 :root,
 :host,
@@ -6,21 +6,33 @@
 #gpt-paragraph-nav,
 #gpt-paragraph-nav[data-page-theme="light"] {
   color-scheme: light;
-  --polaris-bg: #ffffff;
-  --polaris-bg-subtle: #f4f4f5;
-  --polaris-bg-muted: #ececef;
+  --polaris-clay-50: #fbf4f0;
+  --polaris-clay-100: #f5e6de;
+  --polaris-clay-200: #ebcbbb;
+  --polaris-clay-300: #e69a78;
+  --polaris-clay-400: #cc7f5e;
+  --polaris-clay-500: #b85c3a;
+  --polaris-clay-600: #a04c2f;
+  --polaris-clay-700: #823d27;
+  --polaris-clay-800: #64301f;
+  --polaris-clay-900: #45231a;
+  --polaris-bg: #fafaf8;
+  --polaris-bg-subtle: #f4f3f0;
+  --polaris-bg-muted: #edebe7;
   --polaris-bg-elevated: #ffffff;
-  --polaris-text: #18181b;
-  --polaris-text-secondary: #52525b;
-  --polaris-text-tertiary: #71717a;
-  --polaris-border: #e4e4e7;
-  --polaris-border-strong: #d4d4d8;
-  --polaris-accent: #4f46e5;
-  --polaris-accent-hover: #4338ca;
+  --polaris-text: #2a2724;
+  --polaris-text-secondary: #57534c;
+  --polaris-text-tertiary: #77726a;
+  --polaris-border: #e0ddd7;
+  --polaris-border-strong: #c9c5bd;
+  --polaris-accent: var(--polaris-clay-500);
+  --polaris-accent-hover: var(--polaris-clay-600);
   --polaris-accent-foreground: #ffffff;
-  --polaris-accent-subtle: #eef2ff;
-  --polaris-focus: #4f46e5;
-  --polaris-overlay: rgba(24, 24, 27, 0.48);
+  --polaris-accent-subtle: var(--polaris-clay-50);
+  --polaris-accent-text: var(--polaris-clay-600);
+  --polaris-focus: var(--polaris-clay-500);
+  --polaris-overlay: rgba(42, 39, 36, 0.52);
+  --polaris-pro-pearl: linear-gradient(90deg, #f6e8ff, #fff 50%, #f8eadf);
   --polaris-radius-sm: 6px;
   --polaris-radius-md: 8px;
   --polaris-radius-lg: 12px;
@@ -77,19 +89,20 @@
 :host([data-page-theme="dark"]),
 #gpt-paragraph-nav[data-page-theme="dark"] {
   color-scheme: dark;
-  --polaris-bg: #09090b;
-  --polaris-bg-subtle: #18181b;
-  --polaris-bg-muted: #27272a;
-  --polaris-bg-elevated: #18181b;
-  --polaris-text: #fafafa;
-  --polaris-text-secondary: #a1a1aa;
-  --polaris-text-tertiary: #71717a;
-  --polaris-border: #27272a;
-  --polaris-border-strong: #3f3f46;
-  --polaris-accent: #818cf8;
-  --polaris-accent-hover: #a5b4fc;
-  --polaris-accent-foreground: #09090b;
-  --polaris-accent-subtle: rgba(129, 140, 248, 0.16);
-  --polaris-focus: #818cf8;
+  --polaris-bg: #1a1918;
+  --polaris-bg-subtle: #2b2a28;
+  --polaris-bg-muted: #33312e;
+  --polaris-bg-elevated: #222120;
+  --polaris-text: #f3f1ed;
+  --polaris-text-secondary: #c4c0b8;
+  --polaris-text-tertiary: #9a958c;
+  --polaris-border: #3a3835;
+  --polaris-border-strong: #514e49;
+  --polaris-accent: var(--polaris-clay-300);
+  --polaris-accent-hover: #f0b093;
+  --polaris-accent-foreground: #271812;
+  --polaris-accent-subtle: #35251f;
+  --polaris-accent-text: var(--polaris-clay-300);
+  --polaris-focus: var(--polaris-clay-300);
   --polaris-overlay: rgba(0, 0, 0, 0.64);
 }

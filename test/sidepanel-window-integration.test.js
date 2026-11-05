@@ -54,6 +54,102 @@ async function boot(windowType = "sidepanel", { locale = "zh", transitionApi = f
   return { dom, win, send, commands, snapshot, chapters, transitions, scrollRequests, writes, resizeObservers };
 }
 
+test("TOC virtualizes all 10,000 image labels without previews or download commands and keeps source navigation", async () => {
+  const s = await boot("sidepanel", { locale: "en", openChapters: false, deliverChapters: false });
+  try {
+    let downloads = 0; s.win.fetch = () => { downloads++; throw new Error("Images must not download"); };
+    const markerItems = Array.from({ length: 10000 }, (_, i) => ({ key: `index:picture-${i}:image:0`, markerKey: `index:picture-${i}:image:0`, type: "ai", title: "[Image]",
+      image: { imageKey: `picture-${i}:image:0`, src: "sediment://file_one", alt: "Image description", width: 2048, height: 1024 } }));
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...s.snapshot, markerItems,
+      conversationIndex: { generation: "run", revision: 1, phase: "complete", count: 10000, native: { phase: "ready" } } } });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const rows = s.win.document.querySelectorAll('.maker-card-ai'); assert.ok(rows.length > 0 && rows.length < 100);
+    assert.ok([...rows].every((row) => row.textContent === "Image"));
+    assert.equal(s.win.document.querySelector('.navigation-panel img'), null);
+    assert.equal(s.commands.some((command) => command.command === "resolve-index-image"), false);
+    assert.equal(downloads, 0);
+    rows[0].click(); await new Promise((resolve) => setTimeout(resolve, 0));
+    const jump = s.commands.findLast((command) => command.command === "jump-to-marker"); assert.equal(jump.markerKey, markerItems[0].markerKey);
+    assert.equal(s.win.document.querySelector('.window-body').dataset.activeTab, "navigation");
+    s.win.document.querySelector('.window-settings-button').click();
+    s.win.document.querySelector('[data-settings-destination="preferences"]').click();
+    assert.equal(s.win.document.querySelector('[data-image-setting]'), null);
+  } finally { s.dom.window.close(); }
+});
+
+test("scroll controls stay hidden until a conversation is read and return when it is ready", async () => {
+  const s = await boot("sidepanel", { openChapters: false });
+  try {
+    const root = s.win.document.getElementById("polaris-window");
+    const controls = s.win.document.querySelector(".window-scroll-controls");
+    assert.equal(controls.hidden, false);
+    for (const unavailable of [
+      { hasConversation: false, supportedRoute: false, platform: "", routeKey: "https://example.com", markerItems: [] },
+      { hasConversation: false, routeKey: "https://chatgpt.com/", markerItems: [] },
+      { loading: true },
+      { conversationLoading: true },
+      { conversationStalled: true }
+    ]) {
+      s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...s.snapshot, ...unavailable } });
+      assert.equal(controls.hidden, true, JSON.stringify(unavailable));
+      assert.equal(root.classList.contains("has-scroll-controls"), false);
+      s.win.dispatchEvent(new s.win.Event("scroll"));
+      s.win.dispatchEvent(new s.win.Event("resize"));
+      assert.equal(controls.hidden, true, "scrolling and resizing cannot reveal the hidden group");
+      s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: s.snapshot });
+      assert.equal(controls.hidden, false);
+      assert.equal(root.classList.contains("has-scroll-controls"), true);
+      assert.equal(s.win.document.querySelectorAll(".window-scroll-controls").length, 1);
+    }
+  } finally { s.dom.window.close(); }
+});
+
+test("scroll controls require TOC or Outline rows and hide on all settings pages", async () => {
+  const s = await boot("sidepanel", { openChapters: false });
+  try {
+    const { document } = s.win;
+    const controls = document.querySelector(".window-scroll-controls");
+    const sendItems = (markerItems, extra = {}) => s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7,
+      snapshot: { ...s.snapshot, markerItems, ...extra } });
+    assert.equal(controls.hidden, false);
+    sendItems([]);
+    assert.equal(controls.hidden, true, "an empty TOC has no scroll controls");
+    sendItems([{ key: "empty", type: "empty", message: "No Makers" }]);
+    assert.equal(controls.hidden, true, "a placeholder is not a TOC row");
+    const index = { generation: "scroll-test", revision: 1, phase: "complete", count: 1 };
+    sendItems([], { conversationIndex: index });
+    assert.ok(document.querySelector(".maker-list"));
+    assert.equal(controls.hidden, true, "an empty virtual list does not reveal the group");
+    sendItems(s.snapshot.markerItems, { conversationIndex: index });
+    assert.equal(controls.hidden, false);
+    sendItems(s.snapshot.markerItems);
+    document.querySelector(".window-settings-button").click();
+    assert.equal(controls.hidden, true);
+    for (const page of ["preferences", "help", "feedback", "updates", "about"]) {
+      document.querySelector(`[data-settings-destination="${page}"]`).click();
+      assert.equal(controls.hidden, true, page);
+      document.querySelector(".window-settings-back").click();
+      assert.equal(controls.hidden, true, "the settings menu also hides the group");
+    }
+    document.querySelector(".window-settings-back").click();
+    assert.equal(controls.hidden, false);
+    s.send({ type: "POLARIS_WINDOW_CHAPTERS", tabId: 7, routeKey: s.snapshot.routeKey, treeChapters: s.chapters });
+    document.querySelector('[data-window-tab="chapters"]').click();
+    assert.equal(controls.hidden, false, "Outline rows show the group");
+    s.send({ type: "POLARIS_WINDOW_CHAPTERS", tabId: 7, routeKey: s.snapshot.routeKey, treeChapters: [] });
+    assert.equal(controls.hidden, true, "an empty Outline hides the group");
+    s.send({ type: "POLARIS_WINDOW_CHAPTERS", tabId: 7, routeKey: s.snapshot.routeKey, treeChapters: s.chapters });
+    assert.equal(controls.hidden, false);
+    const search = document.querySelector(".window-search input");
+    search.value = "no-matching-chapter";
+    search.dispatchEvent(new s.win.Event("input", { bubbles: true }));
+    assert.equal(controls.hidden, true, "no matching Outline rows hides the group");
+    document.querySelector(".chapter-tree-reader .empty-search button").click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(controls.hidden, false, "clearing search inside the reader restores the group");
+  } finally { s.dom.window.close(); }
+});
+
 test("floating scroll controls disable at each edge and jump within the sidepanel", async () => {
   const s = await boot("sidepanel", { openChapters: false });
   try {
@@ -98,7 +194,8 @@ test("scroll controls refresh after content and viewport changes without being r
     Object.defineProperty(document.documentElement, "clientHeight", { value: 600, configurable: true });
     s.win.dispatchEvent(new s.win.Event("resize"));
     const controls = document.querySelector(".window-scroll-controls");
-    const [top, bottom] = controls.querySelectorAll("button");
+    const top = controls.querySelector('[data-scroll-edge="top"]');
+    const bottom = controls.querySelector('[data-scroll-edge="bottom"]');
     assert.equal(top.disabled, true);
     assert.equal(bottom.disabled, true, "a short page has no scroll targets");
     const observer = s.resizeObservers.find(({ target }) => target.id === "polaris-window");
@@ -135,6 +232,84 @@ test("scroll controls use English labels and respect reduced motion", async () =
   } finally { s.dom.window.close(); }
 });
 
+test("current Maker control scrolls and focuses the active row without navigating the source or toggling groups", async () => {
+  const s = await boot("sidepanel", { openChapters: false });
+  try {
+    const { document } = s.win;
+    const current = document.querySelector('[aria-label="定位当前 Maker"]');
+    const row = document.querySelector('.maker-card.is-active');
+    document.querySelector('.window-header').getBoundingClientRect = () => ({ bottom: 80 });
+    row.getBoundingClientRect = () => ({ top: 720 });
+    s.win.scrollTo({ top: 300 });
+    const commandCount = s.commands.length;
+    assert.equal(current.disabled, false);
+    assert.equal(current.title, "定位当前 Maker");
+    current.click();
+    assert.deepEqual({ ...s.scrollRequests.at(-1) }, { top: 928, behavior: "smooth" });
+    assert.equal(document.activeElement, row);
+    assert.equal(s.commands.length, commandCount);
+    document.querySelector('[data-window-tab="chapters"]').click();
+    assert.equal(current.hidden, true, "Outline retains its existing edge controls");
+    document.querySelector('[data-window-tab="navigation"]').click();
+    assert.equal(current.hidden, false);
+  } finally { s.dom.window.close(); }
+});
+
+test("current Maker control follows the latest active key and disables when no matching row exists", async () => {
+  const s = await boot("sidepanel", { openChapters: false });
+  try {
+    const current = s.win.document.querySelector('[data-scroll-action="current"]');
+    for (const activeMarkerKey of ["", "removed-marker"]) {
+      s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...s.snapshot, activeMarkerKey } });
+      assert.equal(current.disabled, true);
+      const requests = s.scrollRequests.length;
+      current.click();
+      assert.equal(s.scrollRequests.length, requests);
+    }
+    const markerItems = [...s.snapshot.markerItems, { key: "third-row", type: "ai", markerKey: "third", title: "third" }];
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...s.snapshot, markerItems, activeMarkerKey: "third" } });
+    assert.equal(current.disabled, false);
+    current.click();
+    assert.equal(s.win.document.activeElement.dataset.markerKey, "third");
+  } finally { s.dom.window.close(); }
+});
+
+test("current Maker control uses an English label and instant movement with reduced motion", async () => {
+  const s = await boot("sidepanel", { locale: "en", openChapters: false, reducedMotion: true });
+  try {
+    const current = s.win.document.querySelector('[aria-label="Locate current Maker"]');
+    assert.equal(current.title, "Locate current Maker");
+    current.click();
+    assert.equal(s.scrollRequests.at(-1).behavior, "instant");
+  } finally { s.dom.window.close(); }
+});
+
+test("current Maker control clears search and mounts an off-screen row in a 10,000-row TOC", async () => {
+  const s = await boot("sidepanel", { openChapters: false, deliverChapters: false });
+  try {
+    const { document } = s.win;
+    const markerItems = Array.from({ length: 10000 }, (_, i) => ({ key: `index:maker-${i}`, markerKey: `index:maker-${i}`, type: "ai", title: `Maker ${i}` }));
+    const activeMarkerKey = markerItems[9500].markerKey;
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...s.snapshot, markerItems, activeMarkerKey,
+      conversationIndex: { generation: "locate-current", revision: 1, phase: "complete", count: 10000 } } });
+    const list = document.querySelector('.maker-list');
+    list.getBoundingClientRect = () => ({ top: -s.win.scrollY, width: 300 });
+    assert.equal(list.querySelector('[data-marker-render-key="index:maker-9500"]'), null);
+    const search = document.querySelector('.window-search input');
+    search.value = "unrelated query";
+    search.dispatchEvent(new s.win.Event("input", { bubbles: true }));
+    assert.equal(document.querySelector('.window-scroll-controls').hidden, false, "current Maker remains reachable while search hides the TOC");
+    const commandCount = s.commands.length;
+    document.querySelector('[data-scroll-action="current"]').click();
+    assert.equal(document.querySelector('.window-search input').value, "");
+    assert.equal(document.activeElement.dataset.markerRenderKey, activeMarkerKey);
+    assert.equal(document.activeElement.classList.contains("is-active"), true);
+    assert.ok(s.win.scrollY > 500000);
+    assert.ok(list.querySelectorAll('.maker-card').length < 100, "locating keeps the list virtualized");
+    assert.equal(s.commands.length, commandCount, "locating only moves the sidepanel");
+  } finally { s.dom.window.close(); }
+});
+
 test("complete indexing settings show the actual title and two exclusive mode cards", async () => {
   const s = await boot("sidepanel", { openChapters: false });
   try {
@@ -145,6 +320,8 @@ test("complete indexing settings show the actual title and two exclusive mode ca
     s.win.document.querySelector('[data-settings-destination="preferences"]').click();
     assert.equal(s.win.document.querySelector('.index-current-title').textContent, "我的真实会话标题");
     assert.equal(s.win.document.querySelectorAll('.index-mode-card').length, 2);
+    assert.match(s.win.document.querySelector('.index-mode-cards').textContent, /后续会话.*浏览器同步.*其他已登录浏览器/);
+    assert.match(s.win.document.querySelector('.index-settings').textContent, /关闭页面或切换读取模式不会删除缓存/);
     assert.equal(s.win.document.querySelector('.index-progress').hasAttribute("value"), false);
     s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...snapshot, conversationTitle: "重命名后的标题", conversationIndex: { ...snapshot.conversationIndex, phase: "complete", total: 123 } } });
     assert.equal(s.win.document.querySelector('.index-current-title').textContent, "重命名后的标题");
@@ -190,7 +367,9 @@ test("indexed TOC and full-text results stay in TOC when native location is unav
     s.win.document.querySelector('.maker-card').click();
     await new Promise((resolve) => setTimeout(resolve, 30));
     assert.equal(s.commands.filter((command) => command.command === "request-chapters").length, 0);
+    assert.equal(s.win.document.querySelector(".window-search select"), null);
     const search = s.win.document.querySelector('.window-search input');
+    assert.equal(search.placeholder, "搜索全部消息");
     search.value = "正文"; search.dispatchEvent(new s.win.Event("input"));
     await new Promise((resolve) => setTimeout(resolve, 450));
     s.win.document.querySelector('.index-search-result').click();
@@ -295,7 +474,42 @@ test("ordinary mode fade completes even when sidepanel animation frames are thro
   s.dom.window.close();
 });
 
-test("settings menu opens five pages and returns through the menu to the original search and scroll", async () => {
+test("the settings home mounts the Pro card above its menu and reacts to entitlement changes", async () => {
+  const s = await boot("sidepanel", { openChapters: false });
+  try {
+    const doc = s.win.document;
+    doc.querySelector('.window-settings-button').click();
+    await new Promise(resolve => s.win.requestAnimationFrame(resolve));
+    const entry = doc.querySelector('.settings-pro-entry');
+    const action = entry.querySelector('.settings-pro-cta');
+    assert.equal(entry.parentElement.firstElementChild, entry);
+    assert.equal(entry.nextElementSibling.classList.contains('settings-home-menu'), true);
+    assert.equal(doc.querySelector('.settings-home-menu [data-settings-destination="license"]'), null);
+    s.send({ type: 'POLARIS_BILLING_UPDATED', view: { available: true, tier: 'trial', fullAccess: true } });
+    assert.equal(entry.querySelector('.settings-pro-status').hidden, false);
+    action.focus(); action.click();
+    assert.ok(doc.querySelector('.billing-page'));
+    assert.equal(doc.querySelector('#polaris-window').hidden, true);
+    doc.querySelector('.billing-header button').click();
+    assert.equal(doc.activeElement, action);
+    s.send({ type: 'POLARIS_BILLING_UPDATED', view: { available: true, tier: 'pro', fullAccess: true } });
+    assert.equal(entry.hidden, false);
+    assert.equal(action.textContent, '查看会员信息');
+    action.click();
+    assert.equal(doc.querySelector('.billing-title').textContent, '你的 Polaris Pro');
+    assert.equal(doc.querySelector('.billing-dialog'), null);
+    doc.querySelector('.billing-header button').click();
+    await new Promise((resolve) => s.win.requestAnimationFrame(resolve));
+    assert.equal(doc.activeElement, doc.querySelector('.settings-pro-cta'));
+    doc.querySelector('[data-settings-destination="feedback"]').click();
+    assert.equal(doc.querySelector('.settings-pro-entry'), null);
+    doc.querySelector('.window-settings-back').click();
+    assert.equal(doc.querySelector('.settings-pro-entry').hidden, false);
+    assert.equal(doc.querySelector('.settings-pro-cta').textContent, '查看会员信息');
+  } finally { s.dom.window.close(); }
+});
+
+test("settings menu opens six pages and returns through the menu to the original search and scroll", async () => {
   const s = await boot("sidepanel", { openChapters: false });
   try {
     const search = s.win.document.querySelector(".window-search input");
@@ -454,12 +668,48 @@ test("English about and feedback show packaged platform icons, the actual versio
     s.win.document.querySelector(".window-settings-back").click();
     s.win.document.querySelector('[data-settings-destination="feedback"]').click();
     const links = [...s.win.document.querySelectorAll(".settings-panel a")];
-    assert.deepEqual(links.map((link) => link.href), ["https://github.com/Jeffery-Ho/Polaris-AI-Chat-Navigator/issues", "mailto:jefferyho.build@gmail.com", "https://x.com/JefferyHo_", "https://xhslink.com/m/3wXO9kRBrLO"]);
+    assert.deepEqual(links.map((link) => link.href), ["https://github.com/Jeffery-Ho/Polaris-AI-Chat-Navigator/issues", "mailto:jefferyho.build@gmail.com", "https://x.com/JefferyHo_", "https://xhslink.com/m/3wXO9kRBrLO", "https://discord.gg/cdrM7Xqmzh"]);
     assert.ok(links.every((link) => link.target === "_blank" && link.rel.includes("noopener")));
     assert.deepEqual(links.slice(0, 2).map((link) => link.textContent), ["Submit an issue on GitHub", "Email the developer"]);
     assert.ok(links.slice(2).every((link) => link.getAttribute("aria-label") && link.title && !link.textContent));
-    assert.equal(s.win.document.querySelectorAll(".settings-social-icon").length, 2);
+    assert.equal(s.win.document.querySelectorAll(".settings-social-icon").length, 3);
   } finally { s.dom.window.close(); }
+});
+
+test("ChatGPT pick-a-chat guidance lives in the sidepanel in both languages and content tabs", async () => {
+  for (const locale of ["zh", "en"]) {
+    const s = await boot("sidepanel", { locale, openChapters: false, deliverChapters: false });
+    const doc = s.win.document;
+    const home = { ...s.snapshot, routeKey: "https://chatgpt.com/", hasConversation: false, markerItems: [],
+      config: { chatgptHistoryMode: "complete" }, conversationAwaiting: true };
+    try {
+      s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: home });
+      const guide = doc.querySelector(".window-body .conversation-awaiting");
+      assert.ok(guide);
+      assert.equal(guide.getAttribute("role"), "status");
+      assert.equal(guide.querySelector(".empty-title").textContent, locale === "zh" ? "选择一个会话开始读取" : "Pick a chat to start reading");
+      assert.match(guide.querySelector(".empty-copy").textContent, locale === "zh" ? /ChatGPT 左侧边栏/ : /ChatGPT sidebar/);
+      assert.equal(doc.querySelector(".conversation-skeleton"), null, "waiting for a selection must not look like active loading");
+      [...doc.querySelectorAll(".window-tab")].find((button) => button.textContent === (locale === "zh" ? "大纲" : "Outline")).click();
+      assert.ok(doc.querySelector(".window-body .conversation-awaiting"));
+
+      for (const routeKey of ["https://chatgpt.com/settings/billing", "https://chatgpt.com/settings/account"]) {
+        s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...home, routeKey, conversationAwaiting: false } });
+        assert.equal(doc.querySelector(".conversation-awaiting"), null, routeKey);
+      }
+      s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...home, conversationAwaiting: false, config: { chatgptHistoryMode: "default" } } });
+      assert.equal(doc.querySelector(".conversation-awaiting"), null, "Follow ChatGPT mode keeps its existing empty state");
+      s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: home });
+      assert.ok(doc.querySelector(".conversation-awaiting"));
+      s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...s.snapshot, hasConversation: false, conversationAwaiting: false, conversationLoading: true } });
+      assert.equal(doc.querySelector(".conversation-awaiting"), null);
+      assert.ok(doc.querySelector(".conversation-skeleton.is-reading"));
+      [...doc.querySelectorAll(".window-tab")].find((button) => button.textContent === (locale === "zh" ? "目录" : "Table of Contents")).click();
+      s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: s.snapshot });
+      assert.equal(doc.querySelector(".conversation-awaiting"), null);
+      assert.equal(doc.querySelector(".maker-title").textContent, "second");
+    } finally { s.dom.window.close(); }
+  }
 });
 
 test("supported conversation skeleton survives retries and yields to real Makers", async () => {
@@ -687,10 +937,26 @@ test("a chat that could not be read asks for a page refresh in the sidepanel", a
   const s = await boot("sidepanel", { openChapters: false });
   try {
     s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...s.snapshot, config: { chatgptHistoryMode: "complete" }, conversationStalled: true,
-      conversationIndex: { generation: "run", revision: 1, phase: "loading", count: 0, total: null } } });
+      conversationIndex: { generation: "run", revision: 1, phase: "error", error: "unsupported-format", count: 0, total: null } } });
     const skeleton = s.win.document.querySelector(".conversation-skeleton");
     assert.equal(skeleton.classList.contains("is-reading"), false);
     assert.match(skeleton.querySelector(".conversation-skeleton-status").textContent, /请刷新页面/);
+  } finally { s.dom.window.close(); }
+});
+
+test("waiting or elapsed stall flags do not offer refresh until an actual read failure arrives", async () => {
+  const s = await boot("sidepanel", { openChapters: false });
+  try {
+    const snapshot = { ...s.snapshot, config: { chatgptHistoryMode: "complete" }, conversationLoading: true, conversationStalled: true,
+      conversationIndex: { generation: "run", phase: "loading", count: 0, native: { phase: "preparing" } } };
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot });
+    assert.ok(s.win.document.querySelector(".conversation-skeleton.is-reading"));
+    assert.match(s.win.document.querySelector(".conversation-skeleton-status").textContent, /正在读取/);
+    assert.equal(s.win.document.querySelector(".conversation-read-reload"), null);
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...snapshot, conversationLoading: false, conversationStalled: false,
+      conversationIndex: { ...snapshot.conversationIndex, phase: "error", error: "http-503" } } });
+    assert.ok(s.win.document.querySelector(".conversation-read-reload"));
+    assert.match(s.win.document.querySelector(".conversation-skeleton-status").textContent, /请刷新页面/);
   } finally { s.dom.window.close(); }
 });
 
@@ -700,7 +966,7 @@ test("the full-read failure action reloads only its source conversation and prev
     try {
       s.win.matchMedia = () => ({ matches: theme === "dark" });
       const snapshot = { ...s.snapshot, config: { chatgptHistoryMode: "complete" }, conversationStalled: true,
-        conversationIndex: { generation: "run", phase: "loading", count: 0 } };
+        conversationIndex: { generation: "run", phase: "error", error: "network-error", count: 0 } };
       s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot });
       const action = s.win.document.querySelector(".conversation-read-reload");
       assert.ok(action, `${locale}/${theme}: the failure has an action`);
@@ -713,7 +979,8 @@ test("the full-read failure action reloads only its source conversation and prev
       assert.equal(commands[0].expectedTabId, 7);
       assert.equal(commands[0].expectedRouteKey, snapshot.routeKey);
       assert.equal(action.disabled, true);
-      s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...snapshot, conversationStalled: false, conversationLoading: true } });
+      s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...snapshot, conversationStalled: false, conversationLoading: true,
+        conversationIndex: { ...snapshot.conversationIndex, phase: "loading", error: "" } } });
       assert.equal(s.win.document.querySelector(".conversation-read-reload"), null, "normal reading needs no refresh action");
       s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...snapshot, config: { chatgptHistoryMode: "default" } } });
       assert.equal(s.win.document.querySelector(".conversation-read-reload"), null, "turning complete mode off removes the action");
@@ -726,7 +993,8 @@ test("a rejected refresh is retryable without changing the full-read preference"
   try {
     const original = s.win.chrome.runtime.sendMessage;
     s.win.chrome.runtime.sendMessage = async (message) => message.command === "reload-conversation" ? { ok: false } : original(message);
-    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...s.snapshot, config: { chatgptHistoryMode: "complete" }, conversationStalled: true } });
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...s.snapshot, config: { chatgptHistoryMode: "complete" }, conversationStalled: true,
+      conversationIndex: { generation: "run", phase: "error", error: "network-error", count: 0 } } });
     const action = s.win.document.querySelector(".conversation-read-reload");
     assert.ok(action);
     action.click();
@@ -734,5 +1002,86 @@ test("a rejected refresh is retryable without changing the full-read preference"
     assert.equal(action.disabled, false);
     assert.match(s.win.document.querySelector(".conversation-skeleton-status").textContent, /刷新失败/);
     assert.equal(s.commands.some((command) => command.command === "update-config"), false);
+  } finally { s.dom.window.close(); }
+});
+
+
+test("billing pages restore reading and settings scroll, keep pending orders out of checkout, and support Escape", async () => {
+  const s = await boot("sidepanel", { openChapters: false });
+  try {
+    const doc = s.win.document;
+    const search = doc.querySelector(".window-search input"); search.focus();
+    s.win.scrollTo({ top: 180 });
+    doc.querySelector('.window-settings-button').click();
+    await new Promise(resolve => s.win.requestAnimationFrame(resolve));
+    s.win.scrollTo({ top: 80 });
+    const trigger = doc.querySelector('.settings-pro-cta'); trigger.focus(); trigger.click();
+    assert.equal(s.win.scrollY, 0);
+    assert.equal(doc.querySelector('#polaris-window').inert, true);
+    s.send({ type: 'POLARIS_BILLING_UPDATED', view: { available:true, tier:'trial', hasPurchase:true, purchaseStatus:'pending', price:null } });
+    assert.match(doc.querySelector('.billing-page').textContent, /继续付款/);
+    assert.equal(s.commands.some(command => command.action === 'checkout'), false);
+    doc.querySelector('.billing-header button').click();
+    assert.equal(s.win.scrollY, 80);
+    assert.equal(doc.activeElement, trigger);
+    assert.equal(doc.querySelector('#polaris-window').inert, false);
+    doc.querySelector('.window-settings-back').click();
+    await new Promise(resolve => s.win.requestAnimationFrame(resolve));
+    assert.equal(s.win.scrollY, 180);
+    assert.equal(doc.activeElement, doc.querySelector('.window-search input'));
+    doc.querySelector('.window-settings-button').click();
+    doc.querySelector('.settings-pro-cta').click();
+    s.win.dispatchEvent(new s.win.KeyboardEvent('keydown', {key:'Escape'}));
+    s.win.dispatchEvent(new s.win.KeyboardEvent('keydown', {key:'Escape'}));
+    assert.equal(doc.querySelector('.billing-page'), null);
+  } finally { s.dom.window.close(); }
+});
+
+test("recognition guidance is a Maker row that follows reply and expansion state", async () => {
+  const s = await boot("sidepanel", { locale: "en", openChapters: false, deliverChapters: false });
+  try {
+    const user = { key: 'user-only', type: 'user', title: 'Question', groupKey: 'user-only', isExpanded: true };
+    const publish = (extra = {}) => s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7,
+      snapshot: { ...s.snapshot, markerItems: [user], recognitionHintGroups: ['user-only'], ...extra } });
+    publish();
+    const hint = s.win.document.querySelector('.maker-list .maker-card-recognition');
+    assert.ok(hint);
+    assert.match(hint.textContent, /Content recognition/);
+    assert.ok(!hint.textContent.includes("TOC"));
+    publish({ recognitionHintGroups: [] });
+    assert.equal(s.win.document.querySelector('.maker-card-recognition'), null);
+    publish({ markerItems: [{ ...user, isExpanded: false }] });
+    assert.equal(s.win.document.querySelector('.maker-card-recognition'), null);
+    publish();
+    s.win.document.querySelector('.maker-card-recognition').click();
+    assert.ok(s.win.document.querySelector('[data-settings-page="preferences"]'));
+  } finally { s.dom.window.close(); }
+});
+
+test("global conversation copy lives in the content area and works while focused on a chapter", async () => {
+  const s = await boot('sidepanel', { locale: 'en' });
+  try {
+    const copied = [];
+    Object.defineProperty(s.win.navigator, 'clipboard', { value: { writeText: async value => copied.push(value) } });
+    const original = s.win.chrome.runtime.sendMessage;
+    s.win.chrome.runtime.sendMessage = async message => message.command === 'get-conversation-export'
+      ? { ok: true, scope: 'complete', title: 'Entire chat', messages: [{ role: 'user', markdown: 'Original question', text: 'Original question' }, { role: 'assistant', markdown: 'First body\n\nSecond body', text: 'First body\n\nSecond body' }] }
+      : original(message);
+    s.win.document.querySelector('.chapter-node-dot[data-key="second"]').click();
+    assert.ok(!s.win.document.querySelector('[role="menu"]').textContent.includes('Copy full text'));
+    [...s.win.document.querySelectorAll('[role="menuitem"]')].find(button => button.textContent === 'Focus this chapter').click();
+    assert.equal(s.win.document.querySelectorAll('.chapter-node-title').length, 1);
+    s.win.document.querySelector('[data-window-tab="navigation"]').click();
+    assert.equal(s.win.document.querySelector('.conversation-actions'), null);
+    s.win.document.querySelector('[data-window-tab="chapters"]').click();
+    const globalCopy = s.win.document.querySelector('.window-body > .conversation-actions .conversation-copy-button');
+    assert.ok(globalCopy); assert.equal(s.win.document.querySelector('.window-tabs .conversation-copy-button'), null);
+    globalCopy.click(); await new Promise(resolve => setTimeout(resolve, 0));
+    assert.match(copied[0], /Original question[\s\S]*First body[\s\S]*Second body/);
+    assert.ok(s.win.document.querySelector('.conversation-export-dialog[open]'));
+    s.send({ type: 'POLARIS_WINDOW_STATE', tabId: 7, snapshot: { ...s.snapshot, routeKey: 'https://chatgpt.com/c/two' } });
+    assert.equal(s.win.document.querySelector('.conversation-export-dialog'), null);
+    s.send({ type: 'POLARIS_WINDOW_STATE', tabId: 7, snapshot: { ...s.snapshot, conversationIndex: { phase: 'loading', generation: 'new' } } });
+    assert.equal(s.win.document.querySelector('.conversation-copy-button').disabled, true);
   } finally { s.dom.window.close(); }
 });

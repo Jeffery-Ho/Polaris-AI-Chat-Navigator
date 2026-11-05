@@ -59,6 +59,26 @@ test("首次打开侧栏可在没有网页快照时展示内置说明，关闭�
   } finally { s.dom.window.close(); }
 });
 
+test("缺失版本说明时，自动弹窗与手动回看均展示对应语言的修复文案", async () => {
+  for (const [locale, title, change] of [
+    ["zh", "优化与修复", "修复错误，提升体验。"],
+    ["en", "Improvements and fixes", "Bug fixes and improvements."]
+  ]) {
+    const s = await boot({ lastSeen: "0.95.0", version: "0.96.1", locale });
+    try {
+      for (const manual of [false, true]) {
+        if (manual) s.notice.open();
+        const dialog = s.window.document.querySelector("dialog[open]");
+        assert.ok(dialog);
+        assert.equal(dialog.querySelector("h3").textContent, `0.96 · ${title}`);
+        assert.deepEqual([...dialog.querySelectorAll("li")].map((li) => li.textContent), [change]);
+        assert.doesNotMatch(dialog.textContent, /Release notes unavailable|Detailed notes|更新说明暂不可用|详细更新说明/);
+        dialog.querySelector(".release-notice-acknowledge").click();
+      }
+    } finally { s.dom.window.close(); }
+  }
+});
+
 test("跨功能版本提示一次，同功能版本的补丁更新保持安静", async () => {
   for (const [lastSeen, version, expected] of [["0.67.7", "0.68.0", true], ["0.68.0", "0.68.1", false], ["0.68.0", "0.68.0", false]]) {
     const s = await boot({ lastSeen, version });

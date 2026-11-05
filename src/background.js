@@ -1,7 +1,28 @@
+import { geminiRoute } from "../public/src/gemini-conversation.js";
+import { billingAllowsIndex } from "./billing-access.js";
+import { SUPPORTED_MATCHES } from "./supported-sites.js";
+import { createBillingService } from "./billing-service.js";
+import { createBillingMessageHandler } from "./billing-messages.js";
 import { snapshotDeliveryResult } from "./snapshot-delivery.js";
 import { createConversationCacheHandler } from "./conversation-cache.js";
 
 export function initializeBackground() {
+let billingSignature = "";
+const billingService = createBillingService({
+  storage: chrome.storage.local,
+  onChange(view) {
+    const signature = JSON.stringify(view);
+    if (signature === billingSignature) return;
+    billingSignature = signature;
+    void chrome.tabs.query({ url: SUPPORTED_MATCHES }).then(tabs => {
+      for (const tab of tabs || []) {
+        void chrome.tabs.sendMessage(tab.id, { type: "POLARIS_BILLING_UPDATED", view }).catch(() => {});
+      }
+    }).catch(() => {});
+    void chrome.runtime.sendMessage({ type: "POLARIS_BILLING_UPDATED", view }).catch(() => {});
+  }
+});
+const handleBilling = createBillingMessageHandler({ chrome, service: billingService });
 const handleConversationCache = createConversationCacheHandler({ runtimeId: chrome.runtime.id, extensionOrigin: chrome.runtime.getURL(""), incognito: chrome.extension?.inIncognitoContext === true });
 const SOURCE_WINDOW_STORAGE_KEY = "polaris-source-window-id";
 const SOURCE_TAB_STORAGE_KEY = "polaris-source-tab-id";
@@ -265,6 +286,10 @@ async function sendContentMessage(tabId, message, { injectIfMissing = false } = 
 }
 
 async function forwardCommand(message) {
+  if (["search-conversation", "get-index-chapter", "retry-conversation-index", "reload-conversation"].includes(message.command)
+      || (message.command === "update-config" && message.patch?.chatgptHistoryMode === "complete")) {
+    if (!billingAllowsIndex(await billingService.getAccess())) return { ok: false, reason: "pro-required" };
+  }
   const tab = await activeNormalTab();
   if (!tab?.id) {
     return;
@@ -275,7 +300,7 @@ async function forwardCommand(message) {
     const url = new URL(tab.pendingUrl || tab.url || "");
     const routeKey = `${url.origin}${url.pathname}${url.search}`;
     if (message.expectedTabId !== tab.id || message.expectedRouteKey !== routeKey
-      || !/^(chatgpt\.com|chat\.openai\.com)$/.test(url.hostname) || !/\/c\/[a-zA-Z0-9-]+(?:\/|$)/.test(url.pathname)) return { ok: false, reason: "source-changed" };
+      || !(geminiRoute(url.href) || /^(chatgpt\.com|chat\.openai\.com)$/.test(url.hostname) && /\/(?:c|share)\/[a-zA-Z0-9-]+(?:\/|$)/.test(url.pathname))) return { ok: false, reason: "source-changed" };
     const stored = await chrome.storage.sync.get("gpt-paragraph-nav-config");
     if (stored["gpt-paragraph-nav-config"]?.chatgptHistoryMode !== "complete") return { ok: false, reason: "complete-mode-disabled" };
     await chrome.tabs.reload(tab.id);
@@ -414,6 +439,11 @@ configureAction();
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message.type !== "string") {
     return;
+  }
+
+  if (message.type === "POLARIS_BILLING") {
+    void handleBilling(message, sender).then(sendResponse).catch(() => sendResponse({ ok: false }));
+    return true;
   }
 
   if (message.type === "POLARIS_CONVERSATION_CACHE") {

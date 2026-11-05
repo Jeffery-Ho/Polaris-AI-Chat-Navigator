@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { createSidepanelChapterReader } from "../src/sidepanel-chapter-reader.js";
 import { collectSidepanelChapters } from "../src/sidepanel-chapter-content.js";
+import { createConversationIndex } from "../src/conversation-index.js";
+import { imagePage, imagePart } from "./fixtures/chatgpt-images.js";
 const nodes = [
   { markerKey: "a", sourceKey: "a", parentKey: "", title: "甲", contents: [{ type: "block", text: "引言", html: "<p>引言</p>" }, { type: "child", key: "b" }] },
   { markerKey: "b", sourceKey: "b", parentKey: "a", title: "子章", contents: [{ type: "block", text: "正文", html: "<p>正文</p>" }] },
@@ -24,6 +26,37 @@ function setup(overrides = {}) {
   return { dom, document, reader, update, click, copied, located };
 }
 const settle = () => new Promise((resolve) => setTimeout(resolve, 25));
+test("Outline keeps indexed and HTML image labels without mounting images or download links", async () => {
+  const s = setup();
+  try {
+    s.update({ nodes: [{ ...nodes[0], contents: [
+      { type: "block", ast: { type: "image", imageKey: "picture:image:0", src: "sediment://file_one", alt: "Description" } },
+      { type: "block", ast: { type: "paragraph", children: [{ type: "text", value: "Before " }, { type: "image", imageKey: "picture:image:1", src: "https://images.example.com/image.png" }, { type: "text", value: " after" }] } },
+      { type: "block", html: '<p><a href="https://images.example.com/original"><img src="https://images.example.com/preview.png"></a></p>' }
+    ] }] });
+    const labels = s.reader.element.querySelectorAll('.chapter-image-label'); assert.equal(labels.length, 3);
+    assert.ok([...labels].every((node) => node.textContent === "图片"));
+    assert.equal(s.reader.element.querySelector("img"), null); assert.equal(s.reader.element.querySelector('a[href*="images.example.com"]'), null);
+    labels[0].click(); await settle(); assert.deepEqual(s.located, ["index:picture:image:0"]);
+  } finally { s.dom.window.close(); }
+});
+
+test("indexed user attachments render as source-linked Image labels in their original text order", async () => {
+  const index = createConversationIndex({ imagePlaceholder: "[图片]" });
+  await index.ingest(imagePage([{ id: "user", author: { role: "user" }, content: { content_type: "multimodal_text", parts: [
+    "前文", imagePart(), "中间", imagePart("two"), "结尾"
+  ] } }]));
+  const s = setup();
+  try {
+    s.update({ conversationKey: "user-images", nodes: index.getOutline().chapters, virtualized: true });
+    const labels = s.reader.element.querySelectorAll(".chapter-image-label"); assert.equal(labels.length, 2);
+    assert.deepEqual([...s.reader.element.querySelectorAll(".chapter-tree-content")].map((part) => part.textContent), ["前文", "图片", "中间", "图片", "结尾"]);
+    labels[1].click(); await settle(); assert.deepEqual(s.located, ["index:user:image:1"]);
+    assert.equal(s.reader.element.querySelector("img"), null);
+    s.document.querySelector(".chapter-node-dot").click(); s.click("复制本章"); await settle();
+    assert.equal(s.copied[0], "前文\n\n[图片]\n\n中间\n\n[图片]\n\n结尾");
+  } finally { s.dom.window.close(); }
+});
 test("ChatGPT user prompt renders, expands its answer, copies and locates the user source", async () => {
   const source = new JSDOM('<main><div id="user">可以在模拟器里面安装系统相册么</div><article><p>iOS Simulator 自带系统照片 App。</p></article></main>');
   const user = source.window.document.getElementById("user");
@@ -57,9 +90,9 @@ test("indexed outline virtualizes metadata and reads only visible expanded chapt
     assert.deepEqual(requested, [["index:0", undefined]]);
     assert.match(s.reader.element.textContent, /按需正文/);
     s.document.querySelector('.chapter-node-dot[data-key="index:0"]').click();
-    s.click("复制全文"); await settle();
+    s.click("复制本章"); await settle();
     assert.equal(s.copied.at(-1), "完整正文");
-    assert.deepEqual(requested.at(-1), ["", "text"]);
+    assert.deepEqual(requested.at(-1), ["index:0", "text"]);
     s.reader.update({ conversationKey: "another", nodes: [], query: "", ready: true, virtualized: true });
     assert.ok(!s.reader.element.textContent.includes("按需正文"));
   } finally { s.dom.window.close(); }
@@ -80,14 +113,14 @@ test("bullet menu does not navigate source; title expands inline; focus and retu
   assert.deepEqual(s.located, []);
   await settle(); s.dom.window.close();
 });
-test("copy full text includes folded nodes; menu keyboard and source navigation are independent", async () => {
+test("chapter copy includes folded descendants but excludes other chapters; menu keyboard and navigation remain independent", async () => {
   const s = setup();
   const dot = s.document.querySelector('.chapter-node-dot[data-key="a"]'); dot.click();
-  s.click("复制全文"); await settle();
-  assert.equal(s.copied[0], "甲\n\n引言\n\n子章\n\n正文\n\n乙\n\n结尾");
+  s.click("复制本章"); await settle();
+  assert.equal(s.copied[0], "甲\n\n引言\n\n子章\n\n正文");
   assert.equal(s.document.querySelector('[role="status"]').textContent, "已复制");
   s.document.activeElement.dispatchEvent(new s.dom.window.KeyboardEvent("keydown", { key: "End", bubbles: true }));
-  assert.equal(s.document.activeElement.textContent, "复制全文");
+  assert.equal(s.document.activeElement.textContent, "复制本章");
   s.document.activeElement.dispatchEvent(new s.dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   assert.equal(s.document.activeElement, dot); assert.equal(s.document.querySelector('[role="menu"]'), null);
   dot.click(); s.click("定位原文"); await settle(); assert.deepEqual(s.located, ["a"]);
@@ -143,4 +176,30 @@ test("disclosure is revealed by entering the bullet, retained across repaint and
   row.dispatchEvent(new s.dom.window.Event("pointerleave"));
   assert.ok(!row.classList.contains("is-controls-visible"));
   s.dom.window.close();
+});
+
+test("copy feedback appears outside the icon menu and is cleared on suspend", async () => {
+  const s = setup();
+  try {
+    s.document.querySelector('.chapter-node-dot').click();
+    const menu = s.document.querySelector('[role="menu"]');
+    for (const item of menu.querySelectorAll('[role="menuitem"]')) {
+      assert.ok(item.querySelector('svg[aria-hidden="true"]'));
+    }
+    s.click("复制本章"); await settle();
+    const tip = s.document.querySelector('.chapter-action-tip');
+    assert.equal(tip.textContent, "已复制");
+    assert.equal(tip.getAttribute('role'), 'status');
+    assert.equal(menu.contains(tip), false);
+    assert.ok(!menu.textContent.includes("已复制"));
+    s.document.querySelector('.chapter-node-dot').getBoundingClientRect = () => ({ left: 100, top: 300, bottom: 328 });
+    menu.getBoundingClientRect = () => ({ width: 210, height: 150 });
+    tip.getBoundingClientRect = () => ({ width: 96, height: 32 });
+    s.dom.window.dispatchEvent(new s.dom.window.Event('resize'));
+    assert.equal(tip.style.top, '292px');
+    assert.equal(tip.style.left, '157px');
+    assert.equal(Number.parseFloat(menu.style.top) - Number.parseFloat(tip.style.top) - 32, 8);
+    s.reader.suspend();
+    assert.equal(tip.isConnected, false);
+  } finally { s.dom.window.close(); }
 });

@@ -49,11 +49,12 @@ test("streaming patches cannot persist stale parsed blocks and are reparsed from
   assert.equal(index.getOutline().items.some((item) => item.title === "最终"), true);
 });
 
-test("conversation routes accept normal and project chats but reject other origins and shares", () => {
+test("conversation routes accept normal, project and shared chats but reject other origins", () => {
   assert.equal(chatGptConversationId("https://chatgpt.com/g/g-p-id/project/c/abc-123"), "abc-123");
   assert.equal(chatGptConversationId("https://chatgpt.com/c/abc-123"), "abc-123");
   assert.equal(chatGptConversationId("https://example.com/c/abc"), "");
-  assert.equal(chatGptConversationId("https://chatgpt.com/share/abc"), "");
+  assert.equal(chatGptConversationId("https://chatgpt.com/share/abc"), "abc");
+  assert.equal(chatGptConversationId("https://chatgpt.com/share/abc/continue"), "");
 });
 
 test("legacy trees select the current branch and reject missing ancestors and cycles", () => {
@@ -123,4 +124,27 @@ test("full-text search normalizes Unicode, returns original highlights and pagin
   assert.equal(indexedSnippet("e\u0301 test", "é").find((part) => part.match).text, "e\u0301");
   const controller = new AbortController(); controller.abort();
   await assert.rejects(index.search("abc", { signal: controller.signal }), { name: "AbortError" });
+});
+
+
+test("full conversation fuzzy search matches ordered body characters and highlights original text", async () => {
+  const index = createConversationIndex();
+  await index.ingest(page([message("body", "标题\n\nＡlpha beta 中文内容", "user"), message("reverse", "内容中文 beta alpha")]));
+  const result = await index.search("a b 中 容");
+  assert.equal(result.total, 1);
+  assert.equal(result.items[0].markerKey, "index:body");
+  assert.equal(result.items[0].count, 1);
+  assert.equal(result.items[0].parts.filter((part) => part.match).map((part) => part.text).join(""), "Ａb中容");
+  assert.equal((await index.search("不存在" )).total, 0);
+});
+
+test("recognition hints appear after body text and disappear when a heading is recognized", async () => {
+  const index = createConversationIndex();
+  await index.ingest(page([message('u', '问题', 'user')]));
+  assert.deepEqual(index.getOutline().recognitionHintGroups, []);
+  await index.ingest(page([message('a', '纯正文')]));
+  assert.deepEqual(index.getOutline().recognitionHintGroups, ['index:u']);
+  await index.ingest(page([message('a', '## 新标题\n\n正文')]));
+  assert.deepEqual(index.getOutline().recognitionHintGroups, []);
+  assert.deepEqual(index.getOutline({ enabledLevelsByPlatform: { chatgpt: [] } }).recognitionHintGroups, ['index:u']);
 });

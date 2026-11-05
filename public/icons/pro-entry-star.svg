@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-12 -12 96 86" width="96" height="86">
+<!-- Geometry, pearl stops and sparkle schedule from Recap's ProfileAbsoluteStarBadge. -->
+<style>
+.particle{animation:flight 2.8s cubic-bezier(.333333,.666667,.666667,1) infinite;animation-delay:var(--delay)}
+.sparkle{animation:glimmer 2.8s linear infinite;animation-delay:var(--delay)}
+@keyframes flight{from{transform:translate(var(--start-x),var(--start-y))}to{transform:translate(var(--end-x),var(--end-y))}}
+@keyframes glimmer{0%{opacity:0;transform:scale(1.1)}25%{opacity:.7071}50%{opacity:1}75%{opacity:.7071}100%{opacity:0;transform:scale(.6)}}
+@media(prefers-reduced-motion:reduce){.particle{animation:none;transform:translate(var(--rest-x),var(--rest-y))}.sparkle{animation:none;opacity:.85;transform:scale(.8)}}
+</style>
+<defs><linearGradient id="pearl" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fff"/><stop offset=".35" stop-color="#f7eafe"/><stop offset=".7" stop-color="#fff"/><stop offset="1" stop-color="#e2f6e9"/></linearGradient></defs>
+  <g class="particle" style="--start-x:22.1436px;--start-y:23.0000px;--end-x:-0.3731px;--end-y:10.0000px;--rest-x:3.2296px;--rest-y:12.0800px;--delay:0.000s"><path class="sparkle" d="M0 -3.2Q0 0 3.2 0Q0 0 0 3.2Q0 0 -3.2 0Q0 0 0 -3.2Z" fill="#f7eafe"/></g>
+  <g class="particle" style="--start-x:44.0000px;--start-y:17.1436px;--end-x:57.0000px;--end-y:-5.3731px;--rest-x:54.9200px;--rest-y:-1.7704px;--delay:-1.540s"><path class="sparkle" d="M0 -2.6Q0 0 2.6 0Q0 0 0 2.6Q0 0 -2.6 0Q0 0 0 -2.6Z" fill="#e2f6e9"/></g>
+  <g class="particle" style="--start-x:51.0351px;--start-y:36.4723px;--end-x:75.4671px;--end-y:45.3648px;--rest-x:71.5580px;--rest-y:43.9420px;--delay:-0.560s"><path class="sparkle" d="M0 -3.4Q0 0 3.4 0Q0 0 0 3.4Q0 0 -3.4 0Q0 0 0 -3.4Z" fill="#f7eafe"/></g>
+  <g class="particle" style="--start-x:22.1436px;--start-y:39.0000px;--end-x:-0.3731px;--end-y:52.0000px;--rest-x:3.2296px;--rest-y:49.9200px;--delay:-2.100s"><path class="sparkle" d="M0 -2.4Q0 0 2.4 0Q0 0 0 2.4Q0 0 -2.4 0Q0 0 0 -2.4Z" fill="#e2f6e9"/></g>
+  <g class="particle" style="--start-x:44.0000px;--start-y:44.8564px;--end-x:57.0000px;--end-y:67.3731px;--rest-x:54.9200px;--rest-y:63.7704px;--delay:-1.120s"><path class="sparkle" d="M0 -1.8Q0 0 1.8 0Q0 0 0 1.8Q0 0 -1.8 0Q0 0 0 -1.8Z" fill="#fff"/></g>
+  <g class="particle" style="--start-x:29.2381px;--start-y:45.5009px;--end-x:18.2500px;--end-y:69.0649px;--rest-x:20.0081px;--rest-y:65.2947px;--delay:-2.520s"><path class="sparkle" d="M0 -1.6Q0 0 1.6 0Q0 0 0 1.6Q0 0 -1.6 0Q0 0 0 -1.6Z" fill="#f7eafe"/></g>
+  <g class="particle" style="--start-x:33.2216px;--start-y:15.2431px;--end-x:28.7068px;--end-y:-10.3619px;--rest-x:29.4292px;--rest-y:-6.2651px;--delay:-0.840s"><path class="sparkle" d="M0 -1.6Q0 0 1.6 0Q0 0 0 1.6Q0 0 -1.6 0Q0 0 0 -1.6Z" fill="#fff"/></g>
+  <g class="particle" style="--start-x:51.4548px;--start-y:26.8589px;--end-x:76.5689px;--end-y:20.1296px;--rest-x:72.5506px;--rest-y:21.2063px;--delay:-1.820s"><path class="sparkle" d="M0 -1.4Q0 0 1.4 0Q0 0 0 1.4Q0 0 -1.4 0Q0 0 0 -1.4Z" fill="#f7eafe"/></g>
+  <g class="particle" style="--start-x:20.2431px;--start-y:33.7784px;--end-x:-5.3619px;--end-y:38.2932px;--rest-x:-1.2651px;--rest-y:37.5708px;--delay:-0.280s"><path class="sparkle" d="M0 -2Q0 0 2 0Q0 0 0 2Q0 0 -2 0Q0 0 0 -2Z" fill="#fff"/></g>
+  <g class="particle" style="--start-x:37.3945px;--start-y:46.9391px;--end-x:39.6605px;--end-y:72.8402px;--rest-x:39.2980px;--rest-y:68.6960px;--delay:-2.380s"><path class="sparkle" d="M0 -2.2Q0 0 2.2 0Q0 0 0 2.2Q0 0 -2.2 0Q0 0 0 -2.2Z" fill="#e2f6e9"/></g>
+<path d="M32.1797,9.3342 L40.6029,21.5627 L55.4248,20.6716 L46.3978,32.4613 L51.8255,46.2825 L37.8233,41.3405 L26.3558,50.7735 L26.7291,35.9295 L14.2141,27.9382 L28.4469,23.7061Z" fill="url(#pearl)" stroke="url(#pearl)" stroke-width="7" stroke-linejoin="round"/>
+</svg>

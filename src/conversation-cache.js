@@ -1,3 +1,4 @@
+import { geminiRoute } from "../public/src/gemini-conversation.js";
 import { publicConversationSnapshot } from "./conversation-snapshot.js";
 
 export const CONVERSATION_CACHE_MAX_BYTES = 100 * 1024 * 1024;
@@ -117,7 +118,7 @@ export function createConversationCacheClient(runtime) {
   };
 }
 
-// Bind cache requests to extension content scripts on an actual ChatGPT chat.
+// Bind cache requests to extension content scripts on an actual supported conversation.
 // A sidepanel may clear the cache, but cannot claim a page's account scope.
 export function createConversationCacheHandler({ runtimeId, extensionOrigin = `chrome-extension://${runtimeId}/`, cache = createConversationCache(), incognito = false } = {}) {
   return async (message, sender) => {
@@ -128,8 +129,10 @@ export function createConversationCacheHandler({ runtimeId, extensionOrigin = `c
     }
     let url;
     try { url = new URL(sender.tab?.url || sender.url); } catch { return null; }
-    if (url.protocol !== "https:" || !/^(chatgpt\.com|chat\.openai\.com)$/.test(url.hostname)
-      || url.pathname.match(/\/c\/([a-zA-Z0-9-]+)(?:\/|$)/)?.[1] !== message.conversationId
+    const gemini = geminiRoute(url.href);
+    const expectedId = gemini ? `gemini:${gemini.kind}:${gemini.id}`
+      : /^(chatgpt\.com|chat\.openai\.com)$/.test(url.hostname) ? url.pathname.match(/\/c\/([a-zA-Z0-9-]+)(?:\/|$)/)?.[1] : '';
+    if (url.protocol !== "https:" || !expectedId || expectedId !== message.conversationId
       || !/^[a-f0-9]{64}$/.test(message.scope || "")) return null;
     if (message.operation === "read") return cache.read(message.scope, message.conversationId);
     if (message.operation === "write") return { ok: await cache.write(message.scope, message.conversationId, message.lease, message.snapshot) };

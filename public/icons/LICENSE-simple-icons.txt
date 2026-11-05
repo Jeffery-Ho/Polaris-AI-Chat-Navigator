@@ -1,6 +1,6 @@
-Simple Icons used: x, xiaohongshu
+Simple Icons used: x, xiaohongshu, discord
 Source: https://github.com/simple-icons/simple-icons
-Retrieved via Iconify MCP.
+Retrieved via Iconify MCP (x, xiaohongshu) and upstream SVG (discord).
 
 # CC0 1.0 Universal
 

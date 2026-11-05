@@ -1,0 +1,30 @@
+{
+  "name": "polaris-license-test",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  "vars": {
+    "PUBLIC_APP_URL": "http://127.0.0.1:4317",
+    "ALLOWED_ORIGINS": "http://127.0.0.1:4317",
+    "STRIPE_PRICE_PRO_PROMO": "REPLACE_WITH_TEST_PRICE_1290_USD",
+    "STRIPE_PRICE_PRO_DEFAULT": "REPLACE_WITH_TEST_PRICE_1999_USD",
+    "ENVIRONMENT": "test"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "polaris-license-test",
+      "database_id": "REPLACE_WITH_EXISTING_TEST_D1_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "triggers": {
+    "crons": [
+      "*/5 * * * *"
+    ]
+  },
+  "preview_urls": false,
+  "observability": {
+    "enabled": true
+  }
+}

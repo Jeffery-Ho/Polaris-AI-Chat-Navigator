@@ -55,14 +55,14 @@ test("route bridge can be disposed and reloaded without wrapping history twice",
   dom.window.close();
 });
 
-async function bootPackagedContent({ delayConfig = false } = {}) {
+async function bootPackagedContent({ delayConfig = false, pageUrl = "https://chatgpt.com/c/wxt-test" } = {}) {
   const errors = [];
   const { VirtualConsole } = await import("jsdom");
   const console = new VirtualConsole();
   console.on("jsdomError", (error) => errors.push(error.message));
   console.on("error", (error) => errors.push(String(error)));
   const dom = new JSDOM('<html><body><main><div data-message-author-role="user">Test prompt</div><div data-message-author-role="assistant"><div class="markdown"><h2>Test heading</h2><p>Test body</p></div></div></main></body></html>', {
-    url: "https://chatgpt.com/c/wxt-test", runScripts: "outside-only", pretendToBeVisual: true, virtualConsole: console
+    url: pageUrl, runScripts: "outside-only", pretendToBeVisual: true, virtualConsole: console
   });
   const win = dom.window;
   win.CSS = { escape: (value) => String(value).replace(/[^a-zA-Z0-9_-]/g, (char) => `\\${char}`) };
@@ -105,6 +105,137 @@ async function bootPackagedContent({ delayConfig = false } = {}) {
   return { dom, win, runtime, storage, messages, errors, pendingConfigReads, flush, inject, invalidate };
 }
 
+test("complete mode leaves ChatGPT settings pages free of the pick-a-chat notice", async () => {
+  for (const pageUrl of ["https://chatgpt.com/settings", "https://chatgpt.com/settings/billing", "https://chatgpt.com/settings/account?tab=profile", "https://chat.openai.com/settings/billing/"]) {
+    const s = await bootPackagedContent({ pageUrl });
+    try {
+      await s.inject();
+      for (const listener of s.runtime.listeners) listener({ type: "POLARIS_WINDOW_COMMAND", command: "update-config", patch: { chatgptHistoryMode: "complete" } }, {}, () => {});
+      await s.flush();
+      assert.equal(s.win.document.getElementById("polaris-conversation-notice"), null, pageUrl);
+      assert.equal(s.win.document.getElementById("polaris-conversation-cover"), null, pageUrl);
+      assert.equal(s.win.document.querySelector("main").hasAttribute("inert"), false, pageUrl);
+      assert.equal(s.messages.findLast((item) => item.type === "POLARIS_CONTENT_STATE")?.snapshot.conversationAwaiting, false, pageUrl);
+      assert.deepEqual(s.errors, []);
+    } finally { s.invalidate(); s.dom.window.close(); }
+  }
+});
+
+test("home guidance is published only to the sidepanel and settings or chats clear its state", async () => {
+  const s = await bootPackagedContent({ pageUrl: "https://chatgpt.com/" });
+  const routeTo = async (path) => {
+    s.win.history.pushState({}, "", path);
+    s.win.dispatchEvent(new s.win.Event("polaris-for-web-route-change"));
+    await s.flush();
+  };
+  try {
+    await s.inject();
+    for (const listener of s.runtime.listeners) listener({ type: "POLARIS_WINDOW_COMMAND", command: "update-config", patch: { chatgptHistoryMode: "complete" } }, {}, () => {});
+    await s.flush();
+    assert.equal(s.win.document.getElementById("polaris-conversation-notice"), null);
+    const awaiting = () => s.messages.findLast((item) => item.type === "POLARIS_CONTENT_STATE")?.snapshot.conversationAwaiting;
+    assert.equal(awaiting(), true);
+    await routeTo("/settings/billing");
+    assert.equal(s.win.document.getElementById("polaris-conversation-notice"), null);
+    assert.equal(awaiting(), false);
+    await routeTo("/");
+    assert.equal(s.win.document.getElementById("polaris-conversation-notice"), null);
+    assert.equal(awaiting(), true);
+    await routeTo("/c/wxt-test");
+    assert.equal(s.win.document.getElementById("polaris-conversation-notice"), null);
+    assert.ok(s.win.document.getElementById("polaris-conversation-cover"), "existing native messages confirm the conversation before the API returns");
+    assert.equal(s.messages.findLast((item) => item.type === "POLARIS_CONTENT_STATE")?.snapshot.conversationLoading, true, "background reading and sidepanel loading continue without the card");
+    assert.equal(awaiting(), false);
+    await routeTo("/settings/account");
+    assert.equal(s.win.document.getElementById("polaris-conversation-notice"), null);
+    assert.equal(s.win.document.getElementById("polaris-conversation-cover"), null);
+    assert.equal(s.win.document.querySelector("main").hasAttribute("inert"), false);
+    assert.equal(awaiting(), false);
+    await routeTo("/c/wxt-test");
+    assert.ok(s.win.document.getElementById("polaris-conversation-cover"));
+    assert.equal(s.messages.findLast((item) => item.type === "POLARIS_CONTENT_STATE")?.snapshot.conversationLoading, true);
+    assert.deepEqual(s.errors, []);
+  } finally { s.invalidate(); s.dom.window.close(); }
+});
+
+test("packaged reading progress appears while native message elements are still mounting", async () => {
+  const s = await bootPackagedContent();
+  const commands = [];
+  s.win.postMessage = (data) => commands.push(data);
+  s.win.document.querySelector('main').replaceChildren();
+  try {
+    await s.inject();
+    for (const listener of s.runtime.listeners) listener({ type: 'POLARIS_WINDOW_COMMAND', command: 'update-config', patch: { chatgptHistoryMode: 'complete' } }, {}, () => {});
+    await s.flush();
+    const bridge = s.win.document.querySelector('script[data-polaris-conversation-bridge]');
+    assert.ok(bridge);
+    bridge.dispatchEvent(new s.win.Event('load'));
+    const requestId = commands.findLast(message => message.command === 'start')?.requestId;
+    assert.ok(requestId);
+    const send = async (event, fields = {}) => {
+      s.win.dispatchEvent(new s.win.MessageEvent('message', { source: s.win, origin: s.win.location.origin, data: {
+        type: 'polaris-conversation-index-result', conversationId: 'wxt-test', requestId, runId: 1, event, ...fields
+      } }));
+      await s.flush(); await s.flush();
+    };
+    await send('page', { payload: { title: 'Read before native rendering', messages: [
+      { id: 'first', author: { role: 'assistant' }, content: { content_type: 'text', parts: ['## First message\nActual conversation content'] } }
+    ], page_info: { has_previous_page: false, has_next_page: false } } });
+    const snapshot = s.messages.findLast(message => message.type === 'POLARIS_CONTENT_STATE')?.snapshot;
+    assert.equal(snapshot?.conversationIndex?.count, 1, 'conversation data has arrived');
+    assert.ok(s.win.document.getElementById('polaris-conversation-cover'), 'read messages must show progress before native message nodes exist');
+    await send('complete');
+    assert.ok(s.win.document.getElementById('polaris-conversation-cover'), 'native preparation must remain visible after API completion');
+    await send('native-state', { phase: 'ready' });
+    assert.equal(s.win.document.getElementById('polaris-conversation-cover'), null);
+    assert.deepEqual(s.errors, []);
+  } finally { s.invalidate(); s.dom.window.close(); }
+});
+
+test("Gemini can replace its body while asynchronous content initialization is pending", async () => {
+  const s = await bootPackagedContent({ delayConfig: true, pageUrl: "https://gemini.google.com/" });
+  const observed = []; const Observer = s.win.MutationObserver;
+  s.win.MutationObserver = class extends Observer {
+    observe(target, options) { if (options.attributeFilter?.includes("src")) observed.push(target); return super.observe(target, options); }
+  };
+  try {
+    await s.inject(); assert.equal(s.pendingConfigReads.length, 1);
+    s.win.document.body.remove();
+    s.pendingConfigReads[0]({}); await s.flush(); await s.flush();
+    const body = s.win.document.createElement("body"); s.win.document.documentElement.append(body);
+    await s.flush();
+    assert.equal(s.runtime.listeners.size, 1); assert.deepEqual(s.errors, []);
+    assert.ok(observed.some((target) => target.contains(body)), "the replacement body must stay inside the observed tree");
+  } finally { s.invalidate(); s.dom.window.close(); }
+});
+
+test("a shared chat in Follow ChatGPT mode includes visible AI image labels alongside its text directory", async () => {
+  const s = await bootPackagedContent({ pageUrl: "https://chatgpt.com/share/share-one" });
+  try {
+    s.win.document.querySelector('main [data-message-author-role="assistant"]').innerHTML = '<div class="markdown"><h2>Text heading</h2></div><img alt="Generated image 1" src="https://images.example.com/generated.png">';
+    await s.inject();
+    for (let i = 0; i < 30 && !s.messages.some((message) => message.type === "POLARIS_CONTENT_STATE"); i++) await s.flush();
+    const snapshot = s.messages.findLast((message) => message.type === "POLARIS_CONTENT_STATE")?.snapshot;
+    assert.equal(snapshot?.config.chatgptHistoryMode, "default");
+    assert.ok(snapshot?.markerItems.some((item) => item.title === "Text heading"));
+    assert.equal(snapshot?.markerItems.filter((item) => item.image).length, 1);
+  } finally { s.invalidate(); s.dom.window.close(); }
+});
+
+test("image-only shared turns keep multiple labels without exposing user attachments or image URLs", async () => {
+  const s = await bootPackagedContent({ pageUrl: "https://chatgpt.com/share/share-one" });
+  try {
+    s.win.document.querySelector("main").innerHTML = `<div data-testid="conversation-turn-0" data-turn="user"><h5 class="sr-only">You said:</h5><div class="group/user-message">Image question</div><img src="data:image/png;base64,cGl4ZWw="></div>
+      <div data-testid="conversation-turn-1" data-turn="assistant"><h5 class="sr-only">ChatGPT said:</h5><img alt="First" src="https://images.example.com/one.png"><img alt="Second" src="https://images.example.com/two.png"><img hidden src="https://images.example.com/hidden.png"><span class="avatar"><img src="https://images.example.com/avatar.png"></span></div>`;
+    await s.inject();
+    for (let i = 0; i < 30 && !s.messages.some((message) => message.type === "POLARIS_CONTENT_STATE"); i++) await s.flush();
+    const snapshot = s.messages.findLast((message) => message.type === "POLARIS_CONTENT_STATE")?.snapshot;
+    const labels = snapshot.markerItems.filter((item) => item.image);
+    assert.equal(labels.length, 2); assert.equal(new Set(labels.map((item) => item.markerKey)).size, 2);
+    assert.doesNotMatch(JSON.stringify(labels), /images.example.com|hidden|avatar/);
+  } finally { s.invalidate(); s.dom.window.close(); }
+});
+
 test("packaged content keeps indexed body data available without native history mounted", async () => {
   const s = await bootPackagedContent();
   try {
@@ -133,6 +264,16 @@ test("packaged content keeps indexed body data available without native history 
     assert.ok(published.treeChapters.some((node) => node.markerKey === "index:server-answer"));
     const body = command("get-index-chapter", { ...source, markerKey: "index:server-answer", expectResult: true });
     assert.equal(body.contents[0].ast.type, "table");
+    assert.equal(command("get-conversation-export", { ...source, expectResult: true }).reason, "not-ready");
+    s.win.dispatchEvent(new s.win.MessageEvent("message", { source: s.win, origin: s.win.location.origin, data: {
+      type: "polaris-conversation-index-result", requestId: start.requestId, conversationId: start.conversationId, runId: 1, event: "complete"
+    } }));
+    await s.flush(); await s.flush();
+    const exported = command("get-conversation-export", { ...source, expectResult: true });
+    assert.equal(exported.ok, true);
+    assert.equal(exported.scope, "complete");
+    assert.match(exported.messages[0].markdown, /表格后的解释/);
+    assert.equal(command("get-conversation-export", { ...source, generation: "stale", expectResult: true }).ok, false);
     assert.equal(s.win.document.querySelector('[data-message-id="server-answer"]'), null);
     const mounted = s.win.document.createElement("div");
     mounted.dataset.chatgptSearchMessageIds = "tool-id server-answer";
@@ -160,6 +301,64 @@ test("packaged content keeps indexed body data available without native history 
     assert.deepEqual(s.errors, []);
   } finally { s.invalidate(); s.dom.window.close(); }
 });
+
+for (const pageUrl of ["https://chatgpt.com/c/wxt-test", "https://chatgpt.com/share/share-one"]) {
+  test(`full indexed TOC includes every user group without an earlier-groups summary: ${new URL(pageUrl).pathname}`, async () => {
+    const s = await bootPackagedContent({ pageUrl });
+    try {
+      const posted = []; s.win.postMessage = (data) => posted.push(data);
+      s.win.fetch = () => { throw new Error("Image labels must not request resources"); };
+      await s.inject();
+      const command = (name, fields = {}) => {
+        for (const listener of s.runtime.listeners) listener({ type: "POLARIS_WINDOW_COMMAND", command: name, ...fields }, {}, () => {});
+      };
+      command("update-config", { patch: { chatgptHistoryMode: "complete", maxVisibleUserGroups: 1 } });
+      s.win.document.querySelector('[data-polaris-conversation-bridge]').dispatchEvent(new s.win.Event("load"));
+      const start = posted.findLast((item) => item.command === "start"); assert.ok(start);
+      const send = async (event, fields = {}) => {
+        s.win.dispatchEvent(new s.win.MessageEvent("message", { source: s.win, origin: s.win.location.origin, data: {
+          type: "polaris-conversation-index-result", requestId: start.requestId, conversationId: start.conversationId, runId: 1, event, ...fields
+        } }));
+        await s.flush(); await s.flush();
+      };
+      const messages = Array.from({ length: 179 }, (_, i) => [
+        { id: `u-${i}`, author: { role: "user" }, content: { content_type: "multimodal_text", parts: [
+          { content_type: "image_asset_pointer", asset_pointer: `sediment://user_file_${i}` }, `Question ${i}`
+        ] } },
+        { id: `a-${i}`, author: { role: "assistant" }, content: { content_type: "multimodal_text", parts: [0, 1].map((n) => ({
+          content_type: "image_asset_pointer", asset_pointer: `sediment://file_${i}_${n}`
+        })) } }
+      ]).flat();
+      await send("page", { payload: { messages, page_info: { has_previous_page: false, has_next_page: false } }, replace: true });
+      await send("native-state", { phase: "ready" }); await send("complete", { source: new URL(pageUrl).pathname.startsWith("/share/") ? "shared" : "native" });
+      const snapshot = () => s.messages.findLast((message) => message.type === "POLARIS_CONTENT_STATE")?.snapshot;
+      const items = snapshot().markerItems;
+      assert.equal(snapshot().conversationIndex.phase, "complete");
+      assert.equal(items.filter((item) => item.type === "user").length, 179);
+      assert.equal(items.filter((item) => item.image).length, 358);
+      assert.equal(items.some((item) => item.type === "earlier"), false);
+      assert.match(items.find((item) => item.type === "user").title, /^\[Image\]/);
+      assert.equal(items.some((item) => item.title.includes("[Attachment]")), false);
+      assert.deepEqual(Array.from(items.filter((item) => item.type === "user"), (item) => item.groupKey), Array.from({ length: 179 }, (_, i) => `index:u-${i}`));
+      command("toggle-user-group", { groupKey: "index:u-0" }); await s.flush();
+      assert.equal(snapshot().markerItems.filter((item) => item.type === "user").length, 179);
+      assert.equal(snapshot().markerItems.filter((item) => item.image).length, 356, "only the explicitly folded question hides its image labels");
+      command("toggle-user-group", { groupKey: "index:u-0" }); await s.flush();
+      assert.equal(snapshot().markerItems.filter((item) => item.image).length, 358);
+      const generation = snapshot().conversationIndex.generation;
+      const before = posted.length;
+      Object.defineProperty(s.win.document, "visibilityState", { configurable: true, value: "hidden" });
+      s.win.document.dispatchEvent(new s.win.Event("visibilitychange")); await s.flush();
+      s.win.dispatchEvent(new s.win.PageTransitionEvent("pagehide", { persisted: true })); await s.flush();
+      Object.defineProperty(s.win.document, "visibilityState", { configurable: true, value: "visible" });
+      s.win.document.dispatchEvent(new s.win.Event("visibilitychange")); await s.flush();
+      assert.equal(snapshot().conversationIndex.generation, generation);
+      assert.equal(snapshot().conversationIndex.phase, "complete");
+      assert.equal(posted.slice(before).some((item) => ["stop", "disarm", "start"].includes(item.command)), false);
+      assert.deepEqual(s.errors, []);
+    } finally { s.invalidate(); s.dom.window.close(); }
+  });
+}
 
 for (const theme of ["light", "dark"]) {
   for (const markup of ["legacy", "modern"]) {

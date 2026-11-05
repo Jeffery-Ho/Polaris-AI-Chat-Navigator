@@ -3,6 +3,7 @@ import { defineConfig } from "wxt";
 import tailwindcss from "@tailwindcss/vite";
 import sourceManifest from "./manifest.build.json" with { type: "json" };
 import { SUPPORTED_MATCHES } from "./src/supported-sites.js";
+import { BILLING_HOST_PERMISSION } from "./src/billing-config.js";
 
 // WXT owns entrypoint paths and the manifest version; manifest.build.json holds
 // product metadata, and every site pattern comes from SUPPORTED_MATCHES.
@@ -15,7 +16,7 @@ export const GECKO_ID = "polaris@polaris-ai.work";
 // sidebar_action there, so drop the Chromium-only keys.
 function browserManifest(browser) {
   const shared = {
-    host_permissions: [...SUPPORTED_MATCHES],
+    host_permissions: [...SUPPORTED_MATCHES, BILLING_HOST_PERMISSION],
     web_accessible_resources: web_accessible_resources.map((entry) => ({ ...entry, matches: [...SUPPORTED_MATCHES] }))
   };
   if (browser !== "firefox") return { ...manifest, ...shared };

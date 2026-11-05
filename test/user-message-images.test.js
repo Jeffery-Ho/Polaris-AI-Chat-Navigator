@@ -171,7 +171,7 @@ test("支持的平台均能扫描当前用户消息中的图片附件", () => {
 
 test("图片地址属性变化会触发用户 Maker 刷新", () => {
   assert.match(contentSource, /const USER_MESSAGE_IMAGE_ATTRIBUTE_FILTER = \["src", "srcset", "data-src", "data-original", "data-url"\];/);
-  assert.match(contentSource, /state\.observer\.observe\(document\.body, \{[\s\S]*?attributes: true,[\s\S]*?attributeFilter:[\s\S]*?USER_MESSAGE_IMAGE_ATTRIBUTE_FILTER,[\s\S]*?childList: true,/);
+  assert.match(contentSource, /state\.observer\.observe\(document\.documentElement, \{[\s\S]*?attributes: true,[\s\S]*?attributeFilter:[\s\S]*?USER_MESSAGE_IMAGE_ATTRIBUTE_FILTER,[\s\S]*?childList: true,/);
   assert.match(contentSource, /function syncOpenImagePreviewForThumbnail\(labelThumbnail\) \{[\s\S]*?state\.imagePreviewUrls = urls;[\s\S]*?syncImagePreviewOverlay\(overlay\)/);
 });
 

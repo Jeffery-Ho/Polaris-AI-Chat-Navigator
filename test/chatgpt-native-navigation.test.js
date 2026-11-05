@@ -206,3 +206,31 @@ test("an instant reveal lands on the target without the approach animation", asy
     assert.deepEqual(s.jumps, ["old-turn"]);
   } finally { s.dom.window.close(); }
 });
+
+test("shared image messages use the existing host virtual list without the private history loader or image requests", async () => {
+  const s = setup({ virtualized: true, animated: true });
+  const route = "https://chatgpt.com/share/share-one";
+  s.win.history.replaceState({}, "", route);
+  delete s.win.__reactRouterManifest;
+  s.win.fetch = () => { throw new Error("Navigation must not request history or images"); };
+  try {
+    assert.equal((await s.navigation.reveal("share-one", { messageId: "old", instant: true })).ok, true);
+    assert.deepEqual(s.jumps, ["old-turn"]); assert.equal(s.calls.length, 0);
+    assert.ok(s.win.document.querySelector('[data-message-id="old"]'));
+    assert.equal(s.win.document.querySelector("img"), null);
+    assert.equal(s.win.location.href, route);
+    assert.equal((await s.navigation.reveal("another-share", { messageId: "old", instant: true })).reason, "source-changed");
+    assert.deepEqual(s.jumps, ["old-turn"]);
+  } finally { s.dom.window.close(); }
+});
+
+test("shared message navigation can use the host message handle and cancels before scrolling", async () => {
+  const s = setup({ virtualized: true }); s.win.history.replaceState({}, "", "/share/share-one");
+  try {
+    const pending = new AbortController(); pending.abort();
+    assert.equal((await s.navigation.reveal("share-one", { messageId: "old", signal: pending.signal })).reason, "source-changed");
+    assert.deepEqual(s.jumps, []);
+    assert.equal((await s.navigation.reveal("share-one", { messageId: "old", instant: true })).ok, true);
+    assert.deepEqual(s.jumps, ["old"]); assert.equal(s.calls.length, 0);
+  } finally { s.dom.window.close(); }
+});

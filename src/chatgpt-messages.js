@@ -9,6 +9,19 @@ export const CHATGPT_USER_TURN_SELECTOR = '[data-testid^="conversation-turn-"]';
 export const CHATGPT_USER_SELECTOR = `${CHATGPT_LEGACY_USER_SELECTOR}, ${CHATGPT_USER_TURN_SELECTOR}, [class~="group/user-message"]`;
 export const CHATGPT_PROSE_SELECTOR = ".markdown, .prose";
 
+// Image-only replies may have no Markdown root or legacy author wrapper.
+// Discover only images owned by a conversation turn, never page chrome.
+export function chatGptAssistantImageNodes(root, users = []) {
+  const selector = '[data-message-author-role="assistant"] img, [data-message-role="assistant"] img, [data-turn="assistant"] img, [data-testid^="conversation-turn-"] img';
+  const userSet = new Set(users);
+  return [...root.querySelectorAll(selector)].filter((image) => {
+    for (let node = image; node; node = node.parentElement) if (userSet.has(node)) return false;
+    const turn = image.closest(CHATGPT_USER_TURN_SELECTOR);
+    return !(turn && isChatGptUserTurnNode(turn))
+      && !image.closest('[hidden], [aria-hidden="true"], [data-message-author-role="user"], [data-message-role="user"], [data-testid*="avatar" i], [class*="avatar" i]');
+  });
+}
+
 function attributeFor(node, name) {
   if (node?.attrs && Object.prototype.hasOwnProperty.call(node.attrs, name)) {
     return node.attrs[name];

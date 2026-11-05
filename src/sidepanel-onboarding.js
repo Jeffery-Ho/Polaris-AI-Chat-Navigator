@@ -7,7 +7,7 @@ const STEP_KEYS = ["platforms", "open", "source", "jump", "outline", "search", "
 const LOOP_REST_MS = 1600;
 const CURSOR_TRAVEL_MS = 480;
 
-export function createSidepanelOnboarding({ document, chrome, locale, t, platforms = SUPPORTED_PLATFORMS }) {
+export function createSidepanelOnboarding({ document, chrome, locale, t, platforms = SUPPORTED_PLATFORMS, onAutomaticDismiss = () => {} }) {
   const window = document.defaultView;
   const manifest = chrome.runtime.getManifest();
   const label = (zh, en) => (locale === "zh" ? zh : en);
@@ -201,7 +201,6 @@ export function createSidepanelOnboarding({ document, chrome, locale, t, platfor
         element("span", "ob-menu-item", label("进入当前节点", "Focus this chapter")),
         element("span", "ob-menu-item", label("定位原文", "Locate in conversation")),
         demo(element("span", "ob-menu-item", label("复制本章", "Copy chapter")), "copy"),
-        element("span", "ob-menu-item", label("复制全文", "Copy full text")),
         demo(element("span", "ob-menu-status", label("已复制", "Copied")), "status")
       );
       figure.classList.add("is-row");
@@ -425,6 +424,7 @@ export function createSidepanelOnboarding({ document, chrome, locale, t, platfor
       if (currentDialog.open) currentDialog.close();
       currentDialog.remove();
       if (dialog === currentDialog) dialog = null;
+      if (automatic) void onAutomaticDismiss();
       const focus = returnFocus?.isConnected && returnFocus !== document.body
         ? returnFocus : document.querySelector(".window-settings-button");
       focus?.focus({ preventScroll: true });

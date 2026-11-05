@@ -3,12 +3,13 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { createChatGptIndexController } from "../src/chatgpt-index-controller.js";
 import { createConversationIndex } from "../src/conversation-index.js";
+import { imagePage, imageMessage, imagePart } from "./fixtures/chatgpt-images.js";
 
 function setup(html = "", { loadBridge = true, cache = null } = {}) {
   const dom = new JSDOM(`<html><head><title>初始标题 - ChatGPT</title></head><body><main>${html}</main></body></html>`, { url: "https://chatgpt.com/c/one" });
-  const win = dom.window; const commands = [];
+  const win = dom.window; const commands = []; const diagnostics = [];
   win.postMessage = (data) => commands.push(data);
-  const controller = createChatGptIndexController({ window: win, cache, bridgeUrl: "https://example.invalid/bridge.js", onChange() {} });
+  const controller = createChatGptIndexController({ window: win, cache, bridgeUrl: "https://example.invalid/bridge.js", onChange() {}, onDiagnostics(details) { diagnostics.push(details); } });
   controller.configure(true);
   if (loadBridge) win.document.querySelector('script').dispatchEvent(new win.Event("load"));
   const requestId = commands.at(-1)?.requestId || controller.snapshot().generation;
@@ -16,8 +17,82 @@ function setup(html = "", { loadBridge = true, cache = null } = {}) {
     type: "polaris-conversation-index-result", conversationId: "one", requestId, runId: 1, event, ...fields
   } })); await new Promise((resolve) => setTimeout(resolve, 0)); };
   const payload = (text = "相同正文", id = "a") => ({ title: "接口真实标题", messages: [{ id, author: { role: "assistant" }, content: { content_type: "text", parts: [text] } }], page_info: { has_previous_page: false, has_next_page: false } });
-  return { dom, win, controller, commands, requestId, send, payload, finish() { controller.dispose(); dom.window.close(); } };
+  return { dom, win, controller, commands, diagnostics, requestId, send, payload, finish() { controller.dispose(); dom.window.close(); } };
 }
+
+test("read failures expose safe diagnostic codes for bridge loading, server reads and invalid snapshots", async () => {
+  for (const stage of ["bridge", "server", "snapshot"]) {
+    const s = setup("", { loadBridge: stage !== "bridge" });
+    try {
+      if (stage === "bridge") s.win.document.querySelector("script").dispatchEvent(new s.win.Event("error"));
+      else if (stage === "server") await s.send("error", { reason: "http-403", kind: "shared-data" });
+      else await s.send("page", { payload: { mapping: {}, current_node: "missing" } });
+      assert.equal(s.controller.snapshot().phase, "error");
+      assert.equal(s.diagnostics.length, 1, `${stage} failures must appear in the downloadable log`);
+      assert.equal(s.diagnostics[0].outcome, "error");
+      assert.equal(s.diagnostics[0].reason, { bridge: "bridge-unavailable", server: "http-403", snapshot: "incomplete-chain" }[stage]);
+      assert.equal(s.diagnostics[0].conversationLength, 0);
+      if (stage === "server") assert.equal(s.diagnostics[0].kind, "shared-data");
+    } finally { s.finish(); }
+  }
+});
+
+test("failure diagnostics redact unknown error details and ignore repeated or stale-source failures", async () => {
+  const s = setup();
+  try {
+    await s.send("error", { reason: "https://example.invalid/private?token=secret", kind: "secret" });
+    await s.send("error", { reason: "https://example.invalid/private?token=secret" });
+    assert.equal(s.diagnostics.length, 1);
+    assert.equal(s.diagnostics[0].reason, "unknown-error");
+    assert.equal(JSON.stringify(s.diagnostics).includes("secret"), false);
+    s.win.history.replaceState({}, "", "/share/another"); s.controller.configure(true);
+    await s.send("error", { reason: "http-403" });
+    assert.equal(s.diagnostics.length, 1, "a previous source must not log failures in the current read");
+  } finally { s.finish(); }
+});
+
+test("shared read diagnostics retain fixed response stages and status without arbitrary response text", async () => {
+  const s = setup();
+  try {
+    await s.send("error", { reason: "unsupported-format", kind: "shared-data", stage: "shared-api", httpStatus: 200, responseFormat: "json", body: "private" });
+    assert.equal(s.diagnostics[0].stage, "shared-api"); assert.equal(s.diagnostics[0].httpStatus, 200);
+    assert.equal(s.diagnostics[0].responseFormat, "json"); assert.equal(s.diagnostics[0].body, undefined);
+    await s.send("loading", { runId: 2 });
+    await s.send("error", { runId: 2, reason: "network-error", kind: "shared-data", stage: "private", httpStatus: "private", responseFormat: "private" });
+    assert.equal(JSON.stringify(s.diagnostics).includes("private"), false);
+  } finally { s.finish(); }
+});
+
+test("image labels locate their own mounted reply without image downloads or matching empty captions", async () => {
+  const s = setup('<article data-message-id="first" data-message-author-role="assistant"></article><article data-message-id="second" data-message-author-role="assistant"></article>');
+  try {
+    await s.send("page", { payload: imagePage([imageMessage("first"), imageMessage("second")]), replace: true });
+    const images = s.controller.outline().items.filter((item) => item.image); assert.equal(images.length, 2);
+    assert.equal(s.controller.resolveTarget(images[1].markerKey), s.win.document.querySelector('[data-message-id="second"]'));
+    assert.equal(s.commands.some((command) => command.command === "resolve-index-image"), false);
+  } finally { s.finish(); }
+});
+
+test("user image source targets resolve the user's own message without image requests", async () => {
+  const s = setup('<article data-message-id="user-picture" data-message-author-role="user"></article><article data-message-id="answer" data-message-author-role="assistant"></article>');
+  try {
+    await s.send("page", { payload: imagePage([{ id: "user-picture", author: { role: "user" },
+      content: { content_type: "multimodal_text", parts: [imagePart()] } }]), replace: true });
+    const result = await s.controller.ensureLocation("index:user-picture:image:0", {});
+    assert.ok(result.element); assert.equal(result.element, s.win.document.querySelector('[data-message-id="user-picture"]'));
+    assert.equal(s.commands.some((command) => ["reveal", "resolve-index-image"].includes(command.command)), false);
+  } finally { s.finish(); }
+});
+
+test("shared conversation routes start full indexing instead of remaining in DOM-only mode", () => {
+  const s = setup();
+  try {
+    s.win.history.replaceState({}, "", "/share/shared-one");
+    s.controller.configure(true);
+    assert.equal(s.controller.enabled(), true); assert.equal(s.controller.awaitingConversation(), false);
+    assert.equal(s.commands.at(-1).command, "start"); assert.equal(s.commands.at(-1).conversationId, "shared-one");
+  } finally { s.finish(); }
+});
 
 test("disk restore stays loading until authoritative data and native preparation are both ready, then saves asynchronously", async () => {
   const saved = createConversationIndex();

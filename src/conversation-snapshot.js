@@ -1,9 +1,17 @@
 // Bump when the public-record projection or Markdown parser changes.
-export const CONVERSATION_SNAPSHOT_VERSION = 1;
+export const CONVERSATION_SNAPSHOT_VERSION = 3;
+
+function imageNode(node) {
+  if (typeof node.src !== "string" || typeof node.alt !== "string" || typeof node.imageKey !== "string") throw new Error("invalid-ast");
+  return { type: "image", src: node.src, alt: node.alt, imageKey: node.imageKey,
+    ...Object.fromEntries(["width", "height"].filter((key) => Number.isFinite(node[key]) && node[key] > 0).map((key) => [key, node[key]])),
+    ...(typeof node.mimeType === "string" ? { mimeType: node.mimeType } : {}) };
+}
 
 function inlineNodes(nodes, depth) {
   if (!Array.isArray(nodes) || depth > 128) throw new Error("invalid-ast");
   return nodes.map((node) => {
+    if (node?.type === "image") return imageNode(node);
     if (["text", "code"].includes(node?.type) && typeof node.value === "string") return { type: node.type, value: node.value };
     if (node?.type === "break") return { type: "break" };
     if (["strong", "em", "del", "link"].includes(node?.type)) {
@@ -18,10 +26,12 @@ function inlineNodes(nodes, depth) {
 function blocks(nodes, depth = 0) {
   if (!Array.isArray(nodes) || depth > 128) throw new Error("invalid-ast");
   return nodes.map((node) => {
+    if (node?.type === "image") return imageNode(node);
     if (node?.type === "paragraph" || node?.type === "heading" && Number.isInteger(node.level) && node.level >= 1 && node.level <= 6)
       return { type: node.type, ...(node.type === "heading" ? { level: node.level } : {}), children: inlineNodes(node.children, depth + 1) };
     if (node?.type === "rule") return { type: "rule" };
-    if (node?.type === "codeBlock" && typeof node.value === "string") return { type: node.type, value: node.value };
+    if (node?.type === "codeBlock" && typeof node.value === "string") return { type: node.type, value: node.value,
+      ...(/^[a-zA-Z0-9_+-]+$/.test(node.language || "") ? { language: node.language } : {}) };
     if (node?.type === "quote") return { type: node.type, blocks: blocks(node.blocks, depth + 1) };
     if (node?.type === "table" && Array.isArray(node.headers) && Array.isArray(node.rows))
       return { type: node.type, headers: node.headers.map((cell) => inlineNodes(cell, depth + 1)), rows: node.rows.map((row) => {

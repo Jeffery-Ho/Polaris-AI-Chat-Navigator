@@ -1,9 +1,12 @@
+import { billingAllowsIndex, billingAllowsPlatform } from "./billing-access.js";
 import { createContentLifecycle } from "./content-lifecycle.js";
+import { createGeminiIndexController } from "./gemini-index-controller.js";
 import { createChatGptIndexController } from "./chatgpt-index-controller.js";
 import { createConversationCacheClient } from "./conversation-cache.js";
 import { createChatGptConversationCover } from "./chatgpt-conversation-cover.js";
 import { createLocateFlash } from "./locate-flash.js";
 import { chapterTreeText } from "./sidepanel-chapter-state.js";
+import { collectDOMConversation } from "./conversation-export.js";
 import { mountSettingsPanel } from "./settings-panel.js";
 import { createI18n } from "./i18n.js";
 import { cleanupLegacyMakerSnapshots } from "./legacy-maker-snapshot-cleanup.js";
@@ -86,6 +89,7 @@ import {
   CHATGPT_LEGACY_ASSISTANT_SELECTOR,
   CHATGPT_USER_SELECTOR,
   CHATGPT_PROSE_SELECTOR,
+  chatGptAssistantImageNodes,
   isChatGptUserTurnNode,
   mergeChatGptAssistantNodes,
   stripChatGptUserRolePrefix
@@ -520,26 +524,26 @@ export function initializeContent() {
   const conversationCover = createChatGptConversationCover({ window, locale,
     logoUrl: chrome.runtime.getURL("icons/gpt-voyager-icon-96.png"),
     onRetry: () => conversationIndex.retry(),
-    onDismiss() { syncConversationCover(); publishWindowSnapshot(); },
-    onStateChange() { syncConversationCover(); publishWindowSnapshot(); }
+    onDismiss() { syncConversationCover(); publishWindowSnapshot(); }
   });
-  const conversationIndex = createChatGptIndexController({
+  const conversationIndex = (isGeminiPage() ? createGeminiIndexController : createChatGptIndexController)({
     window,
+    imagePlaceholder: locale === "zh" ? "[图片]" : "[Image]",
     cache: createConversationCacheClient(chrome.runtime),
     onDiagnostics(timings) { recordDiagnosticEvent("conversation_read", timings); },
-    bridgeUrl: chrome.runtime.getURL("src/chatgpt-index-bridge.js"),
+    bridgeUrl: chrome.runtime.getURL(isGeminiPage() ? "src/gemini-index-bridge.js" : "src/chatgpt-index-bridge.js"),
     onChange() {
       syncConversationCover();
       chapterContentRevision += 1;
       publishWindowSnapshot();
     }
   });
+  let billingView = null;
   const conversationReading = () => conversationCover.isShowing() || conversationCover.isWaiting();
   function syncConversationCover() {
     const theme = document.getElementById(ROOT_ID)?.dataset.pageTheme || "light";
-    if (conversationIndex.awaitingConversation()) conversationCover.awaitConversation(theme);
-    else conversationCover.update(conversationIndex.snapshot(), theme);
-    // Makers appear with the conversation, not before the cover finishes.
+    conversationCover.update(conversationIndex.snapshot(), theme);
+    // Keep incomplete index results gated while the inline status reports progress.
     document.getElementById(ROOT_ID)?.toggleAttribute("data-conversation-loading", conversationReading());
   }
 
@@ -3553,19 +3557,19 @@ export function initializeContent() {
       matched += nodes.length;
       visible[selector] = nodes.filter((node) => isVisible(node, scanContext));
     });
+    const users = getChatGptUserContainers(scanContext);
     const merged = mergeChatGptAssistantNodes({
       legacy: visible[CHATGPT_LEGACY_ASSISTANT_SELECTOR] || [],
       hashed: visible[HASHED_MARKDOWN_ROOT_SELECTOR] || [],
       prose: visible[CHATGPT_PROSE_SELECTOR] || [],
-      users: getChatGptUserContainers(scanContext)
+      users
     });
-    if (merged.length > 0) {
-      return merged.map((item) => item.node);
-    }
     const fallback = visible[MARKDOWN_FALLBACK_SELECTOR] || [];
-    if (fallback.length > 0) {
-      return fallback;
-    }
+    const containers = merged.length ? merged.map((item) => item.node) : fallback;
+    const images = chatGptAssistantImageNodes(document, users)
+      .filter((image) => isVisible(image, scanContext) && !isInsideNavigationRoot(image) && !isUserInputContext(image)
+        && !containers.some((container) => container.contains(image)));
+    if (containers.length || images.length) return [...containers, ...images];
     const routeKey = currentRouteKey();
     if (matched > 0 && discardedConversationWarningRoute !== routeKey) {
       discardedConversationWarningRoute = routeKey;
@@ -3928,6 +3932,9 @@ export function initializeContent() {
       assistantToUser.set(entry.element, currentUser);
       if (currentUser) {
         groupsByKey.get(currentUser.markerKey).hasAssistantMessage = true;
+        if (entry.element.textContent?.trim() || entry.element.querySelector("img, video, audio, canvas, iframe")) {
+          groupsByKey.get(currentUser.markerKey).hasReplyContent = true;
+        }
       }
     });
 
@@ -4294,11 +4301,21 @@ export function initializeContent() {
     containers.forEach((container) => {
       const hashedMarkdownRoot = container.matches(HASHED_MARKDOWN_ROOT_SELECTOR)
         || Boolean(container.querySelector(HASHED_MARKDOWN_ROOT_SELECTOR));
-      const candidateSelector = hashedMarkdownRoot
+      let candidateSelector = hashedMarkdownRoot
         ? `${MARKER_CANDIDATE_SELECTOR}, h5, h6, ${HASHED_HEADING_SELECTOR}`
         : MARKER_CANDIDATE_SELECTOR;
-      container.querySelectorAll(candidateSelector).forEach((heading) => {
+      if (isChatGPTPage()) candidateSelector += ", img";
+      const candidates = [...(container.matches("img") ? [container] : []), ...container.querySelectorAll(candidateSelector)];
+      candidates.forEach((heading) => {
         if (!(heading instanceof HTMLElement) || !isVisible(heading, scanContext) || seen.has(heading)) {
+          return;
+        }
+
+        if (isChatGPTPage() && heading.tagName === "IMG") {
+          if (heading.closest('[hidden], [aria-hidden="true"], [data-testid*="avatar" i], [class*="avatar" i]')) return;
+          seen.add(heading);
+          headings.push({ element: heading, level: 3, title: locale === "zh" ? "图片" : "Image",
+            id: heading.id || `gpt-paragraph-image-${headings.length + 1}`, sourceType: "image", image: { alt: heading.getAttribute("alt") || "" } });
           return;
         }
 
@@ -4381,6 +4398,7 @@ export function initializeContent() {
       if (item.title.length <= 0) {
         return false;
       }
+      if (item.sourceType === "image") return true;
       if (item.sourceType === "hashed-markdown") {
         return item.level >= 1 && item.level <= 6;
       }
@@ -4502,6 +4520,7 @@ export function initializeContent() {
 
   function isHeadingEnabledForCurrentConfig(heading) {
     const platformKey = currentPlatformKey();
+    if (heading.sourceType === "image") return true;
     if (heading.sourceType === "hashed-markdown") {
       return heading.level >= 1 && heading.level <= 6;
     }
@@ -4835,6 +4854,7 @@ export function initializeContent() {
       level: heading.level,
       title,
       preview: markerPreviewFor(title),
+      image: heading.image,
       width: markerWidthFor(title),
       signature: markerRenderSignature(["ai", heading.level, title])
     };
@@ -5302,7 +5322,8 @@ export function initializeContent() {
       thumbnailSrc: standaloneWindowImageSource(item.thumbnailSrc),
       imageUrls: [],
       imageCount: Number(item.imageCount) || 0,
-      isImageOnly: Boolean(item.isImageOnly)
+      isImageOnly: Boolean(item.isImageOnly),
+      ...(item.image ? { image: item.image } : {})
     };
   }
 
@@ -5378,8 +5399,7 @@ export function initializeContent() {
           group.headings.push(item); group.visibleHeadings.push(item);
         }
       }
-      const limited = limitedMarkerGroups(indexedGroups);
-      items = markerRenderItems(limited.groups, limited.earlierUserGroupCount).map(serializableWindowMarkerItem);
+      items = markerRenderItems(indexedGroups, 0).map(serializableWindowMarkerItem);
       allMarkerItems = indexed.items;
     }
     const root = document.getElementById(ROOT_ID);
@@ -5389,10 +5409,13 @@ export function initializeContent() {
       config: JSON.parse(JSON.stringify(state.config)),
       hasConversation: Boolean(indexed?.items.length || state.markerSourceContainers.length > 0),
       conversationIndex: conversationIndex.snapshot(),
+      conversationAwaiting: conversationIndex.awaitingConversation(),
       conversationLoading: conversationReading(),
       conversationStalled: conversationCover.isStalled(),
       conversationTitle: conversationIndex.snapshot()?.title || conversationIndex.title(),
       allMarkerItems,
+      recognitionHintGroups: indexed ? indexed.recognitionHintGroups || []
+        : groups.filter((group) => group.hasReplyContent && !group.visibleHeadings.length).map((group) => group.key),
       headings: state.headings.map((heading) => ({
         id: heading.id,
         markerKey: markerKeyForHeading(heading),
@@ -5546,7 +5569,21 @@ export function initializeContent() {
     }
     if (message.expectedRouteKey && message.expectedRouteKey !== currentRouteKey()) return { ok: false, reason: "source-changed" };
     if (message.generation && message.generation !== conversationIndex.snapshot()?.generation) return { ok: false, reason: "source-changed" };
+    if (!billingAllowsPlatform(billingView, currentPlatformKey())) return { ok: false, reason: "platform-required" };
+    if (!billingAllowsIndex(billingView) && ["search-conversation", "get-index-chapter", "retry-conversation-index"].includes(message.command)) return { ok: false, reason: "pro-required" };
     if (message.command === "search-conversation") return conversationIndex.search(String(message.query || ""), { offset: Number(message.offset) || 0 });
+    if (message.command === "get-conversation-export") {
+      if (conversationIndex.enabled()) {
+        if (!billingAllowsIndex(billingView)) return { ok: false, reason: "pro-required" };
+        const data = conversationIndex.exportConversation();
+        return data ? { ok: true, ...data, url: currentRouteKey() } : { ok: false, reason: "not-ready" };
+      }
+      const snapshot = collectMarkerRenderSnapshot();
+      const data = collectDOMConversation({ document, containers: snapshot.assistantContainers,
+        users: snapshot.markerGroups.flatMap((group) => group.user ? [group.user] : []),
+        title: document.title, url: currentRouteKey() });
+      return { ok: Boolean(data.messages.length), ...data };
+    }
     if (message.command === "get-index-chapter") {
       if (!conversationIndex.enabled()) return { ok: false };
       const chapters = conversationIndex.outline(state.config).chapters;
@@ -5571,7 +5608,7 @@ export function initializeContent() {
       });
     }
     if (message.command === "request-state") {
-      conversationIndex.configure(state.config.chatgptHistoryMode === "complete" && isTopLevelFrame());
+      conversationIndex.configure(billingAllowsIndex(billingView) && state.config.chatgptHistoryMode === "complete" && isTopLevelFrame());
       publishWindowSnapshot();
       return;
     }
@@ -5658,8 +5695,11 @@ export function initializeContent() {
       return;
     }
     lifecycle.listenChrome(chrome.runtime.onMessage, (message, _sender, sendResponse) => {
-      if (message?.type === "POLARIS_WINDOW_REQUEST_STATE") {
-        conversationIndex.configure(state.config.chatgptHistoryMode === "complete" && isTopLevelFrame());
+      if (message?.type === "POLARIS_BILLING_UPDATED") {
+        billingView = message.view;
+        render();
+      } else if (message?.type === "POLARIS_WINDOW_REQUEST_STATE") {
+        conversationIndex.configure(billingAllowsIndex(billingView) && state.config.chatgptHistoryMode === "complete" && isTopLevelFrame());
         if (!state.awaitingRouteDom && state.markerSourceContainers.length === 0) {
           render();
           return;
@@ -5736,8 +5776,14 @@ export function initializeContent() {
       return;
     }
 
-    conversationIndex.configure(state.config.chatgptHistoryMode === "complete" && isTopLevelFrame() && document.visibilityState !== "hidden");
+    conversationIndex.configure(billingAllowsIndex(billingView) && state.config.chatgptHistoryMode === "complete" && isTopLevelFrame());
     syncConversationCover();
+
+    if (!billingAllowsPlatform(billingView, currentPlatformKey())) {
+      removeNavigationRoot();
+      publishWindowSnapshot();
+      return;
+    }
 
     if (!isSupportedRoute()) {
       clearNonConversationPageState();
@@ -6441,15 +6487,14 @@ export function initializeContent() {
   function handleVisibilityChange() {
     if (document.visibilityState === "hidden") {
       cancelPointerDrag("document-hidden");
-      conversationIndex.configure(false);
     } else if (state.config.chatgptHistoryMode === "complete" && isTopLevelFrame()) {
       conversationIndex.configure(true);
     }
   }
 
-  function handlePageHide() {
+  function handlePageHide(event) {
     cancelPointerDrag("pagehide");
-    conversationIndex.configure(false);
+    if (!event.persisted) conversationIndex.configure(false);
   }
 
   function handleKeydown(event) {
@@ -6590,6 +6635,11 @@ export function initializeContent() {
     if (state.isExtensionContextInvalidated) return;
     watchConfigChanges();
     registerWindowBridge();
+    try {
+      void Promise.resolve(chrome.runtime.sendMessage({ type: "POLARIS_BILLING", action: "access" })).then(result => {
+        if (result?.ok && result.view && isExtensionContextValid()) { billingView = result.view; render(); }
+      }).catch(() => {});
+    } catch { /* Licensing is unavailable while the extension context restarts. */ }
     state.routeKey = currentRouteKey();
     try {
       await cleanupLegacyMakerSnapshots({ storage: chrome.storage.local });
@@ -6616,7 +6666,9 @@ export function initializeContent() {
     render();
 
     state.observer = new MutationObserver(handleDocumentMutations);
-    state.observer.observe(document.body, {
+    // Hosts can replace body while configuration is loading. Observe the stable
+    // root so initialization and later body replacements remain observable.
+    state.observer.observe(document.documentElement, {
       attributes: true,
       attributeFilter: isDeepSeekPage()
         ? [...USER_MESSAGE_IMAGE_ATTRIBUTE_FILTER, ...DEEPSEEK_OBSERVED_ATTRIBUTES]

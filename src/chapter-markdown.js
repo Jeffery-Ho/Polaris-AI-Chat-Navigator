@@ -143,10 +143,19 @@ function parseMarkdownInline(text) {
     }
 
     if (character === "!" && source[index + 1] === "[") {
-      const imageEnd = source.indexOf(")", source.indexOf("](", index + 2) + 2);
-      if (imageEnd >= 0) {
-        appendMarkdownText(nodes, source.slice(index, imageEnd + 1));
-        index = imageEnd + 1;
+      const labelEnd = source.indexOf("](", index + 2);
+      let end = labelEnd + 2; let depth = 1;
+      if (labelEnd >= 0) for (; end < source.length; end++) {
+        if (source[end] === "\\") { end++; continue; }
+        if (source[end] === "(") depth++;
+        if (source[end] === ")" && --depth === 0) break;
+      }
+      if (labelEnd >= 0 && end < source.length) {
+        const destination = source.slice(labelEnd + 2, end).trim();
+        const src = destination.replace(/\s+["'][^"']*["']$/, "").replace(/^<([^>]+)>$/, "$1");
+        nodes.push({ type: "image", src, alt: source.slice(index + 2, labelEnd) });
+        recognized = true;
+        index = end + 1;
         continue;
       }
     }
@@ -316,7 +325,8 @@ function parseMarkdownBlocks(lines) {
     if (fence) {
       const end = lines.findIndex((line, cursor) => cursor > index && line.trimStart().startsWith(fence));
       if (end > index) {
-        blocks.push({ type: "codeBlock", value: lines.slice(index + 1, end).join("\n") });
+        const language = lines[index].trimStart().slice(fence.length).trim().match(/^[a-zA-Z0-9_+-]+$/)?.[0];
+        blocks.push({ type: "codeBlock", value: lines.slice(index + 1, end).join("\n"), ...(language ? { language } : {}) });
         recognized = true;
         index = end + 1;
         continue;
@@ -392,8 +402,21 @@ export function parseChapterMarkdown(text) {
   return parsed.recognized ? parsed.blocks : null;
 }
 
-export function appendParsedMarkdownInline(target, nodes, ownerDocument, baseUrl) {
+function containsMarkdownImage(nodes) {
+  return nodes.some((node) => node.type === "image" || node.children && containsMarkdownImage(node.children));
+}
+
+export function appendParsedMarkdownInline(target, nodes, ownerDocument, baseUrl, appendImage) {
   nodes.forEach((node) => {
+    if (node.type === "image") {
+      if (appendImage) appendImage(target, node);
+      else {
+        const source = ownerDocument.createElement("img");
+        source.setAttribute("src", node.src); source.setAttribute("alt", node.alt || "");
+        appendSanitizedChapterNode(target, source, ownerDocument, baseUrl);
+      }
+      return;
+    }
     if (node.type === "text") {
       target.appendChild(ownerDocument.createTextNode(node.value));
       return;
@@ -409,30 +432,34 @@ export function appendParsedMarkdownInline(target, nodes, ownerDocument, baseUrl
       return;
     }
     if (node.type === "link") {
+      // Image labels keep their own navigation instead of nesting anchors.
+      if (containsMarkdownImage(node.children)) {
+        appendParsedMarkdownInline(target, node.children, ownerDocument, baseUrl, appendImage); return;
+      }
       const href = safeChapterLinkHref(node.href, baseUrl);
       if (!href) {
-        appendParsedMarkdownInline(target, node.children, ownerDocument, baseUrl);
+        appendParsedMarkdownInline(target, node.children, ownerDocument, baseUrl, appendImage);
         return;
       }
       const link = ownerDocument.createElement("a");
       link.href = href;
       link.target = "_blank";
       link.rel = "noopener noreferrer";
-      appendParsedMarkdownInline(link, node.children, ownerDocument, baseUrl);
+      appendParsedMarkdownInline(link, node.children, ownerDocument, baseUrl, appendImage);
       target.appendChild(link);
       return;
     }
     const element = ownerDocument.createElement(node.type);
-    appendParsedMarkdownInline(element, node.children, ownerDocument, baseUrl);
+    appendParsedMarkdownInline(element, node.children, ownerDocument, baseUrl, appendImage);
     target.appendChild(element);
   });
 }
 
-export function appendSanitizedChapterContent(target, source, ownerDocument, baseUrl) {
-  source.childNodes.forEach((node) => appendSanitizedChapterNode(target, node, ownerDocument, baseUrl));
+export function appendSanitizedChapterContent(target, source, ownerDocument, baseUrl, appendImage) {
+  source.childNodes.forEach((node) => appendSanitizedChapterNode(target, node, ownerDocument, baseUrl, appendImage));
 }
 
-export function appendSanitizedChapterNode(target, source, ownerDocument, baseUrl) {
+export function appendSanitizedChapterNode(target, source, ownerDocument, baseUrl, appendImage) {
   if (source.nodeType === 3) {
     target.appendChild(ownerDocument.createTextNode(source.textContent || ""));
     return;
@@ -448,7 +475,7 @@ export function appendSanitizedChapterNode(target, source, ownerDocument, baseUr
 
   const tagName = chapterContentTagName(source.tagName);
   if (!tagName) {
-    appendSanitizedChapterContent(target, source, ownerDocument, baseUrl);
+    appendSanitizedChapterContent(target, source, ownerDocument, baseUrl, appendImage);
     return;
   }
 
@@ -458,21 +485,23 @@ export function appendSanitizedChapterNode(target, source, ownerDocument, baseUr
   }
 
   if (tagName === "a") {
+    if (appendImage && source.querySelector("img")) { appendSanitizedChapterContent(target, source, ownerDocument, baseUrl, appendImage); return; }
     const href = safeChapterLinkHref(source.getAttribute("href"), baseUrl);
     if (!href) {
-      appendSanitizedChapterContent(target, source, ownerDocument, baseUrl);
+      appendSanitizedChapterContent(target, source, ownerDocument, baseUrl, appendImage);
       return;
     }
     const link = ownerDocument.createElement("a");
     link.href = href;
     link.target = "_blank";
     link.rel = "noopener noreferrer";
-    appendSanitizedChapterContent(link, source, ownerDocument, baseUrl);
+    appendSanitizedChapterContent(link, source, ownerDocument, baseUrl, appendImage);
     target.appendChild(link);
     return;
   }
 
   if (tagName === "img") {
+    if (appendImage) { appendImage(target, { type: "image", alt: source.getAttribute("alt") || "" }); return; }
     const src = safeChapterImageSrc(source.getAttribute("src") || source.getAttribute("data-src"), baseUrl);
     if (!src) {
       return;
@@ -527,6 +556,6 @@ export function appendSanitizedChapterNode(target, source, ownerDocument, baseUr
       element.rowSpan = rowspan;
     }
   }
-  appendSanitizedChapterContent(element, source, ownerDocument, baseUrl);
+  appendSanitizedChapterContent(element, source, ownerDocument, baseUrl, appendImage);
   target.appendChild(element);
 }

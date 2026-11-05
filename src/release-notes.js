@@ -1,5 +1,220 @@
 const RELEASE_NOTES = Object.freeze([
   {
+    version: "0.104.0",
+    en: { title: "Export attribution", changes: ["Markdown and HTML exports now end with a local-export attribution using the published app name."] },
+    zh: { title: "导出文件署名", changes: ["Markdown 与 HTML 文件底部新增本地导出署名，自动使用应用发布名称。"] }
+  },
+  {
+    version: "0.102.0",
+    en: { title: "Copy and export conversations", changes: ["Copy the conversation from the top right of the content area, then optionally save Markdown or HTML. Chapter menus now copy only the selected chapter."] },
+    zh: { title: "复制与导出会话", changes: ["内容区右上方新增会话复制入口，复制后可选择导出 Markdown 或 HTML；章节菜单只复制当前章节。"] }
+  },
+  {
+    version: "0.100.0",
+    en: { title: "Find reply text in Outline", changes: ["When TOC has no reply entries, use the new shortcuts to adjust the display range in Settings or read body text in Outline."] },
+    zh: { title: "在 Outline 查看回复正文", changes: ["TOC 无回复目录项时，可通过提示直接调整设置中的显示范围，或切换 Outline 查看正文。"] }
+  },
+  {
+    version: "0.94.0",
+    en: { title: "A new sidebar surface", changes: ["A subtle dotted background, outlined assistant cards and gray user bubbles bring a clearer hierarchy to the sidebar. Outline keeps a solid reading surface, with matching dark-mode colors."] },
+    zh: { title: "新的侧栏背景与卡片", changes: ["侧栏采用浅点阵底纹、细描边回答卡片与灰色用户卡片；大纲保持实底阅读区域，并适配深色模式。"] }
+  },
+  {
+    version: "0.93.0",
+    en: { title: "Pro at the top of Settings", changes: ["A terracotta card with a pearl star replaces the Pro menu entry. It opens purchases or pending progress, and stays visible for Pro members to view their membership details."] },
+    zh: { title: "设置首页的 Pro 入口", changes: ["赤陶色付费卡片与珍珠五角星替换原 Pro 列表入口；未购买可打开购买窗口或查看待确认进度，已购买用户通过同一卡片查看会员信息。"] }
+  },
+  {
+    version: "0.92.0",
+    en: { title: "Discord community", changes: ["Feedback now includes a Discord community entry beside X and Xiaohongshu."] },
+    zh: { title: "Discord 社区入口", changes: ["反馈页新增 Discord 社区入口，与 X、小红书并列显示。"] }
+  },
+  {
+    version: "0.91.0",
+    en: { title: "Locate the current Maker", changes: ["The scroll toolbar now has a Locate current Maker button. Return to the active Maker in the TOC, including off-screen entries in long conversations."] },
+    zh: { title: "定位当前 Maker", changes: ["滚动工具栏新增“定位当前 Maker”按钮，一键回到目录中当前聚焦的 Maker，支持长对话中屏幕外的条目。"] }
+  },
+  {
+    version: "0.90.0",
+    en: { title: "Pro and license", changes: ["Adds purchase, license redemption, recovery and device deactivation in Settings. A seven-day full-access trial leads into Free with two changeable platforms."] },
+    zh: { title: "Pro 与许可", changes: ["设置中新增购买、许可证兑换、找回和本设备停用入口；七天完整功能试用结束后，可选择两个免费平台并随时更换。"] }
+  },
+  {
+    version: "0.88.0",
+    en: { title: "Simpler full-conversation search", changes: ["Removed the search scope selector. Search all message text with fuzzy matching, original-text highlights and source navigation."] },
+    zh: { title: "统一全文模糊搜索", changes: ["移除搜索范围下拉选择，统一模糊搜索全部消息正文，保留原文高亮与定位。"] }
+  },
+  {
+    version: "0.87.0",
+    en: { title: "User image labels and stable reading", changes: ["User image attachments are indexed as image labels. Reading survives background tabs and reuses recent conversations. The reading cover returns, with refresh offered only after failure."] },
+    zh: { title: "用户图片标签与稳定读取", changes: ["用户图片附件解析为图片标签；后台保留读取，返回近期会话复用已读内容。恢复读取遮罩，仅在读取失败后提供刷新操作。"] }
+  },
+  {
+    version: "0.86.0",
+    en: {
+      title: "All conversation groups in the full index",
+      changes: ["The full-history TOC now includes every indexed question and Image label directly, without an earlier-groups summary. Virtual scrolling keeps the mounted list small, and individual questions can still be folded."]
+    },
+    zh: {
+      title: "全文目录直接包含全部分组",
+      changes: ["全文目录直接包含所有已索引的问题和图片标签，移除顶部更早分组汇总；虚拟滚动按需挂载，仍可单独折叠问题。"]
+    }
+  },
+  {
+    version: "0.85.7",
+    en: {
+      title: "Locate images in shared chats",
+      changes: ["Image entries now ask ChatGPT's existing virtual list to mount the source message, then locate and highlight it. ChatGPT continues to own image loading and rendering."]
+    },
+    zh: {
+      title: "修复分享页图片定位",
+      changes: ["点击图片条目会请求 ChatGPT 原生虚拟列表挂载对应消息，再定位并高亮；图片加载和渲染继续交由原站处理。"]
+    }
+  },
+  {
+    version: "0.85.6",
+    en: {
+      title: "Read shared chats in the signed-in app",
+      changes: ["Full reading now handles the signed-in shared page's reload response using the existing page session and the shared-chat data endpoint. All Image labels continue through the same full index and virtual list without image downloads."]
+    },
+    zh: {
+      title: "修复登录状态下的分享全文读取",
+      changes: ["分享页返回重载指令时，使用页面现有会话授权读取分享数据；全部图片标签继续复用全文索引和虚拟列表，无需下载图片。"]
+    }
+  },
+  {
+    version: "0.85.5",
+    en: {
+      title: "A separate reader for shared chats",
+      changes: ["Shared chats now use their own server data reader, supporting the route's raw loader response and an HTML compatibility fallback while preserving the same full index and Image labels."]
+    },
+    zh: {
+      title: "分享会话使用独立读取链路",
+      changes: ["分享会话改用独立服务器数据读取器，支持原站加载接口的原始响应及 HTML 兼容回退，继续共用全文索引和图片标签展示。"]
+    }
+  },
+  {
+    version: "0.85.4",
+    en: {
+      title: "Reuse shared-chat server data",
+      changes: ["Full reading now reuses the complete server data already loaded by the active shared chat, including image messages beyond the mounted page. It waits briefly for page initialization when necessary and cancels safely when the source changes."]
+    },
+    zh: {
+      title: "复用分享会话服务器数据",
+      changes: ["全文读取优先复用当前分享会话已加载的完整服务器数据，包含页面尚未显示的图片消息；必要时短暂等待页面初始化，来源切换后取消旧读取。"]
+    }
+  },
+  {
+    version: "0.85.3",
+    en: {
+      title: "Shared-chat read recovery",
+      changes: ["If a shared-chat refetch returns an unreadable format, Polaris can recover its full history from the matching server snapshot already received by the page, including image labels beyond the mounted messages."]
+    },
+    zh: {
+      title: "分享会话读取回退",
+      changes: ["分享页重复请求返回无法解析的内容时，可从本页已收到且分享 ID 匹配的服务器快照恢复全文，包含尚未显示的历史图片标签。"]
+    }
+  },
+  {
+    version: "0.85.2",
+    en: {
+      title: "Read failure diagnostics",
+      changes: ["Downloaded diagnostics now include safe error codes, elapsed time and message counts when a full-conversation read fails, helping identify failures on shared chat pages."]
+    },
+    zh: {
+      title: "补充全文读取失败诊断",
+      changes: ["完整对话读取失败时，下载的诊断日志会记录安全错误码、耗时和消息数量，便于定位分享会话的实际失败原因。"]
+    }
+  },
+  {
+    version: "0.85.1",
+    en: {
+      title: "Image labels in shared chats",
+      changes: ["Follow ChatGPT mode now includes already displayed AI image replies, including image-only shared turns, without downloading previews. Full-history mode continues to read earlier image messages from the server."]
+    },
+    zh: {
+      title: "补全分享会话图片标签",
+      changes: ["跟随 ChatGPT 模式也会识别已显示的 AI 图片与纯图片分享回复，无需下载预览；全文读取仍可读取服务器中的更早图片消息。"]
+    }
+  },
+  {
+    version: "0.85.0",
+    en: {
+      title: "Image labels without downloads",
+      changes: ["All AI image messages appear as Image labels in the TOC and Outline, with source navigation and no preview downloads or sampling.", "Fixes Gemini initialization when the page replaces its body while settings are loading."]
+    },
+    zh: {
+      title: "图片标签，无需下载",
+      changes: ["TOC 与 Outline 中的全部 AI 图片消息仅显示图片标签，保留源消息定位，不再下载预览或进行采样。", "修复 Gemini 在设置读取期间替换页面 body 时的初始化错误。"]
+    }
+  },
+  {
+    version: "0.84.2",
+    en: {
+      title: "AI images in the TOC",
+      changes: ["The full-history TOC now includes AI image replies with lazy previews and original-image links. Markdown sandbox images work in both original and shared conversations."]
+    },
+    zh: {
+      title: "目录支持 AI 图片回复",
+      changes: ["全文读取的 TOC 现显示 AI 图片回复，支持按需预览和打开原图；原始会话及分享会话中的 Markdown sandbox 图片也可读取。"]
+    }
+  },
+  {
+    version: "0.84.1",
+    en: {
+      title: "Neutral Outline backgrounds",
+      changes: ["Collapse controls and image placeholders now use neutral gray backgrounds instead of the accent tint."]
+    },
+    zh: {
+      title: "大纲背景使用中性灰色",
+      changes: ["折叠图标和图片占位背景改用浅灰色，替代原先的浅粉色。"]
+    }
+  },
+  {
+    version: "0.84.0",
+    en: {
+      title: "Read the full history of shared chats",
+      changes: ["Shared ChatGPT conversations now read their complete server history, including AI image replies beyond the currently visible messages."]
+    },
+    zh: {
+      title: "完整读取分享会话的历史",
+      changes: ["ChatGPT 分享会话现从服务器读取完整历史，包含当前页面尚未显示的 AI 图片回复。"]
+    }
+  },
+  {
+    version: "0.83.1",
+    en: {
+      title: "Scroll controls follow the current list",
+      changes: ["Floating scroll buttons now appear only when the TOC or Outline shows list rows. Settings, empty lists, and other states keep them hidden."]
+    },
+    zh: {
+      title: "仅在目录和大纲列表显示滚动按钮",
+      changes: ["仅当 TOC 或 Outline 实际显示列表条目时显示底部滚动按钮；设置页、空列表及其他状态均隐藏。"]
+    }
+  },
+  {
+    version: "0.83.0",
+    en: {
+      title: "Read images in long conversations",
+      changes: ["Reading now shows Markdown images and generated image attachments in reply order. Images load as you read, open their originals in a new tab, and keep a retry option if loading fails."]
+    },
+    zh: {
+      title: "在长对话中阅读图片",
+      changes: ["Reading 现支持按回复顺序显示 Markdown 图片与生成图片附件；随阅读按需加载，点击可打开原图，加载失败时可重试。"]
+    }
+  },
+  {
+    version: "0.82.1",
+    en: {
+      title: "Show scroll controls with conversation content",
+      changes: ["The floating scroll buttons stay hidden when no conversation has been read, while loading, or after reading fails, and return when conversation content is ready."]
+    },
+    zh: {
+      title: "读取会话后再显示滚动按钮",
+      changes: ["未读取到会话、正在读取或读取失败时隐藏底部滚动按钮，读取成功后再显示。"]
+    }
+  },
+  {
     version: "0.82.0",
     en: {
       title: "Jump to the top or bottom",
@@ -635,12 +850,12 @@ function fallbackReleaseNote(version) {
     isFallback: true,
     version,
     en: {
-      title: "Release notes unavailable",
-      changes: ["Detailed notes for this version are unavailable. Please send feedback if something needs attention."]
+      title: "Improvements and fixes",
+      changes: ["Bug fixes and improvements."]
     },
     zh: {
-      title: "更新说明暂不可用",
-      changes: ["此版本的详细更新说明暂不可用；如有问题，请通过下方入口反馈。"]
+      title: "优化与修复",
+      changes: ["修复错误，提升体验。"]
     }
   };
 }

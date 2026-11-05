@@ -66,7 +66,7 @@ test("侧栏包含导航、章节、设置和无对话平台空状态", () => {
   assert.match(windowSource, /chrome\.tabs\?\.onUpdated/);
   assert.match(windowSource, /setInterval\(requestSourceState, 1200\)/);
   assert.match(windowSource, /const shouldRetry = !snapshot \|\| Boolean\(snapshot\.supportedRoute && !snapshot\.hasConversation\)/);
-  assert.match(windowSource, /if \(isLoading \|\| snapshot\.loading \|\| snapshot\.conversationLoading \|\| snapshot\.conversationStalled \|\| awaitingConversation\)/);
+  assert.match(windowSource, /if \(isLoading \|\| snapshot\.loading \|\| snapshot\.conversationLoading \|\| snapshot\.conversationStalled \|\| readFailed \|\| awaitingConversation\)/);
   assert.match(windowSource, /Reading conversation/);
   assert.doesNotMatch(windowSource, /No conversation here/);
   assert.match(windowSource, /jump-to-marker/);
@@ -82,10 +82,14 @@ test("侧栏包含导航、章节、设置和无对话平台空状态", () => {
 });
 
 test("Side Panel 使用窗口专属赤陶品牌层级", () => {
-  assert.match(windowCss, /--window-accent: #b85c3a;/i);
-  assert.match(windowCss, /--window-accent-dark: #e69a78;/i);
-  assert.match(windowCss, /--polaris-bg: #faf9f7;/i);
-  assert.match(windowCss, /--polaris-bg: #191817;/i);
+  assert.match(tokensCss, /--polaris-clay-500: #b85c3a;/i);
+  assert.match(tokensCss, /--polaris-accent: var\(--polaris-clay-500\);/);
+  assert.match(tokensCss, /--polaris-accent: var\(--polaris-clay-300\);/);
+  assert.doesNotMatch(tokensCss, /#4f46e5|#818cf8/i);
+  assert.match(tokensCss, /--polaris-pro-pearl: linear-gradient\(90deg, #f6e8ff, #fff 50%, #f8eadf\);/);
+  assert.equal(windowCss.match(/background: var\(--polaris-pro-pearl\)/g)?.length, 2);
+  assert.doesNotMatch(windowCss, /#f6e8ff/i);
+  assert.doesNotMatch(windowCss, /--polaris-(?:bg|text|accent)[\w-]*:/);
   assert.match(windowSource, /window-brand/);
   assert.match(windowSource, /window-meta/);
   assert.match(windowSource, /window-settings-button/);
@@ -95,7 +99,7 @@ test("Side Panel 使用窗口专属赤陶品牌层级", () => {
   assert.match(windowSource, /if \(snapshot\?\.supportedRoute && platformData\) \{[\s\S]*?meta\.append\(platform\);/);
   assert.doesNotMatch(windowSource, /favicon: "icons\/gpt-voyager-icon-32\.png"/);
   assert.match(windowSource, /createSettingsIcon/);
-  assert.match(windowSource, /window-settings-nav/);
+  assert.match(windowSource, /createPageNavigation/);
   assert.match(windowSource, /createBackIcon/);
   assert.match(windowSource, /window-settings-back/);
   assert.match(windowSource, /document\.querySelector\("\.window-settings-back"\)\?\.focus\(\{ preventScroll: true \}\)/);
@@ -153,8 +157,8 @@ test("侧栏缩略图加载失败后移除破图并保留 Maker 文本", () => {
 });
 
 test("Maker 列表用同一套表面区分 agent 和用户卡片，并保留可见焦点", () => {
-  assert.match(windowCss, /\.maker-card-ai \{[\s\S]*?background: var\(--polaris-bg-subtle\);/);
-  assert.match(windowCss, /\.maker-card-user \{[\s\S]*?background: var\(--polaris-bg-elevated\);/);
+  assert.match(windowCss, /\.maker-card-ai \{[\s\S]*?background: var\(--polaris-bg-elevated\);/);
+  assert.match(windowCss, /\.maker-card-user \{[\s\S]*?background: var\(--polaris-bg-subtle\);/);
   assert.match(windowCss, /\.maker-card:hover \{[\s\S]*?background: var\(--polaris-bg-subtle\);/);
   assert.match(windowCss, /\.maker-card:focus-visible[\s\S]*?outline: 2px solid var\(--polaris-focus\);/);
   assert.doesNotMatch(windowCss, /\.maker-card \{[^}]*outline:\s*0/);
@@ -186,12 +190,12 @@ test("窗口标题只保留平台图标，卡片不重复模型名", () => {
   assert.match(windowCss, /\.maker-badge \{[^}]*width: fit-content;/);
 });
 
-test("Side Panel 不使用渐变背景", () => {
+test("Side Panel 的基础表面保持纯色背景", () => {
   assert.match(windowCss, /@import "\.\/tokens\.css"/);
   assert.match(tokensCss, /--window-background: var\(--polaris-bg\)/);
-  assert.match(tokensCss, /--polaris-bg: #ffffff;/);
-  assert.match(tokensCss, /--polaris-bg: #09090b;/);
-  assert.doesNotMatch(windowCss, /radial-gradient|linear-gradient/);
+  assert.match(tokensCss, /--polaris-bg: #fafaf8;/);
+  assert.match(tokensCss, /--polaris-bg: #1a1918;/);
+  assert.doesNotMatch(windowCss, /(?:^|\n)(?:body|\.window-header|#polaris-window|\.maker-card)\s*\{[^}]*(?:radial-gradient|linear-gradient)/);
   assert.doesNotMatch(tokensCss, /--window-background:[^;]*(?:radial-gradient|linear-gradient)/);
 });
 

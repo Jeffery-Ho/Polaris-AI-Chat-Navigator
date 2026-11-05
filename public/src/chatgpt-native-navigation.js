@@ -4,7 +4,8 @@
 const SCROLL_TO_KEY_LIMIT_MS = 2000;
 
 export function createChatGptNativeNavigation({ window: win, loadModule = (url) => import(url) }) {
-  const currentId = () => win.location.pathname.match(/\/c\/([a-zA-Z0-9-]+)(?:\/|$)/)?.[1] || "";
+  const currentId = () => win.location.pathname.match(/^\/share\/([a-zA-Z0-9-]+)\/?$/)?.[1]
+    || win.location.pathname.match(/\/c\/([a-zA-Z0-9-]+)(?:\/|$)/)?.[1] || "";
   let loadRun = null;
 
   // Share the host load between preparation and later location requests. The
@@ -184,20 +185,26 @@ export function createChatGptNativeNavigation({ window: win, loadModule = (url) 
     async reveal(conversationId, { messageId, prepare = false, includeSnapshot = false, instant = false, signal } = {}) {
       if (!conversationId || currentId() !== conversationId || signal?.aborted) return { ok: false, reason: "source-changed" };
       try {
-        const require = await runtime();
-        if (!require) return { ok: false, reason: "native-list-unavailable" };
-        const host = hostInterfaces(require);
-        if (!host) return { ok: false, reason: "native-list-unavailable" };
-        const scope = hostScope(host.token, host.families, conversationId);
-        if (!scope) return { ok: false, reason: "native-list-unavailable" };
-        if (currentId() !== conversationId || signal?.aborted) return { ok: false, reason: "source-changed" };
-        await ensureLoaded(host, scope, conversationId, signal);
+        const shared = /^\/share\//.test(win.location.pathname);
+        let scope;
+        // Shared chats already have their complete model. Ask their existing
+        // virtual list to mount the target; ChatGPT owns all image rendering.
+        if (!shared) {
+          const require = await runtime();
+          if (!require) return { ok: false, reason: "native-list-unavailable" };
+          const host = hostInterfaces(require);
+          if (!host) return { ok: false, reason: "native-list-unavailable" };
+          scope = hostScope(host.token, host.families, conversationId);
+          if (!scope) return { ok: false, reason: "native-list-unavailable" };
+          if (currentId() !== conversationId || signal?.aborted) return { ok: false, reason: "source-changed" };
+          await ensureLoaded(host, scope, conversationId, signal);
+        }
         if (currentId() !== conversationId || signal?.aborted) return { ok: false, reason: "source-changed" };
         if (messageId || prepare) {
+          const target = messageId ? hostVirtualTarget(messageId) : null;
           const list = hostMessageList();
-          if (!list) return { ok: false, reason: "native-list-unavailable" };
+          if (!list && !(shared && target)) return { ok: false, reason: "native-list-unavailable" };
           if (messageId) {
-            const target = hostVirtualTarget(messageId);
             if (target) {
               if (!instant) await scrollTowardTarget(target, conversationId, signal);
               if (currentId() !== conversationId || signal?.aborted) return { ok: false, reason: "source-changed" };
@@ -208,7 +215,7 @@ export function createChatGptNativeNavigation({ window: win, loadModule = (url) 
           }
         }
         if (currentId() !== conversationId || signal?.aborted) return { ok: false, reason: "source-changed" };
-        return includeSnapshot ? { ok: true, payload: completePayload(scope, conversationId) } : { ok: true };
+        return includeSnapshot && scope ? { ok: true, payload: completePayload(scope, conversationId) } : { ok: true };
       } catch (error) {
         return { ok: false, reason: signal?.aborted || currentId() !== conversationId ? "source-changed"
           : error?.message === "navigation-cancelled" ? "navigation-cancelled" : "native-load-failed" };

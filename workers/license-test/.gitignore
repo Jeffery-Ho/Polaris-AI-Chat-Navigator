@@ -1,0 +1,6 @@
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+wrangler.jsonc
+.wrangler/
+node_modules/

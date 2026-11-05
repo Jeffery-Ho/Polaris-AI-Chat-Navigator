@@ -16,7 +16,10 @@
     "dev": "wxt",
     "prepare": "node scripts/prepare.js",
     "check": "node scripts/check.js",
-    "test": "node --test"
+    "test": "node --test",
+    "billing:dev": "wrangler dev --config workers/license-test/wrangler.jsonc --port 4318 --compatibility-date 2026-05-15",
+    "billing:check": "node --test workers/license-test/test/*.test.js",
+    "billing:deploy": "wrangler deploy --config workers/license-test/wrangler.jsonc"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
@@ -25,6 +28,7 @@
     "tailwindcss": "^4.3.3",
     "vite": "7.3.6",
     "web-ext": "10.7.0",
+    "wrangler": "4.92.0",
     "wxt": "0.21.4"
   },
   "dependencies": {
