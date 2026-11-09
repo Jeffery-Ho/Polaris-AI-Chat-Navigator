@@ -10,13 +10,13 @@ export function createSidepanelConversationExport({ document: doc, locale, appNa
   let dialog = null;
   const toolbar = make("div", "conversation-actions");
   const status = make("span", "conversation-export-status"); status.setAttribute("role", "status");
-  const trigger = make("button", "conversation-copy-button"); trigger.type = "button";
-  trigger.setAttribute("aria-label", label("复制会话全文", "Copy conversation"));
-  trigger.title = label("复制会话全文", "Copy conversation");
+  const trigger = make("button", "conversation-copy-button", label("导出", "Export")); trigger.type = "button";
+  trigger.setAttribute("aria-label", label("导出会话", "Export conversation"));
+  trigger.title = label("导出会话", "Export conversation");
   const icon = doc.createElementNS("http://www.w3.org/2000/svg", "svg");
   icon.setAttribute("viewBox", "0 0 24 24"); icon.setAttribute("aria-hidden", "true");
   const path = doc.createElementNS("http://www.w3.org/2000/svg", "path");
-  path.setAttribute("d", "M8 8h13v13H8zM16 8V3H3v13h5"); icon.append(path); trigger.append(icon);
+  path.setAttribute("d", "M8 8h13v13H8zM16 8V3H3v13h5"); icon.append(path);
   toolbar.append(status, trigger);
 
   function make(tag, className, text = "") {
@@ -67,6 +67,40 @@ export function createSidepanelConversationExport({ document: doc, locale, appNa
       });
       choices.append(choice);
     }
+    const handoff = make("section", "conversation-export-handoff");
+    handoff.setAttribute("aria-label", label("接续对话的 Prompt", "Conversation handoff prompt"));
+    const prompt = make("p", "conversation-export-prompt", label(
+      `这是我与 AI 的${scope === "complete" ? "完整对话记录" : "已读取的对话记录，可能不包含更早的消息"}。请将文件中 User（用户）的提问和 Assistant（AI 回复）的回答作为本次对话的历史上下文。先简要复述最后三轮问答，确认你已读到结尾，再从最后一条消息继续。如果不足三轮，请复述全部已有问答。`,
+      `This file contains ${scope === "complete" ? "my complete conversation with an AI" : "the available part of my conversation with an AI; earlier messages may be missing"}. Treat the User questions and Assistant replies as the history of this conversation. First, briefly recap the last three exchanges to confirm you have read to the end, then continue from the final message. If there are fewer than three exchanges, recap all available exchanges.`
+    ));
+    const promptCard = make("div", "conversation-export-prompt-card");
+    const copyPrompt = make("button", "conversation-export-copy-prompt"); copyPrompt.type = "button";
+    const copyPromptLabel = label("复制 Prompt", "Copy prompt");
+    copyPrompt.setAttribute("aria-label", copyPromptLabel); copyPrompt.title = copyPromptLabel;
+    copyPrompt.setAttribute("aria-live", "polite");
+    const promptIcon = icon.cloneNode(true);
+    const promptIconPath = promptIcon.querySelector("path");
+    copyPrompt.append(promptIcon);
+    const promptStatus = make("p", "conversation-export-status"); promptStatus.setAttribute("role", "status"); promptStatus.hidden = true;
+    copyPrompt.addEventListener("click", async () => {
+      copyPrompt.disabled = true; promptStatus.hidden = true;
+      try {
+        await win.navigator.clipboard.writeText(prompt.textContent);
+        const copiedLabel = label("已复制 Prompt", "Prompt copied");
+        copyPrompt.setAttribute("aria-label", copiedLabel); copyPrompt.title = copiedLabel;
+        promptIconPath.setAttribute("d", "m5 12 4 4L19 6");
+      } catch {
+        copyPrompt.setAttribute("aria-label", copyPromptLabel); copyPrompt.title = copyPromptLabel;
+        promptIconPath.setAttribute("d", path.getAttribute("d"));
+        promptStatus.textContent = label("复制失败，请重试，或选中文案手动复制。", "Copy failed. Try again, or select and copy the prompt manually.");
+        promptStatus.hidden = false;
+      } finally { copyPrompt.disabled = false; }
+    });
+    promptCard.append(copyPrompt, prompt);
+    handoff.append(make("p", "conversation-export-handoff-description", label(
+      "在其他 AI 中接着讨论时，上传导出的文件，再粘贴下方 Prompt。",
+      "To continue with another AI, upload the exported file, then paste this prompt."
+    )), promptCard, promptStatus);
     const actions = make("div", "conversation-export-footer");
     const feedback = make("p", "conversation-export-status"); feedback.setAttribute("role", "alert"); feedback.hidden = true;
     save.addEventListener("click", () => {
@@ -82,7 +116,7 @@ export function createSidepanelConversationExport({ document: doc, locale, appNa
       } catch { feedback.textContent = label("导出失败，请重试。", "Export failed. Try again."); feedback.hidden = false; }
       finally { if (objectUrl) win.setTimeout(() => win.URL.revokeObjectURL(objectUrl), 1000); }
     });
-    actions.append(save); current.append(feedback, choices, actions);
+    actions.append(save); current.append(feedback, choices, handoff, actions);
     current.addEventListener("close", () => { if (dialog === current) closeDialog(); });
     current.addEventListener("click", (event) => {
       if (event.target !== current) return;
@@ -120,8 +154,8 @@ export function createSidepanelConversationExport({ document: doc, locale, appNa
       }
       sourceKey = key; available = enabled;
       trigger.disabled = !available || busy;
-      trigger.title = !enabled ? label("会话读取完成后可复制", "Available when the conversation is ready")
-        : complete ? label("复制整个会话", "Copy entire conversation") : label("复制已读取的会话", "Copy the conversation read from this page");
+      trigger.title = !enabled ? label("会话读取完成后可导出", "Available when the conversation is ready")
+        : complete ? label("导出整个会话", "Export entire conversation") : label("导出已读取的会话", "Export the conversation read from this page");
     }
   };
 }

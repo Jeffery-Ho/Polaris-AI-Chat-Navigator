@@ -14,7 +14,9 @@ import { didWindowConversationChange } from "./window-source-state.js";
 import { releaseNotesForUpdate } from "./release-notes.js";
 import { SUPPORTED_PLATFORMS, createPlatformLinks, rememberPlatform } from "./supported-platforms.js";
 import { createSidepanelOnboarding } from "./sidepanel-onboarding.js";
+import { createSidepanelPlatformMenu } from "./sidepanel-platform-menu.js";
 import { createVirtualList } from "./virtual-list.js";
+import { createSidepanelConversationStatus } from "./sidepanel-conversation-status.js";
 
 export function initializeSidepanel() {
   const SYSTEM_THEME_QUERY = "(prefers-color-scheme: dark)";
@@ -23,7 +25,9 @@ export function initializeSidepanel() {
   let billingPage = null;
   let billingOrigin = null;
   const billing = createSidepanelBilling({ document, chrome, locale, onChange: () => render(),
+    onPlatformEnabled: platform => { void platformMenu.switchTo(platform); },
     onOpenPage(page) {
+      platformMenu.close();
       billingOrigin = { scrollY: window.scrollY, focus: document.activeElement };
       billingPage = page;
       document.body.classList.add("billing-open");
@@ -43,6 +47,7 @@ export function initializeSidepanel() {
       window.scrollTo({ top: origin?.scrollY || 0, behavior: "auto" });
       if (origin?.focus?.isConnected) origin.focus.focus({ preventScroll: true });
       else if (origin?.focus?.dataset.settingsFocus) root.querySelector(`[data-settings-focus="${origin.focus.dataset.settingsFocus}"]`)?.focus({ preventScroll: true });
+      else if (origin?.focus?.classList.contains("window-platform")) root.querySelector(".window-platform")?.focus({ preventScroll: true });
       updateScrollControls();
     }
   });
@@ -71,6 +76,12 @@ export function initializeSidepanel() {
     pendingModeTarget: "",
     isChangingMode: false
   };
+  const platformMenu = createSidepanelPlatformMenu({ document, chrome, locale,
+    getView: () => billing.getView(), getPlatform: () => activePlatform(state.snapshot)?.key,
+    onManage: () => billing.open("platforms"),
+    onRestricted: platform => billing.open("platform-access", { platform: platform.key }),
+    onUpgrade: () => billing.open()
+  });
   const markerStreamingIndicator = createMarkerStreamingIndicator({
     setActive(marker, isActive) {
       marker.classList.toggle("is-streaming", isActive);
@@ -124,6 +135,15 @@ export function initializeSidepanel() {
       return result;
     }
   });
+  const conversationStatus = createSidepanelConversationStatus({ document, locale,
+    onRetry: () => sendReadingCommand("retry-conversation-index"),
+    onReadLoaded: () => sendReadingCommand("read-loaded-conversation"),
+    onPreferences: () => { openSettings(); openSettingsPage("preferences"); }
+  });
+  function sendReadingCommand(command) {
+    send({ command, expectedTabId: state.sourceTabId, expectedRouteKey: state.routeKey,
+      generation: state.snapshot?.conversationIndex?.generation });
+  }
   let sourceRetryTimer = 0;
   let virtualMarkers = null;
   let virtualMarkerElement = null;
@@ -427,17 +447,27 @@ export function initializeSidepanel() {
       : null;
     const focusedTab = document.activeElement?.dataset?.windowTab || "";
     const focusedSettingsControl = document.activeElement?.dataset?.settingsFocus || "";
+    const focusedPlatform = document.activeElement?.classList.contains("window-platform");
     document.querySelector(".image-preview")?.remove();
     applyTheme(snapshot);
     syncSourceRetry(state.snapshot);
     if (state.activeTab !== "chapters") chapterReader?.suspend();
     const body = renderBody(snapshot, { isLoading, existingBody });
+    const showReadingStatus = state.activeTab !== "settings" && snapshot.config?.chatgptHistoryMode === "complete"
+      && snapshot.conversationIndex && snapshot.conversationLoading
+      && billingAllowsPlatform(billing.getView(), snapshot.platform) && billingAllowsIndex(billing.getView());
+    if (showReadingStatus) {
+      conversationStatus.update(snapshot.conversationIndex);
+      if (body.firstElementChild !== conversationStatus.element) body.prepend(conversationStatus.element);
+    } else conversationStatus.element.remove();
+    const skeletonStatus = body.querySelector(".conversation-skeleton-status");
+    if (skeletonStatus) skeletonStatus.hidden = Boolean(showReadingStatus);
     const showConversationActions = state.activeTab === "chapters" && snapshot.hasConversation && !snapshot.conversationAwaiting
       && billingAllowsPlatform(billing.getView(), snapshot.platform);
     const exportReady = Boolean(showConversationActions && !isLoading && !snapshot.loading && !snapshot.conversationLoading && !snapshot.conversationStalled
       && (!snapshot.conversationIndex || snapshot.conversationIndex.phase === "complete"));
     conversationExport.update({ key: `${state.sourceTabId}:${state.routeKey}:${snapshot.conversationIndex?.generation || "dom"}`,
-      enabled: exportReady, complete: Boolean(snapshot.conversationIndex) });
+      enabled: exportReady, complete: Boolean(snapshot.conversationIndex && snapshot.conversationIndex.coverage !== "loaded") });
     if (showConversationActions) {
       if (body.firstElementChild !== conversationExport.element) body.prepend(conversationExport.element);
     }
@@ -455,6 +485,8 @@ export function initializeSidepanel() {
     if (activeSearch && state.activeTab !== "settings") {
       focusSearchInput(activeSearch);
     }
+    platformMenu.refresh();
+    if (focusedPlatform) root.querySelector(".window-platform")?.focus({ preventScroll: true });
     if (state.imageUrls.length) renderImagePreview();
     updateScrollControls();
   }
@@ -561,15 +593,27 @@ export function initializeSidepanel() {
     identity.append(brand);
     const meta = element("div", "window-meta");
     const platformData = activePlatform(snapshot);
-    if (snapshot?.supportedRoute && platformData) {
-      const platform = element("span", "window-platform");
-      platform.setAttribute("role", "img");
-      platform.setAttribute("aria-label", platformData.label);
-      platform.title = platformData.label;
+    if (platformData) {
+      const platform = element("button", "window-platform");
+      platform.type = "button";
+      const platformLabel = `${platformData.label} · ${locale === "zh" ? "切换平台" : "Switch platform"}`;
+      platform.setAttribute("aria-label", platformLabel);
+      platform.title = platformLabel;
+      platform.setAttribute("aria-expanded", String(platformMenu.isOpen()));
+      platform.setAttribute("aria-haspopup", "dialog");
+      platform.setAttribute("aria-controls", "window-platform-menu");
       const platformIcon = element("img", "window-platform-icon");
       platformIcon.src = chrome.runtime.getURL(platformData.favicon);
       platformIcon.alt = "";
       platform.appendChild(platformIcon);
+      const chevron = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      chevron.setAttribute("viewBox", "0 0 24 24"); chevron.setAttribute("aria-hidden", "true");
+      const chevronPath = document.createElementNS(chevron.namespaceURI, "path");
+      chevronPath.setAttribute("d", "m6 9 6 6 6-6"); chevron.append(chevronPath); platform.append(chevron);
+      platform.addEventListener("click", () => platformMenu.toggle());
+      platform.addEventListener("keydown", event => {
+        if (event.key === "ArrowDown" && !platformMenu.isOpen()) { event.preventDefault(); platformMenu.toggle(); }
+      });
       meta.append(platform);
     }
     const settingsButton = element(
@@ -593,10 +637,13 @@ export function initializeSidepanel() {
 
     const search = element("div", "window-search");
     const isChapterSearch = state.activeTab === "chapters";
-    const isFullSearch = !isChapterSearch && snapshot.conversationIndex;
+    const isFullSearch = !isChapterSearch && canSearchConversation(snapshot);
+    const fullSearchLabel = snapshot.conversationIndex?.coverage === "loaded"
+      ? (locale === "zh" ? "搜索已读消息" : "Search read messages")
+      : (locale === "zh" ? "搜索全部消息" : "Search all messages");
     search.setAttribute("aria-label", isChapterSearch
       ? (locale === "zh" ? "搜索章节" : "Search chapters")
-      : isFullSearch ? (locale === "zh" ? "搜索全部消息" : "Search all messages") : (locale === "zh" ? "搜索 Maker" : "Search Makers"));
+      : isFullSearch ? fullSearchLabel : (locale === "zh" ? "搜索 Maker" : "Search Makers"));
     const input = document.createElement("input");
     input.setAttribute("aria-label", search.getAttribute("aria-label"));
     input.type = "text";
@@ -607,7 +654,7 @@ export function initializeSidepanel() {
     input.lang = locale === "zh" ? "zh-CN" : "en";
     input.placeholder = isChapterSearch
       ? (locale === "zh" ? "搜索章节" : "Search chapters")
-      : isFullSearch ? (locale === "zh" ? "搜索全部消息" : "Search all messages") : (locale === "zh" ? "搜索 Maker" : "Search Makers");
+      : isFullSearch ? fullSearchLabel : (locale === "zh" ? "搜索 Maker" : "Search Makers");
     input.value = state.activeTab === "chapters" ? state.chapterQuery : state.markerQuery;
     search.dataset.query = input.value;
     const clear = element("button", "clear-search");
@@ -734,16 +781,22 @@ export function initializeSidepanel() {
     }
     if (!billingAllowsPlatform(billing.getView(), snapshot.platform) && snapshot.platform && snapshot.platform !== "default") {
       const panel = element("section", "settings-section billing-settings");
-      panel.append(element("h2", "settings-section-title", locale === "zh" ? "选择免费使用的平台" : "Choose your free platforms"));
+      const platform = activePlatform(snapshot);
+      panel.append(element("h2", "settings-section-title", platform
+        ? (locale === "zh" ? `${platform.label} 未在你的免费平台中` : `${platform.label} isn't one of your free platforms`)
+        : (locale === "zh" ? "选择免费使用的平台" : "Choose your free platforms")));
       panel.append(element("p", "billing-copy", locale === "zh" ? "Free 可同时使用两个平台，也可以升级 Pro 使用全部平台。" : "Free includes two platforms at a time. Upgrade to Pro for every platform."));
       const choose = element("button", "settings-diagnostic-primary billing-action", locale === "zh" ? "选择或更换平台" : "Choose or change platforms");
-      choose.type = "button"; choose.addEventListener("click", () => billing.open("platforms"));
-      const upgrade = element("button", "secondary-button billing-action", locale === "zh" ? "了解 Pro" : "Explore Pro");
+      const names = (billing.getView()?.platforms || []).map(key => supportedPlatforms.find(item => item.key === key)?.label).filter(Boolean).join(", ");
+      if (names) panel.append(element("p", "billing-copy", locale === "zh" ? `当前免费平台：${names}` : `Current free platforms: ${names}`));
+      choose.type = "button"; choose.addEventListener("click", () => billing.open(billing.getView()?.platforms?.length === 2 ? "replace-platform" : "platforms", { platform: platform?.key }));
+      const upgrade = element("button", "secondary-button billing-action", locale === "zh" ? "Get Pro · 使用全部平台" : "Get Pro · Use every platform");
       upgrade.type = "button"; upgrade.addEventListener("click", () => billing.open());
       panel.append(choose, upgrade); body.replaceChildren(panel); return body;
     }
     if (state.activeTab === "chapters") {
-      const needsConversation = isLoading || snapshot.loading || snapshot.conversationAwaiting || !snapshot.hasConversation;
+      const needsConversation = isLoading || snapshot.loading || snapshot.conversationLoading || snapshot.conversationStalled
+        || snapshot.conversationAwaiting || !snapshot.hasConversation;
       if (needsConversation) chapterReader.suspend();
       const panel = needsConversation
         ? renderNavigation(snapshot, {
@@ -794,8 +847,8 @@ export function initializeSidepanel() {
         guide.setAttribute("role", "status");
         guide.append(element("h2", "empty-title", locale === "zh" ? "选择一个会话开始读取" : "Pick a chat to start reading"));
         guide.append(element("p", "empty-copy", locale === "zh"
-          ? `展开 ${snapshot.platform === "gemini" ? "Gemini" : "ChatGPT"} 左侧边栏，再选择一个会话。Polaris 会读取其中的全部消息。`
-          : `Open the ${snapshot.platform === "gemini" ? "Gemini" : "ChatGPT"} sidebar and pick a chat. Polaris reads every message in it.`));
+          ? `展开 ${activePlatform(snapshot)?.label || "AI"} 左侧边栏，再选择一个会话。`
+          : `Open the ${activePlatform(snapshot)?.label || "AI"} sidebar and pick a chat.`));
         panel.replaceChildren(guide);
       }
       return panel;
@@ -805,9 +858,10 @@ export function initializeSidepanel() {
     if (snapshot.conversationIndex && snapshot.hasConversation && !snapshot.conversationLoading && !emptyFailure) {
       windowMarkerListReconciler.reset(); markerStreamingIndicator.reset();
       const searching = Boolean(state.markerQuery.trim());
-      if (searching) requestFullSearch();
+      const fullSearch = searching && canSearchConversation(snapshot);
+      if (fullSearch) requestFullSearch();
       const items = !searching ? withRecognitionHints(snapshot.markerItems || [], snapshot)
-        : state.fullSearch.items;
+        : fullSearch ? state.fullSearch.items : filterItems(snapshot.allMarkerItems || snapshot.markerItems || [], state.markerQuery);
       let list = panel.querySelector(':scope > .maker-list');
       if (!list) { list = element("div", "maker-list"); panel.replaceChildren(list); }
       if (virtualMarkerElement !== list) {
@@ -817,10 +871,10 @@ export function initializeSidepanel() {
       virtualMarkers.setItems(items);
       panel.querySelector(':scope > .index-list-status')?.remove();
       const status = element("div", "index-list-status"); status.setAttribute("role", "status");
-      status.textContent = searching
+      status.textContent = fullSearch
         ? state.fullSearch.loading ? (locale === "zh" ? "正在搜索…" : "Searching…") : (locale === "zh" ? `${state.fullSearch.total} 条消息匹配` : `${state.fullSearch.total} matching messages`)
-        : indexStatusText(snapshot.conversationIndex);
-      if (searching && state.fullSearch.hasMore) {
+        : searching ? (locale === "zh" ? `${items.length} 个 Maker 匹配` : `${items.length} matching Makers`) : indexStatusText(snapshot.conversationIndex);
+      if (fullSearch && state.fullSearch.hasMore) {
         const more = element("button", "secondary-button", locale === "zh" ? "加载更多结果" : "More results"); more.type = "button"; more.disabled = state.fullSearch.loading;
         more.addEventListener("click", () => { requestFullSearch(true); render(); }); status.append(more);
       }
@@ -845,11 +899,12 @@ export function initializeSidepanel() {
       const status = loading.querySelector(".conversation-skeleton-status");
       if (status.textContent !== copy) status.textContent = copy;
       const canReload = snapshot.config?.chatgptHistoryMode === "complete" && readFailed
-        && ["chatgpt", "gemini"].includes(snapshot.platform) && isPotentialConversationRoute(snapshot.routeKey);
-      let reload = loading.querySelector(".conversation-read-reload");
-      if (!canReload) reload?.remove();
-      else if (!reload) {
-        reload = element("button", "secondary-button conversation-read-reload", locale === "zh" ? "刷新页面" : "Refresh page");
+        && snapshot.conversationIndex && isPotentialConversationRoute(snapshot.routeKey);
+      let actions = loading.querySelector(".conversation-read-fallback-actions");
+      if (!canReload) actions?.remove();
+      else if (!actions) {
+        actions = element("div", "conversation-read-fallback-actions");
+        const reload = element("button", "secondary-button conversation-read-reload", locale === "zh" ? "刷新页面" : "Refresh page");
         reload.type = "button";
         reload.addEventListener("click", async () => {
           const tabId = state.sourceTabId; const routeKey = state.routeKey;
@@ -865,7 +920,12 @@ export function initializeSidepanel() {
           reload.textContent = locale === "zh" ? "刷新页面" : "Refresh page";
           status.textContent = locale === "zh" ? "刷新失败，请重试。" : "Couldn't refresh the page. Try again.";
         });
-        status.after(reload);
+        const useDefault = element("button", "secondary-button conversation-read-default", locale === "zh" ? "使用默认列表" : "Use default list");
+        useDefault.type = "button";
+        useDefault.title = locale === "zh" ? "关闭长对话读取，仅显示页面上已加载的内容" : "Turn off long-conversation reading and show messages already on the page";
+        useDefault.addEventListener("click", () => send({ command: "update-config", patch: { chatgptHistoryMode: "default" } }));
+        actions.append(reload, useDefault);
+        status.after(actions);
       }
       if (panel.firstElementChild !== loading) panel.replaceChildren(loading);
       return panel;
@@ -877,6 +937,7 @@ export function initializeSidepanel() {
       empty.append(element("h1", "empty-title", t("empty.title")));
       empty.append(element("p", "empty-copy", t("empty.copy")));
       empty.append(createPlatformLinks(document, chrome, { label: t("empty.platforms"), lastUsedLabel: t("empty.lastUsedPlatform") }));
+      empty.append(releaseNotice.tip);
       panel.replaceChildren(empty);
       return panel;
     }
@@ -940,26 +1001,56 @@ export function initializeSidepanel() {
     row.className = `maker-card maker-card-${item.type === "result" ? "ai index-search-result" : item.type}${item.isExpanded ? " is-expanded" : ""}${item.markerKey && item.markerKey === state.snapshot?.activeMarkerKey ? " is-active" : ""}`;
     row.dataset.markerRenderKey = item.key;
     row.setAttribute("aria-label", item.image ? (locale === "zh" ? "图片" : "Image") : item.title || item.preview || "Maker");
-    const signature = JSON.stringify([item.title, item.preview, item.parts, item.count, item.isExpanded, item.remainder, item.image]);
+    row.dataset.groupKey = item.groupKey || "";
+    const signature = JSON.stringify([item.title, item.preview, item.parts, item.count, item.isExpanded, item.remainder, item.image, item.thumbnailSrc, item.imageCount, item.isImageOnly, item.attachments]);
     if (row.dataset.indexSignature === signature) return;
     row.dataset.indexSignature = signature;
     const copy = element("span", "maker-copy");
     if (item.type === "result") {
-      copy.append(element("span", "index-result-meta", `${item.role === "user" ? (locale === "zh" ? "你" : "You") : (state.snapshot?.platform === "gemini" ? "Gemini" : "ChatGPT")} · ${item.count}`));
+      copy.append(element("span", "index-result-meta", `${item.role === "user" ? (locale === "zh" ? "你" : "You") : (activePlatform(state.snapshot)?.label || "AI")} · ${item.count}`));
       const snippet = element("span", "index-result-snippet");
       for (const part of item.parts || []) snippet.append(element(part.match ? "mark" : "span", "", part.text));
       copy.append(snippet);
-    } else copy.append(element("span", "maker-title", item.image ? (locale === "zh" ? "图片" : "Image") : item.title || item.preview || "Maker"));
+    } else {
+      const title = element("span", "maker-title", item.image ? (locale === "zh" ? "图片" : "Image") : item.title || item.preview || "Maker");
+      if (item.type === "user") {
+        const toggle = element("button", "maker-user-toggle"); toggle.type = "button";
+        toggle.setAttribute("aria-expanded", String(Boolean(item.isExpanded)));
+        toggle.append(title); copy.append(toggle);
+      } else copy.append(title);
+    }
+    if (item.attachments?.length) {
+      const labels = element("span", "maker-attachments");
+      for (const file of item.attachments) {
+        const type = /^[a-z0-9+-]{1,12}$/i.test(file.mimeType || "") ? file.mimeType.toUpperCase() : "";
+        const label = element("button", "chapter-image-label maker-attachment", type && !file.name.toUpperCase().endsWith(`.${type}`) ? `${file.name} · ${type}` : file.name);
+        label.type = "button";
+        label.setAttribute("aria-label", `${locale === "zh" ? "定位附件" : "Locate attachment"}: ${file.name}`);
+        label.disabled = !file.attachmentKey;
+        label.addEventListener("click", (event) => {
+          event.stopPropagation();
+          if (file.attachmentKey) void locateIndexed(`index:${file.attachmentKey}`).catch(showIndexNotice);
+        });
+        labels.append(label);
+      }
+      copy.append(labels);
+    }
     row.replaceChildren(copy);
+    syncWindowMarkerThumbnail(row, item);
+    if (item.type === "user" && item.imageCount > 1) {
+      copy.append(element("span", "index-result-meta", locale === "zh" ? `${item.imageCount} 张图片` : `${item.imageCount} images`));
+    }
     if (item.type === "user" || item.type === "fold") {
-      const chevron = element("span", "maker-chevron"); chevron.setAttribute("aria-hidden", "true"); row.append(chevron);
-      row.setAttribute("aria-expanded", String(Boolean(item.isExpanded)));
+      const chevron = element("span", "maker-chevron"); chevron.setAttribute("aria-hidden", "true");
+      if (item.type === "user") copy.querySelector(".maker-user-toggle").append(chevron);
+      else { row.append(chevron); row.setAttribute("aria-expanded", String(Boolean(item.isExpanded))); }
     }
   }
 
   function renderIndexedRow(item) {
-    const row = element("button", "maker-card");
-    row.type = "button";
+    const row = element(item.type === "user" ? "div" : "button", "maker-card");
+    if (item.type === "user") row.setAttribute("role", "group");
+    else row.type = "button";
     row.addEventListener("click", () => {
       const current = row.indexItem;
       if (current.type === "recognition") openContentRecognition();
@@ -972,9 +1063,17 @@ export function initializeSidepanel() {
     return row;
   }
 
+  function canSearchConversation(snapshot) {
+    return Boolean(snapshot?.conversationIndex && billingAllowsIndex(billing.getView())
+      && (snapshot.conversationIndex.source !== "dom" || snapshot.config?.chatgptHistoryMode === "complete"));
+  }
+
   function indexStatusText(index) {
     if (!index) return locale === "zh" ? "仅显示页面上已加载的内容" : "Showing messages already loaded on the page";
     const count = Number(index.count) || 0;
+    if (index.coverage === "loaded") return locale === "zh"
+      ? `已索引 ${count} 条已加载消息${index.refreshing ? "，正在读取更早的对话…" : "，继续加载页面可补充历史"}`
+      : `${count} loaded messages indexed${index.refreshing ? ". Reading earlier messages…" : ". Load more on the page to add history."}`;
     if (index.phase === "complete") return locale === "zh" ? `已读取全部 ${count} 条消息` : `All ${count} messages have been read`;
     if (["partial", "error"].includes(index.phase)) return locale === "zh" ? `已读取 ${count} 条消息，部分历史暂时无法读取` : `${count} messages are ready. Some earlier messages could not be read.`;
     return locale === "zh" ? `已读取 ${count} 条消息，正在读取更早的对话…` : `${count} messages are ready. Reading earlier messages…`;
@@ -991,7 +1090,7 @@ export function initializeSidepanel() {
     const legend = element("legend", "sr-only", locale === "zh" ? "读取范围" : "Messages to read"); cards.append(legend);
     for (const [mode, title, description] of [
       ["default", locale === "zh" ? "跟随页面" : "Follow the page", locale === "zh" ? "只显示页面上已加载的内容。向上滚动页面可查看更多。" : "Show the messages already on the page. Scroll up on the page to see more."],
-      ["complete", locale === "zh" ? "读取完整对话" : "Read the whole conversation", locale === "zh" ? "自动读取 ChatGPT 和 Gemini 会话的全部历史消息，生成完整目录并支持全文搜索。此设置适用于后续会话；开启浏览器同步后，也会在其他已登录浏览器生效。" : "Automatically read full ChatGPT and Gemini conversations for outline and search. Applies to future chats and, with browser sync enabled, your other signed-in browsers."]
+      ["complete", locale === "zh" ? "读取完整对话" : "Read the whole conversation", locale === "zh" ? "读取支持平台可获取的历史消息，统一生成目录并支持全文搜索。页面分批加载时保留已读内容；无法确认全部历史时显示已读范围。此设置适用于后续会话；开启浏览器同步后，也会在其他已登录浏览器生效。" : "Read available history across supported platforms for outline and full-text search. Keep indexed messages as pages load, and show the read scope when full history cannot be confirmed. Applies to future chats and, with browser sync enabled, your other signed-in browsers."]
     ]) {
       const card = element("label", "index-mode-card");
       const input = document.createElement("input"); input.type = "radio"; input.name = "chatgpt-history-mode"; input.value = mode;
@@ -1009,8 +1108,8 @@ export function initializeSidepanel() {
     const retry = settingsCommandButton(locale === "zh" ? "重新读取" : "Read again", "retry-conversation-index"); retry.dataset.indexRetry = "true";
     section.append(retry);
     section.append(element("p", "index-current-status", locale === "zh"
-      ? "完整对话会在本机缓存，最多占用 100 MiB，不会同步。关闭页面或切换读取模式不会删除缓存，可通过下方按钮清除。重新打开时仍会校验最新内容并等待正文准备好。"
-      : "Complete conversations are cached locally, up to 100 MiB, without sync. Closing the page or changing the reading mode does not delete the cache; use the button below to clear it. Reopening checks current content and waits for the conversation to be ready."));
+      ? "ChatGPT 和 Gemini 的完整对话会在本机缓存，最多占用 100 MiB，不会同步。其他平台的已读内容在当前页面内保留。关闭页面或切换读取模式不会删除缓存，可通过下方按钮清除。重新打开时仍会校验最新内容并等待正文准备好。"
+      : "Complete ChatGPT and Gemini conversations are cached locally, up to 100 MiB, without sync. Other platforms keep read content in the current page. Closing the page or changing the reading mode does not delete the local cache; use the button below to clear it. Reopening checks current content and waits for the conversation to be ready."));
     const clearCache = element("button", "secondary-button", locale === "zh" ? "清除会话缓存" : "Clear conversation cache");
     clearCache.type = "button"; clearCache.dataset.settingsFocus = "clear-conversation-cache";
     const cacheStatus = element("p", "index-cache-status"); cacheStatus.setAttribute("role", "status");
@@ -1032,8 +1131,7 @@ export function initializeSidepanel() {
     const section = panel.matches(".index-settings") ? panel : panel.querySelector(".index-settings");
     if (!section) return;
     section.querySelector(".index-current-title").textContent = snapshot.conversationTitle || (locale === "zh" ? "当前对话" : "Current chat");
-    section.querySelector(".index-current-status").textContent = !["chatgpt", "gemini"].includes(snapshot.platform)
-      ? (locale === "zh" ? "读取完整对话目前支持 ChatGPT 和 Gemini" : "Reading the whole conversation is currently available for ChatGPT and Gemini") : indexStatusText(index);
+    section.querySelector(".index-current-status").textContent = indexStatusText(index);
     section.querySelectorAll('input[type="radio"]').forEach((input) => {
       input.checked = input.value === (billingAllowsIndex(billing.getView()) ? snapshot.config?.chatgptHistoryMode || "default" : "default");
       input.closest("label").classList.toggle("is-selected", input.checked);
@@ -1041,9 +1139,10 @@ export function initializeSidepanel() {
     const progress = section.querySelector("progress");
     progress.hidden = !index;
     if (index?.total != null) { progress.max = index.total || 1; progress.value = index.total || 1; }
+    else if (index?.coverage === "loaded" && !index.refreshing) progress.hidden = true;
     else progress.removeAttribute("value");
     const retry = section.querySelector("[data-index-retry]");
-    retry.hidden = !index || !["partial", "error"].includes(index.phase);
+    retry.hidden = !index || !["partial", "error"].includes(index.phase) && !index.historyError;
     retry.disabled = Date.now() < (index?.retryAt || 0);
   }
 
@@ -1602,8 +1701,11 @@ export function initializeSidepanel() {
     }
   });
 
-  const onboarding = createSidepanelOnboarding({ document, chrome, locale, t, platforms: supportedPlatforms, onAutomaticDismiss: () => billing.afterOnboarding() });
-  createSidepanelReleaseNotice({ document, chrome, locale, t, autoShowGate: onboarding.ready.then((shown) => !shown) });
+  const onboarding = createSidepanelOnboarding({ document, chrome, locale, t, platforms: supportedPlatforms,
+    platformChoice: { ready: billing.ready, getView: () => billing.getView(), getCurrentPlatform: () => activePlatform(state.snapshot)?.key,
+      save: platforms => billing.selectPlatforms(platforms), onUpgrade: () => billing.open() }
+  });
+  const releaseNotice = createSidepanelReleaseNotice({ document, chrome, locale, t, autoShowGate: onboarding.ready.then((shown) => !shown) });
   void onboarding.ready.then((shown) => { if (!shown) void billing.initialPrompt(); });
   render();
   startThemeObserver();

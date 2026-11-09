@@ -1,3 +1,5 @@
+import { publicFilePart } from './chatgpt-image-data.js';
+
 // Gemini's public-share and signed-in RPCs use the same turn representation.
 export function geminiRoute(value) {
   try {
@@ -47,7 +49,8 @@ function userParts(user) {
       if (seen.has(signature)) return;
       seen.add(signature);
       const image = value[11].startsWith('image/') ? safeImage(value[3], value[2], value[15]) : null;
-      parts.push(image || `[Attachment: ${value[2]}]`); return;
+      parts.push(image || publicFilePart({ content_type: 'file_asset_pointer', file_name: value[2], mime_type: value[11], url: value[3] })
+        || `[Attachment: ${value[2]}]`); return;
     }
     for (const child of value) visit(child, depth + 1);
   }

@@ -6,7 +6,7 @@ import { webcrypto } from "node:crypto";
 import { JSDOM } from "jsdom";
 import { createChatGptNativeNavigation } from "../public/src/chatgpt-native-navigation.js";
 import { createChatGptIndexController } from "../src/chatgpt-index-controller.js";
-import { createChatGptConversationCover } from "../src/chatgpt-conversation-cover.js";
+import { conversationReadingState } from "../src/conversation-reading-state.js";
 import { publicImageMessage } from "../public/src/chatgpt-image-data.js";
 import { imagePage, imageMessage, imagePart, sharedData, sharedHtml, sharedImagePayload, sharedReloadData } from "./fixtures/chatgpt-images.js";
 import { readSharedConversationHtml, loadSharedConversation } from "../public/src/chatgpt-shared-conversation.js";
@@ -65,15 +65,14 @@ test("shared chats read the full server snapshot without loading native history 
   } finally { s.finish(); }
 });
 
-test("the browser's reload-only route reaches the shared index and releases the loading cover", async () => {
+test("the browser's reload-only route reaches the shared index and releases the sidepanel loading state", async () => {
   const s = await boot((url) => {
     if (url.startsWith("/share/share-one.data?")) return new Response(sharedReloadData, { status: 202 });
     if (url === "/backend-api/share/share-one") return Response.json(sharedImagePayload());
     throw new Error(`Unexpected request: ${url}`);
   }, () => ({ invalidate() {}, prepare() { throw new Error("Shared chats cannot use private history"); } }));
   s.win.history.replaceState({}, "", "/share/share-one");
-  const cover = createChatGptConversationCover({ window: s.win });
-  const controller = createChatGptIndexController({ window: s.win, bridgeUrl: "https://example.invalid/bridge.js", onChange() { cover.update(controller.snapshot()); } });
+  const controller = createChatGptIndexController({ window: s.win, bridgeUrl: "https://example.invalid/bridge.js", onChange() {} });
   s.win.postMessage = (data) => {
     if (data.type === "polaris-conversation-index-result") s.events.push(data);
     queueMicrotask(() => s.win.dispatchEvent(new s.win.MessageEvent("message", { source: s.win, origin: s.win.location.origin, data })));
@@ -82,12 +81,12 @@ test("the browser's reload-only route reaches the shared index and releases the 
     controller.configure(true); s.win.document.querySelector('script[src]').dispatchEvent(new s.win.Event("load"));
     await settled(s); await new Promise((resolve) => setTimeout(resolve, 10));
     assert.equal(controller.snapshot().phase, "complete"); assert.equal(controller.snapshot().count, 2);
-    assert.equal(controller.snapshot().native.phase, "ready"); assert.equal(cover.isShowing(), false);
+    assert.equal(controller.snapshot().native.phase, "ready"); assert.equal(conversationReadingState(controller.snapshot()).loading, false);
     assert.equal(controller.outline().items.filter((item) => item.image).length, 1);
     assert.equal(s.calls.length, 3);
     assert.equal(s.calls.some((call) => /^\/backend-api\/conversations?\//.test(call.url)), false);
     assert.equal(s.win.document.querySelector("img"), null);
-  } finally { controller.dispose(); cover.dispose(); await Promise.resolve(); s.finish(); }
+  } finally { controller.dispose(); await Promise.resolve(); s.finish(); }
 });
 
 test("a late authenticated share response cannot replace a different share's current branch", async () => {
@@ -160,9 +159,7 @@ test("an unreadable share refetch falls back to the matching server snapshot alr
   const s = await boot(() => new Response("<html><body>Client application shell</body></html>"));
   s.win.history.replaceState({}, "", "/share/share-one");
   s.win.document.body.innerHTML = sharedHtml(sharedImagePayload());
-  const cover = createChatGptConversationCover({ window: s.win });
   const controller = createChatGptIndexController({ window: s.win, bridgeUrl: "https://example.invalid/bridge.js", onChange() {
-    cover.update(controller.snapshot());
   } });
   s.win.postMessage = (data) => {
     if (data.type === "polaris-conversation-index-result") s.events.push(data);
@@ -176,10 +173,10 @@ test("an unreadable share refetch falls back to the matching server snapshot alr
     assert.equal(controller.snapshot().native.phase, "ready");
     assert.equal(controller.snapshot().count, 2);
     assert.equal(controller.outline().items.filter((item) => item.image).length, 1);
-    assert.equal(cover.isShowing(), false);
+    assert.equal(conversationReadingState(controller.snapshot()).loading, false);
     assert.equal(s.win.document.querySelector('[data-message-author-role], img'), null, "server reading must not require mounted replies or download images");
     assert.equal(s.calls.length, 2); assert.equal(s.calls[1].url, "/share/share-one");
-  } finally { controller.dispose(); cover.dispose(); await Promise.resolve(); s.finish(); }
+  } finally { controller.dispose(); await Promise.resolve(); s.finish(); }
 });
 
 test("a share fallback never reads a server snapshot belonging to a different route", async () => {
@@ -210,19 +207,17 @@ test("visible image metadata crosses the bridge while obsolete download commands
   } finally { s.finish(); }
 });
 
-test("late native conversation reads do not reopen the completed conversation cover", async () => {
+test("late native conversation reads do not reopen completed reading progress", async () => {
   let preparations = 0;
   let payload = page(["a", "b"], false, false);
   const s = await boot(() => Response.json(payload), () => ({
     invalidate() {}, async prepare() { preparations++; return { ok: true, payload }; }
   }));
   s.win.document.body.innerHTML = "<main></main>";
-  const cover = createChatGptConversationCover({ window: s.win });
   let reopened = 0; let initiallyReady = false; let wasShowing = false;
   const controller = createChatGptIndexController({ window: s.win, bridgeUrl: "https://example.invalid/bridge.js", onChange() {
-    cover.update(controller.snapshot());
-    if (initiallyReady && cover.isShowing() && !wasShowing) reopened++;
-    wasShowing = cover.isShowing();
+    if (initiallyReady && conversationReadingState(controller.snapshot()).loading && !wasShowing) reopened++;
+    wasShowing = conversationReadingState(controller.snapshot()).loading;
   } });
   s.win.postMessage = (data) => {
     if (data.type === "polaris-conversation-index-result") s.events.push(data);
@@ -233,7 +228,7 @@ test("late native conversation reads do not reopen the completed conversation co
     s.win.document.querySelector("script").dispatchEvent(new s.win.Event("load"));
     await settled(s); await new Promise((resolve) => setTimeout(resolve, 10));
     assert.equal(controller.snapshot().phase, "complete");
-    assert.equal(cover.isShowing(), false);
+    assert.equal(conversationReadingState(controller.snapshot()).loading, false);
     initiallyReady = true;
     for (let read = 0; read < 3; read++) {
       await s.win.fetch("/backend-api/conversations/one?num_turns=50");
@@ -254,7 +249,7 @@ test("late native conversation reads do not reopen the completed conversation co
     assert.equal((await controller.search("replacement")).total, 0);
     assert.equal(reopened, 0, "changed complete snapshots must commit without reopening the cover");
     assert.equal(preparations, 1);
-  } finally { controller.dispose(); cover.dispose(); await Promise.resolve(); s.finish(); }
+  } finally { controller.dispose(); await Promise.resolve(); s.finish(); }
 });
 
 test("returning to a completed conversation reuses the full branch without repeating native preparation", async () => {

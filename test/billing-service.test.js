@@ -77,3 +77,9 @@ test('checkout crossing the offer deadline requires confirmation of the refreshe
  assert.equal((await f.service.getView()).price.amount,1999);
  await f.service.checkout();assert.equal(f.checkouts(),1);
 });
+
+test('platforms chosen during trial apply at expiry without deleting local data or extending the trial',async()=>{
+ const f=fixture();const trial=await f.service.getView();await f.service.selectPlatforms(['kimi','gemini']);
+ const selected=await f.service.getView();assert.equal(selected.fullAccess,true);assert.equal(selected.trialEndsAt,trial.trialEndsAt);
+ f.advance(8*86400000);const free=await f.service.getView();assert.equal(free.tier,'free');assert.equal(free.needsPlatformChoice,false);assert.deepEqual(free.platforms,['kimi','gemini']);assert.equal(free.trialEndsAt,trial.trialEndsAt);
+});

@@ -6,6 +6,32 @@ const one=(env,sql,...args)=>stmt(env,sql,...args).first();
 function configured(env){if(!env.DB||!env.LICENSE_HASH_SECRET||env.LICENSE_HASH_SECRET.length<32||!env.LICENSE_DELIVERY_ENCRYPTION_KEY||env.LICENSE_DELIVERY_ENCRYPTION_KEY.length<32)throw new ApiError(503,'test_environment_not_configured');}
 function text(value,max=256){if(typeof value!=='string'||!value.trim()||value.length>max)throw new ApiError(400,'invalid_request');return value.trim();}
 const installationHash=(env,id)=>hash(env.LICENSE_HASH_SECRET,`installation:${text(id)}`);
+const WEB_AMOUNT=1290;
+// Website purchases have no installation; their intent row uses a per-purchase sentinel hash.
+const webPurchaseHash=(env,id)=>hash(env.LICENSE_HASH_SECRET,`web-purchase:${id}`);
+function webReturnOrigin(req){
+ const origin=req.headers.get('Origin');if(!origin)throw new ApiError(403,'origin_required');
+ const url=new URL(origin),local=url.protocol==='http:'&&['localhost','127.0.0.1'].includes(url.hostname);
+ if(url.protocol!=='https:'&&!local)throw new ApiError(403,'origin_not_allowed');return url.origin;
+}
+async function createCheckout(env,{amount,priceId,installationHash,returnBase,channel}){
+ if(!priceId)throw new ApiError(503,'prices_not_configured');
+ const price=await stripe(env,`prices/${encodeURIComponent(priceId)}`);
+ if(price.active!==true||price.currency!=='usd'||price.unit_amount!==amount||price.type!=='one_time')throw new ApiError(503,'price_configuration_mismatch');
+ const id=crypto.randomUUID(),claim=randomToken(),hashValue=installationHash??await webPurchaseHash(env,id);
+ await stmt(env,'INSERT INTO polaris_billing_purchase_intents(id,installation_hash,claim_hash,claim_expires_at,amount,created_at) VALUES(?,?,?,?,?,?)',id,hashValue,await hash(env.LICENSE_HASH_SECRET,`claim:${claim}`),Date.now()+DAY,amount,Date.now()).run();
+ const back=(result)=>{const url=new URL('/checkout-return/',returnBase);url.searchParams.set('result',result);if(channel==='web')url.searchParams.set('purchase',id);return url.href};
+ const session=await stripe(env,'checkout/sessions',{method:'POST',idempotencyKey:id,body:{mode:'payment','line_items[0][price]':priceId,'line_items[0][quantity]':'1','metadata[purchaseId]':id,'metadata[channel]':channel,success_url:back('success'),cancel_url:back('cancel')}});
+ if(!session.id?.startsWith('cs_test_')||new URL(session.url).origin!=='https://checkout.stripe.com')throw new ApiError(502,'invalid_test_checkout');
+ await stmt(env,'UPDATE polaris_billing_purchase_intents SET session_id=? WHERE id=?',session.id,id).run();
+ return {checkoutUrl:session.url,purchaseId:id,claimToken:claim,amount};
+}
+function licenseEmail(env,key){
+ const support=env.SUPPORT_EMAIL||env.EMAIL_FROM_ADDRESS;
+ const text=`Polaris Pro: lifetime access\n\nYour license key:\n${key}\n\nTo activate, open Polaris, go to Settings, choose Redeem license and paste the key. Use the same key on any of your devices.\n\nSupport: ${support}`;
+ const html=`<p>Polaris Pro: lifetime access</p><p>Your license key:</p><p style="font-family:ui-monospace,Menlo,monospace;font-size:15px;padding:12px 14px;background:#f4f3f0;border-radius:8px">${key}</p><p>To activate, open Polaris, go to <strong>Settings</strong>, choose <strong>Redeem license</strong> and paste the key. Use the same key on any of your devices.</p><p>Support: ${support}</p>`;
+ return {subject:'Your Polaris Pro license',text,html};
+}
 const bearer=req=>(req.headers.get('authorization')||'').replace(/^Bearer /,'');
 async function readText(req, limit) {
  if(Number(req.headers.get('Content-Length'))>limit)throw new ApiError(413,'request_too_large');
@@ -84,8 +110,8 @@ async function webhook(env,req){
 }
 async function route(req,env){
  const url=new URL(req.url),path=url.pathname;
- if(path==='/health'&&req.method==='GET')return json({ok:true,env:'test',version:'0.1.2'});
- const routes=new Set(['/api/trial/start','/api/plans','/api/checkout/session','/api/stripe/webhook','/api/licenses/claim','/api/licenses/redeem','/api/licenses/validate','/api/licenses/recover','/api/licenses/deactivate']);
+ if(path==='/health'&&req.method==='GET')return json({ok:true,env:'test',version:'0.1.3'});
+ const routes=new Set(['/api/trial/start','/api/plans','/api/checkout/session','/api/checkout/web-session','/api/web-purchases/claim','/api/stripe/webhook','/api/licenses/claim','/api/licenses/redeem','/api/licenses/validate','/api/licenses/recover','/api/licenses/deactivate']);
  if(!routes.has(path)&&!/^\/api\/purchases\/[^/]+\/status$/.test(path))throw new ApiError(404,'not_found');
  configured(env);
  if(path==='/api/stripe/webhook' &&req.method==='POST')return webhook(env,req);
@@ -103,17 +129,24 @@ async function route(req,env){
   const data=await body(req);if(data.planId!==PLAN)throw new ApiError(400,'invalid_plan');
   const row=await installation(env,data.installationId,req.headers.get('X-Installation-Token'));
   const promo=row.trial_ends_at>Date.now(),priceId=promo?env.STRIPE_PRICE_PRO_PROMO:env.STRIPE_PRICE_PRO_DEFAULT;
-  if(!priceId)throw new ApiError(503,'prices_not_configured');
   const amount=promo?1290:1999;
   if(data.expectedAmount!==undefined&&data.expectedAmount!==amount)throw new ApiError(409,'price_changed');
-  const price=await stripe(env,`prices/${encodeURIComponent(priceId)}`);
-  if(price.active!==true||price.currency!=='usd'||price.unit_amount!==amount||price.type!=='one_time')throw new ApiError(503,'price_configuration_mismatch');
   const publicUrl=new URL(env.PUBLIC_APP_URL);if(publicUrl.protocol!=='https:'&&!['localhost','127.0.0.1'].includes(publicUrl.hostname))throw new ApiError(503,'invalid_return_origin');
-  const id=crypto.randomUUID(),claim=randomToken();
-  await stmt(env,'INSERT INTO polaris_billing_purchase_intents(id,installation_hash,claim_hash,claim_expires_at,amount,created_at) VALUES(?,?,?,?,?,?)',id,row.id_hash,await hash(env.LICENSE_HASH_SECRET,`claim:${claim}`),Date.now()+DAY,amount,Date.now()).run();
-  const session=await stripe(env,'checkout/sessions',{method:'POST',idempotencyKey:id,body:{mode:'payment','line_items[0][price]':priceId,'line_items[0][quantity]':'1','metadata[purchaseId]':id,success_url:new URL('/checkout-return?result=success',publicUrl).href,cancel_url:new URL('/checkout-return?result=cancel',publicUrl).href}});
-  if(!session.id?.startsWith('cs_test_')||new URL(session.url).origin!=='https://checkout.stripe.com')throw new ApiError(502,'invalid_test_checkout');
-  await stmt(env,'UPDATE polaris_billing_purchase_intents SET session_id=? WHERE id=?',session.id,id).run();return json({checkoutUrl:session.url,purchaseId:id,claimToken:claim});
+  const {checkoutUrl,purchaseId,claimToken}=await createCheckout(env,{amount,priceId,installationHash:row.id_hash,returnBase:publicUrl,channel:'extension'});
+  return json({checkoutUrl,purchaseId,claimToken});
+ }
+ if(path==='/api/checkout/web-session'&&req.method==='POST'){
+  // The website sells the same one-time welcome price without an installation identity.
+  const returnBase=webReturnOrigin(req),data=await body(req);if(data.planId!==PLAN)throw new ApiError(400,'invalid_plan');
+  if(data.expectedAmount!==undefined&&data.expectedAmount!==WEB_AMOUNT)throw new ApiError(409,'price_changed');
+  return json(await createCheckout(env,{amount:WEB_AMOUNT,priceId:env.STRIPE_PRICE_PRO_PROMO,installationHash:null,returnBase,channel:'web'}));
+ }
+ if(path==='/api/web-purchases/claim'&&req.method==='POST'){
+  const data=await body(req),purchase=await one(env,'SELECT * FROM polaris_billing_purchase_intents WHERE id=?',text(data.purchaseId));
+  if(!purchase||purchase.claim_expires_at<Date.now()||purchase.installation_hash!==await webPurchaseHash(env,purchase.id)||!equal(purchase.claim_hash,await hash(env.LICENSE_HASH_SECRET,`claim:${text(data.claimToken)}`)))throw new ApiError(401,'invalid_claim');
+  const license=await one(env,'SELECT * FROM polaris_billing_licenses WHERE purchase_id=?',purchase.id);
+  if(purchase.status==='paid'&&license?.status==='active'){const {key}=await unseal(env.LICENSE_DELIVERY_ENCRYPTION_KEY,license.delivery_cipher);return json({status:'paid',licenseKey:key})}
+  return json({status:purchase.status==='revoked'?'failed':purchase.status});
  }
  const match=path.match(/^\/api\/purchases\/([^/]+)\/status$/);
  if(match&&req.method==='GET'){
@@ -157,14 +190,19 @@ export default {
  },
  async scheduled(_controller,env){
   configured(env);await stmt(env,'DELETE FROM polaris_billing_rate_limits WHERE expires_at<?',Date.now()).run();
-  if(!env.EMAIL_PROVIDER_API_KEY||!env.EMAIL_FROM_ADDRESS)return;
+  // Prefer the Cloudflare Email Sending binding; Resend remains an optional fallback.
+  if(!env.EMAIL_FROM_ADDRESS||(!env.EMAIL&&!env.EMAIL_PROVIDER_API_KEY))return;
   const jobs=await stmt(env,"SELECT e.*,l.delivery_cipher,l.status AS license_status FROM polaris_billing_email_deliveries e JOIN polaris_billing_licenses l ON l.id=e.license_id WHERE e.status='pending' AND e.next_attempt_at<=? LIMIT 20",Date.now()).all();
   for(const job of jobs.results){
    if(job.license_status!=='active'){await stmt(env,"UPDATE polaris_billing_email_deliveries SET status='canceled' WHERE id=?",job.id).run();continue;}
    try{
     const payload=await unseal(env.LICENSE_DELIVERY_ENCRYPTION_KEY,job.delivery_cipher);
-    const response=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:`Bearer ${env.EMAIL_PROVIDER_API_KEY}`,'Content-Type':'application/json','Idempotency-Key':job.id},body:JSON.stringify({from:env.EMAIL_FROM_ADDRESS,to:[payload.email],subject:'Your Polaris Pro License',text:`Polaris Pro — lifetime access\n\nYour license: ${payload.key}\n\nOpen Polaris Settings → Redeem License on your devices.\nSupport: ${env.SUPPORT_EMAIL||env.EMAIL_FROM_ADDRESS}`})});
-    if(!response.ok)throw new Error('email_unavailable');
+    const mail=licenseEmail(env,payload.key);
+    if(env.EMAIL)await env.EMAIL.send({to:payload.email,from:{email:env.EMAIL_FROM_ADDRESS,name:'Polaris'},...(env.SUPPORT_EMAIL?{replyTo:env.SUPPORT_EMAIL}:{}),subject:mail.subject,text:mail.text,html:mail.html});
+    else{
+     const response=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:`Bearer ${env.EMAIL_PROVIDER_API_KEY}`,'Content-Type':'application/json','Idempotency-Key':job.id},body:JSON.stringify({from:env.EMAIL_FROM_ADDRESS,to:[payload.email],subject:mail.subject,text:mail.text})});
+     if(!response.ok)throw new Error('email_unavailable');
+    }
     await stmt(env,"UPDATE polaris_billing_email_deliveries SET status='sent',attempt_count=attempt_count+1 WHERE id=?",job.id).run();
    }catch{await stmt(env,'UPDATE polaris_billing_email_deliveries SET attempt_count=attempt_count+1,next_attempt_at=? WHERE id=?',Date.now()+Math.min(DAY,60000*2**Math.min(job.attempt_count,10)),job.id).run()}
   }

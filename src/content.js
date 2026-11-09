@@ -2,8 +2,10 @@ import { billingAllowsIndex, billingAllowsPlatform } from "./billing-access.js";
 import { createContentLifecycle } from "./content-lifecycle.js";
 import { createGeminiIndexController } from "./gemini-index-controller.js";
 import { createChatGptIndexController } from "./chatgpt-index-controller.js";
+import { createDOMIndexController } from "./dom-index-controller.js";
+import { createDOMConversationSource } from "./dom-conversation-source.js";
 import { createConversationCacheClient } from "./conversation-cache.js";
-import { createChatGptConversationCover } from "./chatgpt-conversation-cover.js";
+import { conversationReadingState } from "./conversation-reading-state.js";
 import { createLocateFlash } from "./locate-flash.js";
 import { chapterTreeText } from "./sidepanel-chapter-state.js";
 import { collectDOMConversation } from "./conversation-export.js";
@@ -151,7 +153,7 @@ export function initializeContent() {
     'button[aria-label*="选择模型" i]'
   ].join(", ");
   const CLAUDE_ASSISTANT_MESSAGE_SELECTOR = 'div[data-cds="Prose"].prose';
-  const CLAUDE_USER_MESSAGE_SELECTOR = '[data-cds="UserMessage"] [data-testid="user-message"]';
+  const CLAUDE_USER_MESSAGE_SELECTOR = '[data-cds="UserMessage"]';
   const GEMINI_ASSISTANT_MESSAGE_SELECTOR = "model-response message-content";
   const GEMINI_USER_MESSAGE_SELECTOR = "user-query";
   const GEMINI_USER_MESSAGE_FALLBACK_SELECTOR = "user-query-content, .user-query-content, .user-query-container";
@@ -521,29 +523,43 @@ export function initializeContent() {
       }
     });
   };
-  const conversationCover = createChatGptConversationCover({ window, locale,
-    logoUrl: chrome.runtime.getURL("icons/gpt-voyager-icon-96.png"),
-    onRetry: () => conversationIndex.retry(),
-    onDismiss() { syncConversationCover(); publishWindowSnapshot(); }
-  });
-  const conversationIndex = (isGeminiPage() ? createGeminiIndexController : createChatGptIndexController)({
+  let dismissedReadingGeneration = null;
+  const usesAPIConversationIndex = isChatGPTPage() || isGeminiPage();
+  const readDOMMessages = createDOMConversationSource({ window, platform: currentPlatformKey(), readContainers() {
+    if (state.awaitingRouteDom || !isSupportedRoute()) return {};
+    if (isDeepSeekPage()) return getDeepSeekConversation();
+    if (isManusPage()) return getManusConversation();
+    const extraHeadings = [];
+    collectYuanbaoVideoCardHeadings(new Set(), extraHeadings);
+    collectQianwenVideoListHeadings(new Set(), extraHeadings);
+    return { assistantContainers: getAssistantContainers(), userContainers: getUserContainers(), extraHeadings };
+  } });
+  const conversationIndex = (isGeminiPage() ? createGeminiIndexController : isChatGPTPage() ? createChatGptIndexController : createDOMIndexController)({
     window,
+    platform: currentPlatformKey(),
+    readMessages: readDOMMessages,
     imagePlaceholder: locale === "zh" ? "[图片]" : "[Image]",
     cache: createConversationCacheClient(chrome.runtime),
     onDiagnostics(timings) { recordDiagnosticEvent("conversation_read", timings); },
     bridgeUrl: chrome.runtime.getURL(isGeminiPage() ? "src/gemini-index-bridge.js" : "src/chatgpt-index-bridge.js"),
     onChange() {
-      syncConversationCover();
+      syncConversationReading();
       chapterContentRevision += 1;
       publishWindowSnapshot();
     }
   });
   let billingView = null;
-  const conversationReading = () => conversationCover.isShowing() || conversationCover.isWaiting();
-  function syncConversationCover() {
-    const theme = document.getElementById(ROOT_ID)?.dataset.pageTheme || "light";
-    conversationCover.update(conversationIndex.snapshot(), theme);
-    // Keep incomplete index results gated while the inline status reports progress.
+  function configureConversationIndex() {
+    const readFull = billingAllowsIndex(billingView) && state.config.chatgptHistoryMode === "complete";
+    conversationIndex.configure(isTopLevelFrame() && billingAllowsPlatform(billingView, currentPlatformKey())
+      && (usesAPIConversationIndex ? readFull : currentPlatformKey() !== "default"), { readFull });
+  }
+  const conversationReading = () => {
+    const snapshot = conversationIndex.snapshot();
+    return snapshot?.generation !== dismissedReadingGeneration && conversationReadingState(snapshot).loading;
+  };
+  function syncConversationReading() {
+    // Keep incomplete index results gated while the sidepanel reports progress.
     document.getElementById(ROOT_ID)?.toggleAttribute("data-conversation-loading", conversationReading());
   }
 
@@ -723,7 +739,6 @@ export function initializeContent() {
 
     state.isExtensionContextInvalidated = true;
     conversationIndex.dispose();
-    conversationCover.dispose();
     locateFlash.cancel();
     lifecycle.dispose();
     delete globalThis[CONTENT_SCRIPT_INSTANCE_KEY];
@@ -778,7 +793,7 @@ export function initializeContent() {
     if (settings instanceof HTMLElement && settings.dataset.pageTheme !== theme) {
       settings.dataset.pageTheme = theme;
     }
-    syncConversationCover();
+    syncConversationReading();
   }
 
   function backgroundColorAlpha(value) {
@@ -2767,8 +2782,7 @@ export function initializeContent() {
     if (treeResult) treeResult.push(...collectSidepanelChapters(snapshot.assistantContainers, buildWindowChapterOutline(boundHeadings), {
       baseUrl: location.href,
       fullTextTitle: t("chapters.fullText"),
-      userMessages: isChatGPTPage() || isDoubaoPage() || isDeepSeekPage() || isQianwenPage() || isGeminiPage() || isGrokPage() || isXiaohongshuPage()
-        ? snapshot.markerGroups.flatMap((group) => group.user ? [group.user] : []) : [],
+      userMessages: snapshot.markerGroups.flatMap((group) => group.user ? [group.user] : []),
       assistantToUser: snapshot.assistantToUser
     }));
     if (!boundHeadings.length) {
@@ -3507,7 +3521,7 @@ export function initializeContent() {
     }
 
     if (isKimiPage()) {
-      return withHashedMarkdownSelectors([KIMI_ASSISTANT_MESSAGE_SELECTOR, ASSISTANT_MESSAGE_SELECTOR]);
+      return withHashedMarkdownSelectors([".segment-assistant .markdown", KIMI_ASSISTANT_MESSAGE_SELECTOR, ASSISTANT_MESSAGE_SELECTOR]);
     }
 
     if (isQianwenPage()) {
@@ -3615,6 +3629,7 @@ export function initializeContent() {
         .filter((node) => node instanceof HTMLElement
           && !isInsideNavigationRoot(node)
           && !isUserInputContext(node)
+          && (!isKimiPage() || !node.closest(".thinking-container"))
           && (!userSelector || (!node.closest(userSelector) && !node.querySelector(userSelector))));
       matched += nodes.length;
       const visibleNodes = nodes.filter((node) => isVisible(node, scanContext));
@@ -3774,6 +3789,16 @@ export function initializeContent() {
       }
     }
     const text = element.innerText || element.textContent || "";
+    if (isGrokPage()) {
+      // Grok puts a screen-reader role heading before the user's actual content.
+      const roleHeading = element.querySelector(":scope > h2.sr-only[data-no-copy]");
+      return roleHeading
+        ? Array.from(element.childNodes)
+          .filter((node) => node !== roleHeading)
+          .map((node) => node.innerText || node.textContent || "")
+          .join("\n")
+        : text;
+    }
     if (isChatGPTPage()) {
       return stripChatGptUserRolePrefix(text);
     }
@@ -4855,6 +4880,7 @@ export function initializeContent() {
       title,
       preview: markerPreviewFor(title),
       image: heading.image,
+      attachment: heading.attachment,
       width: markerWidthFor(title),
       signature: markerRenderSignature(["ai", heading.level, title])
     };
@@ -4922,6 +4948,7 @@ export function initializeContent() {
       thumbnailSrc: user.thumbnailSrc,
       imageCount: user.imageCount,
       imageUrls: user.imageUrls,
+      attachments: user.attachments,
       isImageOnly: user.isImageOnly,
       width: markerWidthFor(user.previewTitle),
       signature: markerRenderSignature(["user", isExpanded, ariaLabel, user.title, preview, user.imageUrls, user.thumbnailSrc, user.imageCount, user.isImageOnly])
@@ -5323,6 +5350,8 @@ export function initializeContent() {
       imageUrls: [],
       imageCount: Number(item.imageCount) || 0,
       isImageOnly: Boolean(item.isImageOnly),
+      ...(item.attachments?.length ? { attachments: item.attachments } : {}),
+      ...(item.attachment ? { attachment: item.attachment } : {}),
       ...(item.image ? { image: item.image } : {})
     };
   }
@@ -5391,11 +5420,19 @@ export function initializeContent() {
     let allMarkerItems = null;
     if (indexed?.items.length) {
       const indexedGroups = [];
+      const indexedGroupByKey = new Map();
       for (const item of indexed.items) {
-        if (item.type === "user") indexedGroups.push({ key: item.groupKey, user: { ...item, previewTitle: item.title }, headings: [], visibleHeadings: [], hasAssistantMessage: true });
+        if (item.type === "user") {
+          const group = { key: item.groupKey, user: { ...item, previewTitle: item.title }, headings: [], visibleHeadings: [], hasAssistantMessage: true };
+          indexedGroups.push(group); indexedGroupByKey.set(item.groupKey, group);
+        }
         else {
-          let group = indexedGroups.at(-1);
-          if (!group) { group = { key: "index:orphan", headings: [], visibleHeadings: [], hasAssistantMessage: true }; indexedGroups.push(group); }
+          const groupKey = item.groupKey || "index:orphan";
+          let group = indexedGroupByKey.get(groupKey);
+          if (!group) {
+            group = { key: groupKey, headings: [], visibleHeadings: [], hasAssistantMessage: true };
+            indexedGroups.push(group); indexedGroupByKey.set(groupKey, group);
+          }
           group.headings.push(item); group.visibleHeadings.push(item);
         }
       }
@@ -5411,7 +5448,7 @@ export function initializeContent() {
       conversationIndex: conversationIndex.snapshot(),
       conversationAwaiting: conversationIndex.awaitingConversation(),
       conversationLoading: conversationReading(),
-      conversationStalled: conversationCover.isStalled(),
+      conversationStalled: conversationReadingState(conversationIndex.snapshot()).stalled,
       conversationTitle: conversationIndex.snapshot()?.title || conversationIndex.title(),
       allMarkerItems,
       recognitionHintGroups: indexed ? indexed.recognitionHintGroups || []
@@ -5570,11 +5607,12 @@ export function initializeContent() {
     if (message.expectedRouteKey && message.expectedRouteKey !== currentRouteKey()) return { ok: false, reason: "source-changed" };
     if (message.generation && message.generation !== conversationIndex.snapshot()?.generation) return { ok: false, reason: "source-changed" };
     if (!billingAllowsPlatform(billingView, currentPlatformKey())) return { ok: false, reason: "platform-required" };
-    if (!billingAllowsIndex(billingView) && ["search-conversation", "get-index-chapter", "retry-conversation-index"].includes(message.command)) return { ok: false, reason: "pro-required" };
+    if (!billingAllowsIndex(billingView) && (["search-conversation", "retry-conversation-index", "read-loaded-conversation"].includes(message.command)
+      || usesAPIConversationIndex && message.command === "get-index-chapter")) return { ok: false, reason: "pro-required" };
     if (message.command === "search-conversation") return conversationIndex.search(String(message.query || ""), { offset: Number(message.offset) || 0 });
     if (message.command === "get-conversation-export") {
       if (conversationIndex.enabled()) {
-        if (!billingAllowsIndex(billingView)) return { ok: false, reason: "pro-required" };
+        if (usesAPIConversationIndex && !billingAllowsIndex(billingView)) return { ok: false, reason: "pro-required" };
         const data = conversationIndex.exportConversation();
         return data ? { ok: true, ...data, url: currentRouteKey() } : { ok: false, reason: "not-ready" };
       }
@@ -5592,6 +5630,13 @@ export function initializeContent() {
       return node ? { ok: true, contents: node.contents, revision: conversationIndex.snapshot().revision } : { ok: false };
     }
     if (message.command === "retry-conversation-index") { conversationIndex.retry(); return { ok: true }; }
+    if (message.command === "read-loaded-conversation") {
+      const snapshot = conversationIndex.snapshot();
+      if (!conversationReadingState(snapshot).failed || !snapshot.count) return { ok: false, reason: "not-ready" };
+      dismissedReadingGeneration = snapshot.generation;
+      syncConversationReading(); publishWindowSnapshot();
+      return { ok: true };
+    }
     if ((message.command === "jump-to-marker" || message.command === "jump-to-chapter") && String(message.markerKey || "").startsWith("index:")) {
       const route = currentRouteKey(); const generation = conversationIndex.snapshot()?.generation;
       // Sidepanel jumps land instantly, then highlight the target at once.
@@ -5608,7 +5653,7 @@ export function initializeContent() {
       });
     }
     if (message.command === "request-state") {
-      conversationIndex.configure(billingAllowsIndex(billingView) && state.config.chatgptHistoryMode === "complete" && isTopLevelFrame());
+      configureConversationIndex();
       publishWindowSnapshot();
       return;
     }
@@ -5618,7 +5663,9 @@ export function initializeContent() {
     }
     if (message.command === "request-image-preview") {
       const group = state.markerGroups.find((item) => item.key === String(message.groupKey || ""));
-      void standaloneWindowImageUrlsForSources(group?.user?.imageUrls?.slice(0, 8) || [])
+      const indexedUser = conversationIndex.enabled() && conversationIndex.outline(state.config).items
+        .find((item) => item.type === "user" && item.groupKey === message.groupKey);
+      void standaloneWindowImageUrlsForSources((indexedUser?.imageUrls || group?.user?.imageUrls || []).slice(0, 8))
         .then((imageUrls) => {
           if (!isExtensionContextValid()) return;
           sendRuntimeMessage(chrome, {
@@ -5699,7 +5746,7 @@ export function initializeContent() {
         billingView = message.view;
         render();
       } else if (message?.type === "POLARIS_WINDOW_REQUEST_STATE") {
-        conversationIndex.configure(billingAllowsIndex(billingView) && state.config.chatgptHistoryMode === "complete" && isTopLevelFrame());
+        configureConversationIndex();
         if (!state.awaitingRouteDom && state.markerSourceContainers.length === 0) {
           render();
           return;
@@ -5776,8 +5823,8 @@ export function initializeContent() {
       return;
     }
 
-    conversationIndex.configure(billingAllowsIndex(billingView) && state.config.chatgptHistoryMode === "complete" && isTopLevelFrame());
-    syncConversationCover();
+    configureConversationIndex();
+    syncConversationReading();
 
     if (!billingAllowsPlatform(billingView, currentPlatformKey())) {
       removeNavigationRoot();

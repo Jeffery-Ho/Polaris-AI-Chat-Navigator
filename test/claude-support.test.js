@@ -23,7 +23,7 @@ test("Claude.ai 使用语义消息选择器和独立平台配置", () => {
   assert.match(contentSource, /claude: true/);
   assert.match(platform, /isClaudePage\(\).*?return "claude"/s);
   assert.match(contentSource, /const CLAUDE_ASSISTANT_MESSAGE_SELECTOR = 'div\[data-cds="Prose"\]\.prose';/);
-  assert.match(contentSource, /const CLAUDE_USER_MESSAGE_SELECTOR = '\[data-cds="UserMessage"\] \[data-testid="user-message"\]';/);
+  assert.match(contentSource, /const CLAUDE_USER_MESSAGE_SELECTOR = '\[data-cds="UserMessage"\]';/);
   assert.match(assistantSelectors, /isClaudePage\(\).*?CLAUDE_ASSISTANT_MESSAGE_SELECTOR/s);
   assert.match(userSelectors, /isClaudePage\(\).*?CLAUDE_USER_MESSAGE_SELECTOR/s);
 });

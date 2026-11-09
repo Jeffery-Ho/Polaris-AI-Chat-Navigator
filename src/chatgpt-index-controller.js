@@ -255,6 +255,7 @@ export function createChatGptIndexController({ window: win, bridgeUrl, onChange,
     }
     if (!message.isConnected) return unavailable("not-mounted");
     if (key === `index:${target.messageId}` || target.imageKey) return { element: message, reason: "" };
+    if (target.attachmentKey) return { element: message, reason: "", fallback: true };
     if (target.blockType === "table") {
       const tables = [...message.querySelectorAll("table")].filter((table) => {
         const row = table.tHead?.rows[0] || table.rows[0];

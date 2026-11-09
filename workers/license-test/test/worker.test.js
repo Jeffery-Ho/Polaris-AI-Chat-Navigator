@@ -5,7 +5,7 @@ import worker from '../src/index.js';
 test('test worker reports its environment without exposing configuration', async () => {
  const response = await worker.fetch(new Request('https://test.invalid/health'), {});
  assert.equal(response.status, 200);
- assert.deepEqual(await response.json(), {ok:true,env:'test',version:'0.1.2'});
+ assert.deepEqual(await response.json(), {ok:true,env:'test',version:'0.1.3'});
 });
 
 test('API fails closed when storage or test secrets are missing', async () => {

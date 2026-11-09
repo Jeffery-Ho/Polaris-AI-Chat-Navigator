@@ -4,7 +4,7 @@ import { JSDOM } from "jsdom";
 import { createI18n } from "../src/i18n.js";
 import { createSidepanelOnboarding, ONBOARDING_STORAGE_KEY, ONBOARDING_VERSION } from "../src/sidepanel-onboarding.js";
 
-async function boot({ stored = {}, locale = "zh", reducedMotion = false, readError = false, writeError = false } = {}) {
+async function boot({ stored = {}, locale = "zh", reducedMotion = false, readError = false, writeError = false, platformChoice } = {}) {
   const dom = new JSDOM('<body><button class="window-settings-button">设置</button></body>', { pretendToBeVisual: true });
   const { window } = dom;
   window.matchMedia = (query) => ({ matches: reducedMotion && query === "(prefers-reduced-motion: reduce)" });
@@ -23,7 +23,7 @@ async function boot({ stored = {}, locale = "zh", reducedMotion = false, readErr
   const warnings = [];
   const warn = console.warn;
   console.warn = (...args) => warnings.push(args);
-  const onboarding = createSidepanelOnboarding({ document: window.document, chrome, locale, t });
+  const onboarding = createSidepanelOnboarding({ document: window.document, chrome, locale, t, platformChoice });
   const shown = await onboarding.ready;
   console.warn = warn;
   const doc = window.document;
@@ -238,4 +238,58 @@ test("存储读取失败时不展示也不抛错，写入失败只记录警告",
     failedWrite.dialog().querySelector(".onboarding-close").click();
     assert.equal(failedWrite.dialog(), null);
   } finally { failedWrite.dom.window.close(); }
+});
+
+test("引导最后选择两个平台，试用仍可用全部平台，保存成功才结束", async () => {
+  for (const locale of ["zh", "en"]) {
+    const saved = []; const view = { tier: "trial", fullAccess: true, platforms: [] };
+    let finishSave;
+    const s = await boot({ locale, platformChoice: { getView: () => view, getCurrentPlatform: () => "kimi", save: platforms => new Promise(resolve => { saved.push(platforms); finishSave = resolve; }) } });
+    try {
+      const dialog = s.dialog(); dialog.querySelectorAll(".onboarding-dot")[7].click();
+      assert.equal(dialog.dataset.step, "choose");
+      assert.equal(dialog.querySelector(".onboarding-figure").hidden, true);
+      assert.equal(dialog.querySelectorAll('[aria-pressed="true"]').length, 1);
+      assert.equal(dialog.querySelector('[data-platform="kimi"]').getAttribute("aria-pressed"), "true");
+      const next = dialog.querySelector(".onboarding-next"); assert.equal(next.disabled, true);
+      dialog.querySelector('[data-platform="chatgpt"]').click(); assert.equal(next.disabled, false);
+      dialog.querySelector('[data-platform="gemini"]').click(); assert.equal(dialog.querySelectorAll('[aria-pressed="true"]').length, 2);
+      dialog.querySelector(".onboarding-previous").click(); next.click();
+      assert.equal(dialog.querySelectorAll('[aria-pressed="true"]').length, 2);
+      next.click(); assert.ok(s.dialog()); assert.equal(next.disabled, true); assert.equal(s.writes.length, 0);
+      dialog.dispatchEvent(new s.dom.window.Event("cancel", { cancelable: true })); assert.ok(s.dialog());
+      assert.deepEqual(saved, [["kimi", "chatgpt"]]); assert.equal(view.fullAccess, true);
+      finishSave(); await new Promise(resolve => setTimeout(resolve, 0));
+      assert.equal(s.dialog(), null); assert.equal(s.writes.length, 1);
+    } finally { s.dom.window.close(); }
+  }
+});
+
+test("保存失败保留选择并可重试，稍后选择不会保存平台", async () => {
+  let attempts = 0;
+  const s = await boot({ platformChoice: { getView: () => ({ tier: "free", platforms: ["chatgpt", "kimi"] }), save: async () => { attempts++; if (attempts === 1) throw new Error("offline"); } } });
+  try {
+    const dialog = s.dialog(); dialog.querySelectorAll(".onboarding-dot")[7].click();
+    dialog.querySelector(".onboarding-next").click(); await new Promise(resolve => setTimeout(resolve, 0));
+    assert.ok(s.dialog()); assert.equal(dialog.querySelectorAll('[aria-pressed="true"]').length, 2);
+    assert.equal(dialog.querySelector('[role="alert"]').hidden, false); assert.equal(s.writes.length, 0);
+    dialog.querySelector(".onboarding-next").click(); await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(s.dialog(), null); assert.equal(attempts, 2);
+  } finally { s.dom.window.close(); }
+  const skipped = await boot({ platformChoice: { getView: () => ({ tier: "trial", platforms: [] }), save: () => { throw new Error("Must not save"); } } });
+  try { skipped.dialog().querySelectorAll(".onboarding-dot")[7].click(); skipped.dialog().querySelector(".onboarding-skip").click(); assert.equal(skipped.dialog(), null); }
+  finally { skipped.dom.window.close(); }
+});
+
+test("Pro 跳过双平台步骤，已有用户不重播引导，升级前关闭引导", async () => {
+  const pro = await boot({ platformChoice: { getView: () => ({ tier: "pro" }) } });
+  try { assert.equal(pro.dialog().querySelectorAll(".onboarding-dot").length, 7); }
+  finally { pro.dom.window.close(); }
+  const existing = await boot({ stored: { [ONBOARDING_STORAGE_KEY]: ONBOARDING_VERSION }, platformChoice: { getView: () => ({ tier: "free" }) } });
+  try { assert.equal(existing.shown, false); assert.equal(existing.dialog(), null); }
+  finally { existing.dom.window.close(); }
+  let upgraded = false;
+  const trial = await boot({ platformChoice: { getView: () => ({ tier: "trial" }), onUpgrade: () => { assert.equal(trial.dialog(), null); upgraded = true; } } });
+  try { trial.dialog().querySelectorAll(".onboarding-dot")[7].click(); trial.dialog().querySelector(".onboarding-platform-upgrade").click(); assert.equal(upgraded, true); }
+  finally { trial.dom.window.close(); }
 });

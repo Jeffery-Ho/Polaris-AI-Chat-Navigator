@@ -1,6 +1,7 @@
 import { releaseNotesForUpdate } from "./release-notes.js";
 
 const STORAGE_KEY = "polaris-release-notice-version";
+const TIP_STORAGE_KEY = "polaris-release-tip-dismissed";
 
 export function createSidepanelReleaseNotice({ document, chrome, locale, t, autoShowGate = Promise.resolve(true) }) {
   const manifest = chrome.runtime.getManifest();
@@ -10,6 +11,7 @@ export function createSidepanelReleaseNotice({ document, chrome, locale, t, auto
   let lastKnownVersion = null;
   let dismissedInSession = false;
   let automatic = false;
+  let tipDismissed = false;
 
   function element(tag, className, text) {
     const node = document.createElement(tag);
@@ -17,6 +19,38 @@ export function createSidepanelReleaseNotice({ document, chrome, locale, t, auto
     if (text !== undefined) node.textContent = text;
     return node;
   }
+
+  const recentNotes = releaseNotesForUpdate(null, manifest.version);
+  const tip = element("aside", "release-notice-tip");
+  tip.hidden = true;
+  const tipHeader = element("div", "release-notice-tip-header");
+  tipHeader.appendChild(element("h2", "release-notice-tip-title", t("releaseNotice.tipTitle", { version: manifest.version })));
+  const tipClose = element("button", "release-notice-tip-close");
+  tipClose.type = "button";
+  tipClose.setAttribute("aria-label", t("releaseNotice.dismissTip"));
+  tipClose.title = t("releaseNotice.dismissTip");
+  const closeIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  closeIcon.setAttribute("viewBox", "0 0 24 24");
+  closeIcon.setAttribute("aria-hidden", "true");
+  const closePath = document.createElementNS(closeIcon.namespaceURI, "path");
+  closePath.setAttribute("d", "m6 6 12 12M6 18 18 6");
+  closeIcon.appendChild(closePath);
+  tipClose.appendChild(closeIcon);
+  tipClose.addEventListener("click", () => {
+    tipDismissed = true;
+    tip.hidden = true;
+    document.querySelector(".platform-link, .window-settings-button")?.focus({ preventScroll: true });
+    void chrome.storage.local.set({ [TIP_STORAGE_KEY]: true }).catch((error) => {
+      console.warn("[Polaris] Update tip dismissal could not be saved.", error);
+    });
+  });
+  tipHeader.appendChild(tipClose);
+  const highlights = element("ul", "release-notice-tip-highlights");
+  for (const note of recentNotes) highlights.appendChild(element("li", "", (note[locale] || note.en).title));
+  const tipAction = element("button", "release-notice-tip-action", t("releaseNotice.viewChangelog"));
+  tipAction.type = "button";
+  tipAction.addEventListener("click", () => open(recentNotes));
+  tip.append(tipHeader, highlights, tipAction);
 
   function open(notes = releaseNotesForUpdate(null, manifest.version, 1), isAutomatic = false) {
     if (dialog?.open || !notes.length) return;
@@ -111,7 +145,12 @@ export function createSidepanelReleaseNotice({ document, chrome, locale, t, auto
 
   document.addEventListener("visibilitychange", showPending);
   chrome.storage.onChanged?.addListener((changes, area) => {
-    if (area !== "local" || !changes[STORAGE_KEY]) return;
+    if (area !== "local") return;
+    if (changes[TIP_STORAGE_KEY]?.newValue === true) {
+      tipDismissed = true;
+      tip.hidden = true;
+    }
+    if (!changes[STORAGE_KEY]) return;
     const newVersion = changes[STORAGE_KEY].newValue;
     if (typeof newVersion !== "string") return;
     lastKnownVersion = newVersion;
@@ -123,15 +162,17 @@ export function createSidepanelReleaseNotice({ document, chrome, locale, t, auto
   const ready = (async () => {
     let lastSeen = null;
     try {
-      const stored = await chrome.storage.local.get(STORAGE_KEY);
+      const stored = await chrome.storage.local.get([STORAGE_KEY, TIP_STORAGE_KEY]);
       lastSeen = typeof stored[STORAGE_KEY] === "string" ? stored[STORAGE_KEY] : null;
+      tipDismissed ||= stored[TIP_STORAGE_KEY] === true;
     } catch (error) {
       console.warn("[Polaris] Update notice read state could not be loaded.", error);
     }
+    tip.hidden = tipDismissed;
     // Onboarding replaces the automatic notice when it is shown in the same session.
     const allowAutomatic = await Promise.resolve(autoShowGate).catch(() => true);
     pendingNotes = dismissedInSession || !allowAutomatic ? [] : releaseNotesForUpdate(lastKnownVersion || lastSeen, manifest.version);
     showPending();
   })();
-  return { ready, open: () => open() };
+  return { ready, open: () => open(), tip };
 }

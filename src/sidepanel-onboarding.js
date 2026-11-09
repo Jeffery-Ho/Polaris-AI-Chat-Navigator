@@ -1,4 +1,5 @@
 import { SUPPORTED_PLATFORMS, createPlatformLinks } from "./supported-platforms.js";
+import { createPlatformPicker } from "./sidepanel-platform-picker.js";
 
 export const ONBOARDING_STORAGE_KEY = "polaris-onboarding-version";
 export const ONBOARDING_VERSION = 1;
@@ -7,7 +8,7 @@ const STEP_KEYS = ["platforms", "open", "source", "jump", "outline", "search", "
 const LOOP_REST_MS = 1600;
 const CURSOR_TRAVEL_MS = 480;
 
-export function createSidepanelOnboarding({ document, chrome, locale, t, platforms = SUPPORTED_PLATFORMS, onAutomaticDismiss = () => {} }) {
+export function createSidepanelOnboarding({ document, chrome, locale, t, platforms = SUPPORTED_PLATFORMS, platformChoice, onAutomaticDismiss = () => {} }) {
   const window = document.defaultView;
   const manifest = chrome.runtime.getManifest();
   const label = (zh, en) => (locale === "zh" ? zh : en);
@@ -332,6 +333,12 @@ export function createSidepanelOnboarding({ document, chrome, locale, t, platfor
 
   function open({ automatic = false } = {}) {
     if (dialog?.open) return;
+    const steps = platformChoice && platformChoice.getView()?.tier !== "pro" ? [...STEP_KEYS, "choose"] : STEP_KEYS;
+    const view = platformChoice?.getView();
+    const currentPlatform = platformChoice?.getCurrentPlatform?.();
+    let choiceSelection = view?.platforms?.length ? [...view.platforms]
+      : platforms.some(platform => platform.key === currentPlatform) ? [currentPlatform] : (view?.suggestedPlatforms || []).slice(0, 1);
+    let saving = false;
     const returnFocus = document.activeElement;
     let index = 0;
     let activeDemo = null;
@@ -355,11 +362,27 @@ export function createSidepanelOnboarding({ document, chrome, locale, t, platfor
     const body = element("p", "onboarding-body");
     body.id = "onboarding-body";
     card.append(title, body);
+    const choice = element("div", "onboarding-platform-choice");
+    choice.hidden = true;
+    const picker = createPlatformPicker({ document, chrome, locale, selection: choiceSelection, onChange(selection) {
+      choiceSelection = selection;
+      next.disabled = selection.length !== 2;
+      choiceError.hidden = true;
+    } });
+    const choiceHeading = element("div", "platform-choice-heading");
+    title.replaceWith(choiceHeading);
+    choiceHeading.append(title, picker.count);
+    const choiceError = element("p", "platform-choice-error"); choiceError.setAttribute("role", "alert"); choiceError.hidden = true;
+    const upgrade = element("button", "billing-link onboarding-platform-upgrade", label("Get Pro · 使用全部平台", "Get Pro · Use every platform"));
+    upgrade.type = "button";
+    upgrade.addEventListener("click", () => { dismiss(); platformChoice?.onUpgrade(); });
+    choice.append(picker.element, choiceError, upgrade);
+    if (view?.tier === "trial") choice.append(element("p", "onboarding-platform-trial", label("试用期间仍可使用全部平台，以上选择在试用结束后生效。", "Every platform stays available during your trial. These choices apply when it ends.")));
     const footer = element("footer", "onboarding-footer");
     const dots = element("div", "onboarding-dots");
     dots.setAttribute("role", "group");
     dots.setAttribute("aria-label", t("onboarding.progress"));
-    STEP_KEYS.forEach((_key, stepIndex) => {
+    steps.forEach((_key, stepIndex) => {
       const dot = element("button", "onboarding-dot");
       dot.type = "button";
       dot.setAttribute("aria-label", t("onboarding.goToStep", { step: stepIndex + 1 }));
@@ -375,40 +398,63 @@ export function createSidepanelOnboarding({ document, chrome, locale, t, platfor
     previous.addEventListener("click", () => show(index - 1));
     const next = element("button", "settings-diagnostic-primary onboarding-next");
     next.type = "button";
-    next.addEventListener("click", () => {
-      if (index === STEP_KEYS.length - 1) dismiss();
+    next.addEventListener("click", async () => {
+      if (steps[index] === "choose") {
+        if (saving || choiceSelection.length !== 2) return;
+        saving = true;
+        for (const button of currentDialog.querySelectorAll("button")) button.disabled = true;
+        next.textContent = label("正在保存…", "Saving…");
+        choiceError.hidden = true;
+        try { await platformChoice.save([...choiceSelection]); saving = false; dismiss(); }
+        catch {
+          choiceError.textContent = label("未能保存平台选择，请重试，或稍后再选。", "Could not save your platforms. Retry or choose later.");
+          choiceError.hidden = false;
+        } finally {
+          saving = false;
+          for (const button of currentDialog.querySelectorAll("button")) button.disabled = false;
+          next.disabled = choiceSelection.length !== 2;
+          next.textContent = label("使用这两个平台", "Use these two platforms");
+        }
+      } else if (index === steps.length - 1) dismiss();
       else show(index + 1);
     });
     actions.append(skip, previous, next);
     footer.append(dots, actions);
-    currentDialog.append(header, figure, card, footer);
+    currentDialog.append(header, figure, card, choice, footer);
 
     function show(nextIndex) {
-      if (nextIndex < 0 || nextIndex >= STEP_KEYS.length) return;
+      if (saving || nextIndex < 0 || nextIndex >= steps.length) return;
       const direction = nextIndex >= index ? "forward" : "backward";
       index = nextIndex;
-      const key = STEP_KEYS[index];
-      eyebrow.textContent = t("onboarding.eyebrow", { step: index + 1, count: STEP_KEYS.length });
-      title.textContent = t(`onboarding.${key}.title`);
-      body.textContent = t(`onboarding.${key}.body`);
+      const key = steps[index];
+      const choosing = key === "choose";
+      picker.count.hidden = !choosing;
+      eyebrow.textContent = t("onboarding.eyebrow", { step: index + 1, count: steps.length });
+      title.textContent = choosing ? label("选择你的两个常用平台", "Choose your two go-to platforms") : t(`onboarding.${key}.title`);
+      body.textContent = choosing ? label("Free 可同时使用两个平台，之后可从顶部图标随时更换。Pro 可使用全部平台。", "Free includes two platforms at a time. Change them anytime from the top platform icon. Pro includes every platform.") : t(`onboarding.${key}.body`);
+      choice.hidden = !choosing;
+      figure.hidden = choosing;
       currentDialog.dataset.step = key;
       currentDialog.dataset.direction = direction;
       [...dots.children].forEach((dot, dotIndex) => {
         if (dotIndex === index) dot.setAttribute("aria-current", "step");
         else dot.removeAttribute("aria-current");
       });
-      skip.hidden = index === STEP_KEYS.length - 1;
+      skip.hidden = index === steps.length - 1 && !choosing;
+      skip.textContent = choosing ? label("稍后选择", "Choose later") : t("onboarding.skip");
       previous.hidden = index === 0;
-      next.textContent = index === STEP_KEYS.length - 1 ? t("onboarding.finish") : t("onboarding.next");
+      next.textContent = choosing ? label("使用这两个平台", "Use these two platforms") : index === steps.length - 1 ? t("onboarding.finish") : t("onboarding.next");
+      next.disabled = choosing && choiceSelection.length !== 2;
       activeDemo?.stop();
-      activeDemo = createDemo(figure, key);
+      if (choosing) figure.replaceChildren();
+      activeDemo = choosing ? null : createDemo(figure, key);
       card.classList.remove("is-entering");
       void card.offsetWidth;
       card.classList.add("is-entering");
     }
 
     currentDialog.addEventListener("keydown", (event) => {
-      if (event.target instanceof window.HTMLInputElement) return;
+      if (event.target instanceof window.HTMLInputElement || choice.contains(event.target)) return;
       if (event.key === "ArrowRight") { event.preventDefault(); show(index + 1); }
       if (event.key === "ArrowLeft") { event.preventDefault(); show(index - 1); }
     });
@@ -416,7 +462,7 @@ export function createSidepanelOnboarding({ document, chrome, locale, t, platfor
 
     let closed = false;
     function dismiss() {
-      if (closed) return;
+      if (closed || saving) return;
       closed = true;
       dismissedInSession = true;
       pending = false;
@@ -461,6 +507,7 @@ export function createSidepanelOnboarding({ document, chrome, locale, t, platfor
       return false;
     }
     if (seen >= ONBOARDING_VERSION || dismissedInSession) return false;
+    await platformChoice?.ready;
     pending = true;
     showPending();
     return true;

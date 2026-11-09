@@ -55,13 +55,13 @@ test("route bridge can be disposed and reloaded without wrapping history twice",
   dom.window.close();
 });
 
-async function bootPackagedContent({ delayConfig = false, pageUrl = "https://chatgpt.com/c/wxt-test" } = {}) {
+async function bootPackagedContent({ delayConfig = false, pageUrl = "https://chatgpt.com/c/wxt-test", html } = {}) {
   const errors = [];
   const { VirtualConsole } = await import("jsdom");
   const console = new VirtualConsole();
   console.on("jsdomError", (error) => errors.push(error.message));
   console.on("error", (error) => errors.push(String(error)));
-  const dom = new JSDOM('<html><body><main><div data-message-author-role="user">Test prompt</div><div data-message-author-role="assistant"><div class="markdown"><h2>Test heading</h2><p>Test body</p></div></div></main></body></html>', {
+  const dom = new JSDOM(html || '<html><body><main><div data-message-author-role="user">Test prompt</div><div data-message-author-role="assistant"><div class="markdown"><h2>Test heading</h2><p>Test body</p></div></div></main></body></html>', {
     url: pageUrl, runScripts: "outside-only", pretendToBeVisual: true, virtualConsole: console
   });
   const win = dom.window;
@@ -105,6 +105,65 @@ async function bootPackagedContent({ delayConfig = false, pageUrl = "https://cha
   return { dom, win, runtime, storage, messages, errors, pendingConfigReads, flush, inject, invalidate };
 }
 
+test("packaged Kimi builds a structured index with files, images and final-answer Makers", async () => {
+  const html = `<html><body><div class="chat-content-list">
+    <div data-archer-id="u1" class="chat-content-item-user"><div class="segment segment-user">
+      <div class="file-card-info"><div>历史记录</div><div class="file-card-info-detail"><span class="file-ext">MD</span><span class="file-size">56 KB</span></div></div>
+      <div class="user-content__text">请确认记录</div><img src="https://cdn.test/upload.png" alt="上传图片"><div>Edit Copy Share</div>
+    </div></div>
+    <div data-archer-id="a1" class="chat-content-item-assistant"><div class="segment segment-assistant">
+      <div class="thinking-container"><div class="markdown"><div class="paragraph"><strong>思考标题</strong></div></div></div>
+      <div class="markdown-container"><div class="markdown"><div class="paragraph">回复前言</div><div class="paragraph"><strong>第一轮</strong></div><p>回答内容</p><img src="https://cdn.test/reply.png" alt="回复图片"></div></div>
+    </div></div></div></body></html>`;
+  const s = await bootPackagedContent({ pageUrl: "https://www.kimi.com/chat/one", html });
+  try {
+    s.win.structuredClone = structuredClone;
+    await s.inject();
+    for (let i = 0; i < 8; i++) await s.flush();
+    const state = s.messages.findLast((message) => message.type === "POLARIS_CONTENT_STATE")?.snapshot;
+    assert.equal(state.conversationIndex?.source, "dom");
+    assert.equal(state.conversationIndex?.count, 2);
+    assert.equal(state.conversationIndex?.coverage, "loaded");
+    const user = state.markerItems.find((item) => item.type === "user");
+    assert.equal(user.imageCount, 1);
+    assert.equal(user.attachments[0].name, "历史记录");
+    assert.doesNotMatch(user.title, /Edit|Copy|Share|56 KB/);
+    assert.ok(state.markerItems.some((item) => item.title === "第一轮"));
+    assert.ok(state.markerItems.some((item) => item.image));
+    assert.ok(state.markerItems.every((item) => item.title !== "思考标题"));
+    for (const listener of s.runtime.listeners) listener({ type: "POLARIS_WINDOW_COMMAND", command: "request-chapters" }, {}, () => {});
+    const chapters = s.messages.findLast((message) => message.type === "POLARIS_WINDOW_CHAPTERS").treeChapters;
+    assert.ok(chapters.every((node) => node.title !== "Full text"));
+    assert.deepEqual(s.errors, []);
+  } finally { s.invalidate(); s.dom.window.close(); }
+});
+
+for (const fixture of [
+  { platform: "Claude", pageUrl: "https://claude.ai/chat/one", wrap: (card) => `<div data-cds="UserMessage"><h2 class="sr-only">You said</h2>${card}<div data-testid="user-message">请确认最后三轮对话</div><div role="toolbar"><span>2 hours ago</span><button>Copy</button></div></div>`, card: (name) => `<div data-cds="MessageAttachmentsFile" data-testid="file-thumbnail"><div data-cds="Card"><span data-cds="CardLink" role="button" title="${name}"><span class="sr-only">${name}</span></span><div><span title="${name}"><bdi>${name}</bdi></span><span data-cds="Badge"><span><bdi>MD</bdi></span></span></div></div></div>` },
+  { platform: "Qwen", pageUrl: "https://www.qianwen.com/chat/one", wrap: (card) => `<div class="message-select-wrapper-question">${card}<div>请确认最后三轮对话</div></div>`, metadata: "56KB" },
+  { platform: "DeepSeek", pageUrl: "https://chat.deepseek.com/a/chat/s/one", wrap: (card) => `<div class="ds-virtual-list-visible-items"><div data-virtual-list-item-key="0"><div class="ds-message">${card}<div class="ds-collapsible-text">请确认最后三轮对话</div></div></div></div>`, metadata: "MD 56.34KB" },
+  { platform: "Doubao", pageUrl: "https://www.doubao.com/chat/one", wrap: (card) => `<div class="bg-g-send-msg-bubble-bg">${card}<div>请确认最后三轮对话</div></div>`, metadata: "Markdown" },
+  { platform: "Grok", pageUrl: "https://grok.com/c/one", wrap: (card) => `<div data-testid="user-message"><h2 class="sr-only">You said</h2>${card}<p>请确认最后三轮对话</p></div>`, metadata: "" }
+]) {
+  test(`packaged ${fixture.platform} publishes clean attachment tags separately from the prompt`, async () => {
+    const name = "分析高净值市场 (1).md";
+    const card = fixture.card ? fixture.card(name) : fixture.metadata
+      ? `<div><svg></svg><div><div>${name}</div><div>${fixture.metadata}</div></div></div>`
+      : `<button><svg></svg><span>${name}</span></button>`;
+    const s = await bootPackagedContent({ pageUrl: fixture.pageUrl, html: `<html><body>${fixture.wrap(card)}</body></html>` });
+    try {
+      s.win.structuredClone = structuredClone;
+      await s.inject();
+      for (let i = 0; i < 8; i++) await s.flush();
+      const state = s.messages.findLast((message) => message.type === "POLARIS_CONTENT_STATE")?.snapshot;
+      const user = state?.markerItems.find((item) => item.type === "user");
+      assert.equal(user?.title, "请确认最后三轮对话");
+      assert.deepEqual(Array.from(user.attachments, (file) => file.name), [name]);
+      assert.deepEqual(s.errors, []);
+    } finally { s.invalidate(); s.dom.window.close(); }
+  });
+}
+
 test("complete mode leaves ChatGPT settings pages free of the pick-a-chat notice", async () => {
   for (const pageUrl of ["https://chatgpt.com/settings", "https://chatgpt.com/settings/billing", "https://chatgpt.com/settings/account?tab=profile", "https://chat.openai.com/settings/billing/"]) {
     const s = await bootPackagedContent({ pageUrl });
@@ -143,7 +202,7 @@ test("home guidance is published only to the sidepanel and settings or chats cle
     assert.equal(awaiting(), true);
     await routeTo("/c/wxt-test");
     assert.equal(s.win.document.getElementById("polaris-conversation-notice"), null);
-    assert.ok(s.win.document.getElementById("polaris-conversation-cover"), "existing native messages confirm the conversation before the API returns");
+    assert.equal(s.win.document.getElementById("polaris-conversation-cover"), null, "reading progress belongs in the sidepanel");
     assert.equal(s.messages.findLast((item) => item.type === "POLARIS_CONTENT_STATE")?.snapshot.conversationLoading, true, "background reading and sidepanel loading continue without the card");
     assert.equal(awaiting(), false);
     await routeTo("/settings/account");
@@ -152,13 +211,13 @@ test("home guidance is published only to the sidepanel and settings or chats cle
     assert.equal(s.win.document.querySelector("main").hasAttribute("inert"), false);
     assert.equal(awaiting(), false);
     await routeTo("/c/wxt-test");
-    assert.ok(s.win.document.getElementById("polaris-conversation-cover"));
+    assert.equal(s.win.document.getElementById("polaris-conversation-cover"), null);
     assert.equal(s.messages.findLast((item) => item.type === "POLARIS_CONTENT_STATE")?.snapshot.conversationLoading, true);
     assert.deepEqual(s.errors, []);
   } finally { s.invalidate(); s.dom.window.close(); }
 });
 
-test("packaged reading progress appears while native message elements are still mounting", async () => {
+test("packaged reading state reaches the sidepanel without inserting a website card", async () => {
   const s = await bootPackagedContent();
   const commands = [];
   s.win.postMessage = (data) => commands.push(data);
@@ -183,9 +242,18 @@ test("packaged reading progress appears while native message elements are still 
     ], page_info: { has_previous_page: false, has_next_page: false } } });
     const snapshot = s.messages.findLast(message => message.type === 'POLARIS_CONTENT_STATE')?.snapshot;
     assert.equal(snapshot?.conversationIndex?.count, 1, 'conversation data has arrived');
-    assert.ok(s.win.document.getElementById('polaris-conversation-cover'), 'read messages must show progress before native message nodes exist');
+    assert.equal(s.win.document.getElementById('polaris-conversation-cover'), null);
+    assert.equal(snapshot.conversationLoading, true, 'sidepanel progress begins before native messages mount');
     await send('complete');
-    assert.ok(s.win.document.getElementById('polaris-conversation-cover'), 'native preparation must remain visible after API completion');
+    assert.equal(s.win.document.getElementById('polaris-conversation-cover'), null);
+    assert.equal(s.messages.findLast(message => message.type === 'POLARIS_CONTENT_STATE')?.snapshot.conversationLoading, true);
+    await send('native-state', { phase: 'error' });
+    for (const listener of s.runtime.listeners) listener({ type: 'POLARIS_WINDOW_COMMAND', command: 'read-loaded-conversation', generation: 'stale' }, {}, () => {});
+    await s.flush();
+    assert.equal(s.messages.findLast(message => message.type === 'POLARIS_CONTENT_STATE')?.snapshot.conversationLoading, true, 'stale actions cannot dismiss a new read');
+    for (const listener of s.runtime.listeners) listener({ type: 'POLARIS_WINDOW_COMMAND', command: 'read-loaded-conversation', generation: snapshot.conversationIndex.generation }, {}, () => {});
+    await s.flush();
+    assert.equal(s.messages.findLast(message => message.type === 'POLARIS_CONTENT_STATE')?.snapshot.conversationLoading, false, 'partial messages become available after the user chooses them');
     await send('native-state', { phase: 'ready' });
     assert.equal(s.win.document.getElementById('polaris-conversation-cover'), null);
     assert.deepEqual(s.errors, []);
@@ -337,7 +405,8 @@ for (const pageUrl of ["https://chatgpt.com/c/wxt-test", "https://chatgpt.com/sh
       assert.equal(items.filter((item) => item.type === "user").length, 179);
       assert.equal(items.filter((item) => item.image).length, 358);
       assert.equal(items.some((item) => item.type === "earlier"), false);
-      assert.match(items.find((item) => item.type === "user").title, /^\[Image\]/);
+      assert.equal(items.find((item) => item.type === "user").title, "Question 0");
+      assert.equal(items.find((item) => item.type === "user").imageCount, 1);
       assert.equal(items.some((item) => item.title.includes("[Attachment]")), false);
       assert.deepEqual(Array.from(items.filter((item) => item.type === "user"), (item) => item.groupKey), Array.from({ length: 179 }, (_, i) => `index:u-${i}`));
       command("toggle-user-group", { groupKey: "index:u-0" }); await s.flush();

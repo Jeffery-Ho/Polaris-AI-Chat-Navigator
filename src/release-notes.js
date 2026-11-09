@@ -1,5 +1,30 @@
 const RELEASE_NOTES = Object.freeze([
   {
+    version: "0.110.0",
+    en: { title: "Updates within reach", changes: ["The empty sidepanel now has a floating update tip at the bottom. Preview recent highlights and open the changelog, or dismiss the tip once to hide it permanently, including after future updates. Update notes remain available in Settings."] },
+    zh: { title: "随手查看近期更新", changes: ["侧栏空页面底部新增悬浮更新提示，可预览近期亮点并打开更新日志；关闭一次后永久隐藏，后续升级也不再出现。仍可在设置中查看更新说明。"] }
+  },
+  {
+    version: "0.109.0",
+    en: { title: "Return to the default list", changes: ["If full conversation reading fails, choose Use default list beside Refresh page to turn off long-conversation reading and follow the messages already on the page. Future chats use the same reading preference."] },
+    zh: { title: "切回默认列表", changes: ["完整对话读取失败时，可点击「刷新页面」右侧的「使用默认列表」，关闭长对话读取并跟随页面已加载的内容；后续会话沿用该读取设置。"] }
+  },
+  {
+    version: "0.108.0",
+    en: { title: "Your two free platforms", changes: ["Choose two free platforms at the end of onboarding, and change them anytime from the top platform icon. Switch between supported platforms, replace a free platform, or explore Pro for access to every platform. Your full-access trial and saved local data are preserved."] },
+    zh: { title: "选择你的免费平台", changes: ["在新手引导最后选择两个免费平台，之后可从顶部平台图标随时切换与更换。未启用的平台可免费替换，也可通过 Pro 使用全部平台；保留完整功能试用和已有本地数据。"] }
+  },
+  {
+    version: "0.107.0",
+    en: { title: "One conversation index across platforms", changes: ["Virtual TOC and Outline now share structured message indexing across supported platforms, retaining loaded replies, file labels and images as pages change. Kimi recognizes formatted paragraph titles and keeps replies under their questions. Available native history can be read progressively; unconfirmed history stays labeled as loaded content."] },
+    zh: { title: "跨平台统一会话索引", changes: ["已支持平台统一接入结构化消息索引与虚拟目录、大纲，保留已读回复、附件标签和图片。Kimi 可识别格式化段落标题，回答归属对应问题；逐步补充可获取的原生历史，未确认完整时明确显示已读范围。"] }
+  },
+  {
+    version: "0.106.0",
+    en: { title: "Continue with another AI", changes: ["The export dialog now includes a copyable prompt for continuing a conversation with another AI. It asks the AI to recap the last three exchanges before continuing, and distinguishes complete history from partially read conversations."] },
+    zh: { title: "在其他 AI 中继续讨论", changes: ["导出弹窗新增可复制的接续 Prompt，引导上传文件后，先复述最后三轮问答再继续；文案会区分完整记录与已读取的部分对话。"] }
+  },
+  {
     version: "0.104.0",
     en: { title: "Export attribution", changes: ["Markdown and HTML exports now end with a local-export attribution using the published app name."] },
     zh: { title: "导出文件署名", changes: ["Markdown 与 HTML 文件底部新增本地导出署名，自动使用应用发布名称。"] }

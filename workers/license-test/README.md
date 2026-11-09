@@ -1,6 +1,6 @@
 # Polaris license test Worker
 
-Independent test backend for the Polaris Pro review flow. The extension includes a background billing service and a Pro/license settings flow. Feature restrictions apply only after successful licensing initialization; current installs retain their prior behavior while the test deployment is unavailable. The remote Worker is `https://polaris-license-test.hexianji.workers.dev`, API version **0.1.2**, using the existing D1 binding. A real Stripe sandbox purchase has passed Checkout, signed Webhook fulfillment, idempotent claim, validation, cross-installation redemption and refund revocation. The WORK extension has displayed an active Pro license through live redemption. Request bodies are bounded while streaming, and unknown paths do not allocate rate-limit records. Transactional email remains unconfigured.
+Independent test backend for the Polaris Pro review flow. The extension includes a background billing service and a Pro/license settings flow. Feature restrictions apply only after successful licensing initialization; current installs retain their prior behavior while the test deployment is unavailable. The remote Worker is `https://polaris-license-test.hexianji.workers.dev`, API version **0.1.3**, using the existing D1 binding. A real Stripe sandbox purchase has passed Checkout, signed Webhook fulfillment, idempotent claim, validation, cross-installation redemption and refund revocation. The WORK extension has displayed an active Pro license through live redemption. Request bodies are bounded while streaming, and unknown paths do not allocate rate-limit records. Transactional email remains unconfigured.
 
 ## Scope and configuration
 
@@ -37,6 +37,8 @@ All JSON APIs are HTTPS on deployment. Restrictive `ALLOWED_ORIGINS` is a browse
 | GET | `/api/plans?installationId=...` | Authoritative prices, currency, trial/offer deadlines, server time |
 | POST | `/api/checkout/session` | `{planId: "pro", installationId, expectedAmount?}`; test Checkout URL + purchase claim; stale expected amounts return `409 price_changed` |
 | POST | `/api/stripe/webhook` | Raw body + signed Stripe header; durable idempotent fulfillment |
+| POST | `/api/checkout/web-session` | `{planId: "pro", expectedAmount?}` from an allowed website origin; $12.90 test Checkout URL, purchase ID and claim token, returning to that origin's `/checkout-return/` |
+| POST | `/api/web-purchases/claim` | `{purchaseId, claimToken}` for website purchases only; `pending` / `paid` + `licenseKey` / `failed` / `canceled` |
 | GET | `/api/purchases/:id/status` | Bearer claim token + `X-Installation-Id` + installation token |
 | POST | `/api/licenses/claim` | `{purchaseId, claimToken, installationId}`; active paid entitlement only |
 | POST | `/api/licenses/redeem` | `{licenseKey, installationId}`; returns per-installation token |
@@ -46,7 +48,7 @@ All JSON APIs are HTTPS on deployment. Restrictive `ALLOWED_ORIGINS` is a browse
 
 Claim credentials expire after 24 hours; recover/redeem remains the fallback. Status polling belongs to the client and is bounded. `preview-client.js` implements this interface for the standalone browser preview; its test-only localStorage namespace never touches extension storage. `src/billing-service.js` now persists installation and activation credentials in `chrome.storage.local`, and the background message handler owns authenticated calls. UI state excludes credentials. Content pages can read public access but cannot create Checkout sessions, redeem licenses or deactivate installations. Cold access checks use local cache without starting network requests.
 
-The frontend may use localhost return URLs during test only. `/checkout-return` must remain a neutral return page: never infer paid/active from redirect parameters. Real activation uses the original client's authenticated claim exchange.
+Extension Checkout returns to `PUBLIC_APP_URL` + `/checkout-return/` (now `https://polaris-ai.work`). Website Checkout returns to the requesting origin, which must be listed in `ALLOWED_ORIGINS` and be HTTPS or localhost. Website purchases have no installation: their intent row stores a per-purchase sentinel hash, so the extension claim/status routes reject them, and only the buying browser's claim token can read the issued key, which it then redeems like any other license. The frontend may use localhost return URLs during test only. `/checkout-return/` must remain a neutral return page: never infer paid/active from redirect parameters. Real activation uses the original client's authenticated claim exchange.
 
 The extension refreshes catalog pricing before creating a new Checkout. An expired discounted quote is hidden until the server supplies a current price; a changed amount requires another explicit purchase selection. `expectedAmount` also protects the boundary between that refresh and Checkout creation. Existing pending Checkout sessions retain their original price.
 
@@ -62,7 +64,7 @@ License and activation verifiers use HMAC-SHA-256. Installation IDs and lookup e
 
 For this test implementation, a deliberately separate AES-GCM key encrypts `{email, licenseKey}` for delivery and recovery. The ciphertext remains for the lifetime of the test license; recovery resends the existing credential. This is not reconstructing a key from its hash. Before production, define deletion/retention, adopt short-lived recovery links/rotation, and audit key rotation and operational access.
 
-The `polaris_billing_email_deliveries` table is a durable outbox. The five-minute scheduled handler sends through Resend only when `EMAIL_PROVIDER_API_KEY` and `EMAIL_FROM_ADDRESS` are configured; otherwise jobs remain pending and payment/activation still succeed. Sending uses a per-job idempotency key and capped exponential backoff. Recovery is throttled to one job per license per hour and all API paths have hashed-IP minute rate limits. No emails have been sent as part of local verification.
+The `polaris_billing_email_deliveries` table is a durable outbox. The five-minute scheduled handler sends through the Cloudflare Email Sending `send_email` binding named `EMAIL` when it and `EMAIL_FROM_ADDRESS` are configured (optional `SUPPORT_EMAIL` becomes Reply-To). Resend via `EMAIL_PROVIDER_API_KEY` remains a fallback. The sender domain must be onboarded to Email Sending, which requires it to be a Cloudflare zone; add `"send_email": [{ "name": "EMAIL" }]` to `wrangler.jsonc` after that; otherwise jobs remain pending and payment/activation still succeed. Sending uses a per-job idempotency key and capped exponential backoff. Recovery is throttled to one job per license per hour and all API paths have hashed-IP minute rate limits. No emails have been sent as part of local verification.
 
 ## Verification and rollout boundaries
 

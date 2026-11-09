@@ -1,7 +1,8 @@
 import { createPageNavigation } from "./sidepanel-navigation.js";
 import { SUPPORTED_PLATFORMS } from "./supported-platforms.js";
+import { createPlatformPicker } from "./sidepanel-platform-picker.js";
 
-export function createSidepanelBilling({ document, chrome, locale, onChange = () => {}, onOpenPage = page => document.body.append(page), onClosePage = () => {} }) {
+export function createSidepanelBilling({ document, chrome, locale, onChange = () => {}, onOpenPage = page => document.body.append(page), onClosePage = () => {}, onPlatformEnabled = () => {} }) {
   const win = document.defaultView;
   const text = (zh, en) => locale === "zh" ? zh : en;
   let view = null;
@@ -21,6 +22,8 @@ export function createSidepanelBilling({ document, chrome, locale, onChange = ()
   let confirmation = null;
   let renderedScreen = "";
   let selectedPlan = "pro";
+  let targetPlatform = null;
+  let replacedPlatform = "";
 
   function el(tag, className = "", content = "") {
     const node = document.createElement(tag);
@@ -122,7 +125,10 @@ export function createSidepanelBilling({ document, chrome, locale, onChange = ()
   function change(next) {
     if (next !== "processing") stopPolling();
     copyInput(); screen = next; error = "";
-    if (next === "platforms") selection = [...(view?.platforms?.length ? view.platforms : view?.suggestedPlatforms || [])];
+    if (next === "platforms") selection = targetPlatform
+      ? [targetPlatform.key, ...(view?.platforms || view?.suggestedPlatforms || []).filter(key => key !== targetPlatform.key)].slice(0, 2)
+      : [...(view?.platforms?.length ? view.platforms : view?.suggestedPlatforms || [])];
+    if (next === "replace-platform") replacedPlatform = "";
     renderDialog(true);
   }
   async function poll() {
@@ -155,6 +161,12 @@ export function createSidepanelBilling({ document, chrome, locale, onChange = ()
     void perform(() => request("checkout"));
   }
 
+  function goBack() {
+    if (busy) return;
+    if (["upgrade", "success", "platforms", "platform-access"].includes(screen)) close();
+    else change(screen === "replace-platform" ? "platform-access" : "upgrade");
+  }
+
   function renderDialog(focus = false) {
     if (!dialog) return;
     copyInput();
@@ -164,11 +176,12 @@ export function createSidepanelBilling({ document, chrome, locale, onChange = ()
     const priorScroll = win.scrollY;
     const header = el("header", "window-header billing-header");
     const nav = createPageNavigation(document, {
-      title: "Polaris Pro", backLabel: text("返回上一页", "Back to previous page"),
-      wordmark: true,
-      onBack: () => screen === "upgrade" || screen === "success" ? close() : change("upgrade")
+      title: ["platforms", "platform-access", "replace-platform"].includes(screen) ? text("平台", "Platforms") : "Polaris Pro", backLabel: text("返回上一页", "Back to previous page"),
+      wordmark: !["platforms", "platform-access", "replace-platform"].includes(screen),
+      onBack: goBack
     });
     const dismiss = nav.querySelector("button");
+    dismiss.disabled = busy;
     header.append(nav);
     const body = el("div", "billing-body");
     let trialBanner = null;
@@ -312,10 +325,13 @@ export function createSidepanelBilling({ document, chrome, locale, onChange = ()
       body.append(button(text("先返回 Polaris", "Return to Polaris"), close, true));
       body.append(link(text("通过购买邮箱找回", "Recover by checkout email"), () => { stopPolling(); change("recover"); }));
     } else if (screen === "success") {
-      heading.textContent = text("Polaris Pro 已激活", "Polaris Pro is active");
-      lead.textContent = text("本设备已获得完整功能，可以继续使用 Polaris。", "Full access is ready on this device. Continue using Polaris.");
-      body.append(note(text("买断许可，不限设备。许可证通过购买邮箱交付；邮件延迟不影响当前授权。", "Lifetime license with unlimited devices. The license is delivered by checkout email; delivery delays do not affect access.")));
-      body.append(button(text("返回 Polaris", "Return to Polaris"), close));
+      const star = el("img", "billing-success-star");
+      star.src = chrome.runtime.getURL("icons/pro-entry-star.svg"); star.alt = ""; star.width = 72; star.height = 64;
+      body.prepend(star);
+      heading.textContent = text("Polaris Pro 已激活", "Welcome to Polaris Pro");
+      lead.textContent = text("全部平台与长对话索引已解锁。", "Every platform and long-conversation indexing, unlocked.");
+      body.append(button(text("开始使用", "Start exploring"), close));
+      body.append(el("p", "billing-closing-fine", text("一次买断 · 不限设备", "Lifetime access · Unlimited devices")));
     } else if (screen === "redeem" || screen === "recover") {
       const redeeming = screen === "redeem";
       heading.textContent = redeeming ? text("兑换许可证", "Redeem your license") : text("找回许可证", "Recover your license");
@@ -343,26 +359,49 @@ export function createSidepanelBilling({ document, chrome, locale, onChange = ()
       heading.textContent = text("请查看你的邮箱", "Check your inbox");
       lead.textContent = text("如果此邮箱有符合条件的购买记录，你将收到找回说明。请同时检查垃圾邮件。", "If an eligible purchase exists for this email, recovery instructions will be sent. Please also check spam.");
       body.append(button(text("返回兑换", "Back to redemption"), () => change("redeem")));
+    } else if (screen === "platform-access" && targetPlatform) {
+      const icon = el("img", "billing-platform-target"); icon.src = chrome.runtime.getURL(targetPlatform.favicon); icon.alt = "";
+      heading.before(icon);
+      heading.textContent = text(`${targetPlatform.label} 未在你的免费平台中`, `${targetPlatform.label} isn't one of your free platforms`);
+      lead.textContent = text("Free 可同时使用两个平台。你可以免费替换其中一个，或升级 Pro 使用全部平台。", "Free includes two platforms at a time. Replace one for free, or upgrade to Pro for every platform.");
+      const names = (view?.platforms || []).map(key => SUPPORTED_PLATFORMS.find(platform => platform.key === key)?.label).filter(Boolean).join(", ");
+      if (names) body.append(el("p", "billing-copy", text(`当前免费平台：${names}`, `Current free platforms: ${names}`)));
+      body.append(button(text(`更换免费平台，启用 ${targetPlatform.label}`, `Change free platforms to enable ${targetPlatform.label}`), () => change(view?.platforms?.length === 2 ? "replace-platform" : "platforms")),
+        button(text("Get Pro · 使用全部平台", "Get Pro · Use every platform"), back, true));
+      body.append(el("p", "billing-copy", text("更换不会删除已保存的本地数据。", "Changing platforms keeps your saved local data.")));
+    } else if (screen === "replace-platform" && targetPlatform) {
+      heading.textContent = text(`用 ${targetPlatform.label} 替换哪个平台？`, `Which platform should ${targetPlatform.label} replace?`);
+      lead.textContent = text("被替换的平台将停止使用 Polaris，已有本地数据会保留。", "Polaris will stop working on the replaced platform. Your saved local data stays.");
+      const list = el("div", "billing-platform-replacements");
+      const save = button(text(`替换并启用 ${targetPlatform.label}`, `Replace and enable ${targetPlatform.label}`), () => {
+        const platforms = view.platforms.map(key => key === replacedPlatform ? targetPlatform.key : key);
+        void perform(() => request("platforms", { platforms }), () => { const platform = targetPlatform; close(); onPlatformEnabled(platform); });
+      });
+      save.disabled = busy || !replacedPlatform;
+      for (const key of view?.platforms || []) {
+        const platform = SUPPORTED_PLATFORMS.find(item => item.key === key);
+        if (!platform) continue;
+        const label = el("label", "billing-platform-replacement");
+        const radio = el("input"); radio.type = "radio"; radio.name = "replace-platform"; radio.value = key; radio.checked = replacedPlatform === key; radio.disabled = busy;
+        radio.addEventListener("change", () => { replacedPlatform = key; save.disabled = busy; });
+        const icon = el("img"); icon.src = chrome.runtime.getURL(platform.favicon); icon.alt = "";
+        label.append(radio, icon, el("span", "", platform.label)); list.append(label);
+      }
+      body.append(list, save, link(text("取消", "Cancel"), close));
     } else if (screen === "platforms") {
       heading.textContent = text("挑选常用的两个平台", "Choose your two go-to platforms");
-      lead.textContent = text("完整功能试用已结束。免费平台可在设置中随时更换。", "Your full-access trial has ended. Change your free platforms anytime in Settings.");
-      const list = el("div", "billing-platforms");
-      for (const platform of SUPPORTED_PLATFORMS) {
-        const chosen = selection.includes(platform.key);
-        const item = button(platform.label, () => {
-          if (chosen) selection = selection.filter(key => key !== platform.key);
-          else if (selection.length < 2) selection.push(platform.key);
-          else { error = text("最多选择两个平台，请先取消一个选择。", "Choose up to two platforms. Deselect one first."); }
-          renderDialog();
-          dialog?.querySelector(`[data-platform="${platform.key}"]`)?.focus();
-        }, true);
-        item.className = "billing-platform"; item.dataset.platform = platform.key; item.setAttribute("aria-pressed", String(chosen));
-        list.append(item);
-      }
-      body.append(list, el("p", "billing-copy", text(`已选择 ${selection.length} / 2`, `${selection.length} / 2 selected`)));
-      const save = button(text("使用这两个平台", "Use these two platforms"), () => perform(() => request("platforms", { platforms: selection }), close));
+      lead.textContent = view?.tier === "trial"
+        ? text("试用期间全部平台仍可用。选择会在试用结束后生效，也可从顶部平台图标随时更换。", "Every platform stays available during your trial. These choices apply when it ends. Change them anytime from the top platform icon.")
+        : text("Free 可同时使用两个平台，之后可从顶部平台图标随时更换。已有本地数据会保留。", "Free includes two platforms at a time. Change them anytime from the top platform icon. Your saved local data stays.");
+      const picker = createPlatformPicker({ document, chrome, locale, selection, onChange(next) { selection = next; save.disabled = busy || next.length !== 2; } });
+      picker.setBusy(busy);
+      const choiceHeading = el("div", "platform-choice-heading");
+      heading.before(choiceHeading);
+      choiceHeading.append(heading, picker.count);
+      body.append(picker.element);
+      const save = button(text("使用这两个平台", "Use these two platforms"), () => perform(() => request("platforms", { platforms: selection }), () => { const platform = targetPlatform; close(); if (platform && selection.includes(platform.key)) onPlatformEnabled(platform); }));
       save.disabled = busy || selection.length !== 2;
-      body.append(save, link(text("升级 Pro，使用全部平台", "Upgrade to Pro for all platforms"), back));
+      body.append(save, link(text("取消", "Cancel"), close), link(text("Get Pro · 使用全部平台", "Get Pro · Use every platform"), back));
     }
     if (error) { const message = note(error, true); message.id = "billing-error"; const form = body.querySelector("form"); if (form) form.querySelector("input").after(message); else body.append(message); }
     const screenChanged = renderedScreen !== screen;
@@ -371,6 +410,7 @@ export function createSidepanelBilling({ document, chrome, locale, onChange = ()
     [...body.querySelectorAll("button, input, summary"), dismiss].forEach((node, index) => { node.dataset.billingFocus = String(index); });
     const openQuestions = [...dialog.querySelectorAll("details")].map(node => node.open);
     dialog.replaceChildren(header, body);
+    if (screen === "success" && screenChanged) celebrate(body.querySelector(".billing-success-star"));
     if (trialBanner) header.after(trialBanner);
     if (!screenChanged) dialog.querySelectorAll("details").forEach((node, index) => { node.open = !!openQuestions[index]; });
     if (focus || screenChanged) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); win.scrollTo?.({ top: 0, behavior: "auto" }); }
@@ -380,6 +420,28 @@ export function createSidepanelBilling({ document, chrome, locale, onChange = ()
       if (inputSelection && target?.type === "text") target.setSelectionRange(...inputSelection);
       win.scrollTo?.({ top: priorScroll, behavior: "auto" });
     }
+  }
+
+  function celebrate(origin) {
+    document.querySelector(".billing-confetti")?.remove();
+    if (win.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) return;
+    const rect = origin?.getBoundingClientRect?.();
+    const x = rect?.width ? rect.left + rect.width / 2 : win.innerWidth / 2;
+    const y = rect?.height ? rect.top + rect.height / 2 : win.innerHeight * .25;
+    const layer = el("div", "billing-confetti");
+    layer.setAttribute("aria-hidden", "true");
+    layer.style.cssText = `--ox:${x}px;--oy:${y}px`;
+    const colors = ["#c4623f", "#e8a33d", "#4f8f6f", "#4a78c2", "#b5579a", "#f2d16b"];
+    const shapes = ["is-ribbon", "is-ball", "is-strip", "is-star", "is-ball", "is-ribbon", "is-strip"];
+    for (let index = 0; index < 70; index++) {
+      const angle = (-200 + Math.random() * 220) * Math.PI / 180;
+      const distance = 90 + Math.random() * 190;
+      const piece = el("i", shapes[index % shapes.length]);
+      piece.style.cssText = `--bx:${Math.cos(angle) * distance}px;--by:${Math.sin(angle) * distance}px;--fall:${140 + Math.random() * 220}px;--r:${(Math.random() - .5) * 1080}deg;--d:${Math.random() * 120}ms;--t:${1800 + Math.random() * 1200}ms;--w:${3 + Math.random() * 3}px;--c:${colors[index % colors.length]}`;
+      layer.append(piece);
+    }
+    document.body.append(layer);
+    win.setTimeout(() => layer.remove(), 3400);
   }
 
   function confirmDeactivation() {
@@ -402,8 +464,9 @@ export function createSidepanelBilling({ document, chrome, locale, onChange = ()
     modal.append(body); document.body.append(modal); modal.showModal();
   }
 
-  function open(next = "upgrade") {
+  function open(next = "upgrade", { platform } = {}) {
     if (next === "deactivate") { confirmDeactivation(); return; }
+    targetPlatform = SUPPORTED_PLATFORMS.find(item => item.key === platform) || null;
     if (!dialog) {
       returnFocus = document.activeElement;
       dialog = el("main", "billing-page");
@@ -483,8 +546,9 @@ export function createSidepanelBilling({ document, chrome, locale, onChange = ()
   win.addEventListener("pagehide", () => { stopPolling(); win.clearInterval(refreshTimer); }, { once: true });
   return {
     ready, open, close, mountSettings, mountSettingsEntry,
+    selectPlatforms: platforms => request("platforms", { platforms }),
     isOpen: () => !!dialog,
-    back() { if (screen === "upgrade" || screen === "success") close(); else change("upgrade"); },
+    back: goBack,
     getView: () => view,
     async afterOnboarding() { await ready; if (view?.available && view.tier !== "pro") open(view.needsPlatformChoice ? "platforms" : "upgrade"); },
     async initialPrompt() { await ready; if (view?.needsPlatformChoice && !document.querySelector("dialog[open]")) open("platforms"); },

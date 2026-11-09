@@ -1,5 +1,9 @@
 # Polaris: AI Chat Navigator Guidelines
 
+## Store Listing Copy
+
+- Read `store-listing.md` before editing marketplace descriptions or package metadata. Use its current Table of Contents / Outline wording and Chrome keyword constraints.
+
 ## Heading Marker Rule
 
 - Recognize and render heading markers according to the current platform level limit.

@@ -1,5 +1,5 @@
 // Bump when the public-record projection or Markdown parser changes.
-export const CONVERSATION_SNAPSHOT_VERSION = 3;
+export const CONVERSATION_SNAPSHOT_VERSION = 4;
 
 function imageNode(node) {
   if (typeof node.src !== "string" || typeof node.alt !== "string" || typeof node.imageKey !== "string") throw new Error("invalid-ast");
@@ -27,6 +27,10 @@ function blocks(nodes, depth = 0) {
   if (!Array.isArray(nodes) || depth > 128) throw new Error("invalid-ast");
   return nodes.map((node) => {
     if (node?.type === "image") return imageNode(node);
+    if (node?.type === "attachment" && typeof node.name === "string" && node.name.trim()) return {
+      type: "attachment", name: node.name,
+      ...Object.fromEntries(["mimeType", "url", "attachmentKey"].filter((key) => typeof node[key] === "string").map((key) => [key, node[key]]))
+    };
     if (node?.type === "paragraph" || node?.type === "heading" && Number.isInteger(node.level) && node.level >= 1 && node.level <= 6)
       return { type: node.type, ...(node.type === "heading" ? { level: node.level } : {}), children: inlineNodes(node.children, depth + 1) };
     if (node?.type === "rule") return { type: "rule" };
@@ -47,11 +51,13 @@ function blocks(nodes, depth = 0) {
 
 export function validConversationSnapshot(snapshot) {
   if (snapshot?.version !== CONVERSATION_SNAPSHOT_VERSION || typeof snapshot.title !== "string"
-    || typeof snapshot.branch !== "string" || !Array.isArray(snapshot.records)) return false;
+    || typeof snapshot.branch !== "string" || !Array.isArray(snapshot.records)
+    || snapshot.coverage !== undefined && !["loaded", "complete"].includes(snapshot.coverage)) return false;
   const ids = new Set();
   for (const record of snapshot.records) {
     if (!record || typeof record.id !== "string" || !record.id || ids.has(record.id)
       || !["user", "assistant"].includes(record.role)
+      || record.replyTo !== undefined && typeof record.replyTo !== "string"
       || !["markdown", "text", "anchorText", "searchText", "fingerprint"].every((key) => typeof record[key] === "string")
       || !record.fingerprint || !Array.isArray(record.blocks)
       || !record.blocks.every((block) => block && typeof block.type === "string")) return false;
@@ -66,8 +72,10 @@ export function publicConversationSnapshot(snapshot) {
   try {
     return {
       version: snapshot.version, title: snapshot.title, branch: snapshot.branch,
-      records: snapshot.records.map(({ id, role, time, markdown, text, blocks: ast, anchorText, searchText, fingerprint }) =>
-        ({ id, role, time: typeof time === "number" ? time : null, markdown, text, blocks: blocks(ast), anchorText, searchText, fingerprint }))
+      ...(snapshot.coverage ? { coverage: snapshot.coverage } : {}),
+      records: snapshot.records.map(({ id, role, time, markdown, text, blocks: ast, anchorText, searchText, fingerprint, replyTo }) =>
+        ({ id, role, time: typeof time === "number" ? time : null, markdown, text, blocks: blocks(ast), anchorText, searchText, fingerprint,
+          ...(typeof replyTo === "string" ? { replyTo } : {}) }))
     };
   } catch { return null; }
 }

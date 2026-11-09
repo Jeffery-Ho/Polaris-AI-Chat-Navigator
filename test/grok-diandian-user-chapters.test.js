@@ -133,6 +133,27 @@ test("Grok keeps support for conversations inside the legacy main wrapper", () =
   assert.equal(chapterTreeText(tree), "旧版提问\n\n旧版回答");
 });
 
+test("Grok user Makers and chapters exclude the screen-reader role heading", () => {
+  const prompt = "This file contains my complete conversation with an AI.\nContinue from the final message.";
+  const { tree, snapshot } = chaptersFor("grok", `<div id="u1" role="article" aria-labelledby="turn-heading-u1" data-testid="user-message"><h2 id="turn-heading-u1" class="sr-only" data-no-copy>You</h2>${prompt}</div>${platforms.grok.answer("<p>回答正文</p>")}`);
+  const marker = snapshot.markerGroups[0].user;
+  assert.equal(marker.title, prompt.replace("\n", " "));
+  assert.equal(marker.previewTitle, prompt.split("\n")[0]);
+  assert.equal(marker.element.querySelector("h2").textContent, "You");
+  assert.equal(chapterTreeText(tree), `${prompt.replace("\n", " ")}\n\n回答正文`);
+});
+
+for (const withRoleHeading of [false, true]) {
+  test(`Grok preserves actual prompt text starting with You (role heading: ${withRoleHeading})`, () => {
+    for (const prompt of ["You", "You said this before", "YouTube 视频总结"]) {
+      const { tree, snapshot } = chaptersFor("grok", `<div id="u1" data-testid="user-message">${withRoleHeading ? '<h2 class="sr-only" data-no-copy>You</h2>' : ""}<div>${prompt}</div></div>`);
+      assert.equal(snapshot.markerGroups[0].user.title, prompt);
+      assert.equal(snapshot.markerGroups[0].user.previewTitle, prompt);
+      assert.equal(chapterTreeText(tree), prompt);
+    }
+  });
+}
+
 test("Diandian keeps legacy Markdown extraction without duplicating nested answer bodies", () => {
   const { user } = platforms.diandian;
   const { tree, snapshot } = chaptersFor("diandian", user("u1", "旧版提问") + '<div class="ai-message"><div class="xhs-ai-md-container"><div class="markdown-styles-diandian-main-v3"><p>旧版回答</p></div></div></div>');

@@ -5,15 +5,17 @@ import {createSidepanelBilling} from '../src/sidepanel-billing.js';
 
 const base={available:true,tier:'trial',fullAccess:true,trialEndsAt:Date.now()+604800000,offerEndsAt:Date.now()+604800000,price:{amount:1290,originalAmount:1999},platforms:[],suggestedPlatforms:[],purchaseStatus:'none',hasPurchase:false};
 const tick=()=>new Promise(resolve=>setTimeout(resolve,0));
-async function fixture({tier='trial',locale='zh',redeemFails=false,statusFails=false,viewOverrides={}}={}){
+async function fixture({tier='trial',locale='zh',redeemFails=false,statusFails=false,platformsFail=false,viewOverrides={}}={}){
  const dom=new JSDOM('<button id="trigger">Pro</button><div id="settings"></div>',{url:'https://extension.test/sidepanel.html',pretendToBeVisual:true});const w=dom.window; w.scrollTo=()=>{};
  w.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','')};w.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');this.dispatchEvent(new w.Event('close'))};
  let view={...base,tier,fullAccess:tier==='pro'||tier==='trial',needsPlatformChoice:tier==='free',...viewOverrides};const requests=[],listeners=[];
  const chrome={runtime:{getURL:path=>`https://extension.test/${path}`,onMessage:{addListener:fn=>listeners.push(fn)},async sendMessage(m){requests.push(m);if(m.action==='redeem'){if(redeemFails)return {ok:false};view={...view,tier:'pro',fullAccess:true,hasPurchase:false};return {ok:true,view}}if(m.action==='checkout'){view={...view,hasPurchase:true,purchaseStatus:'pending'}}if(m.action==='purchase-status'&&statusFails)return {ok:false};if(m.action==='purchase-status')view={...view,tier:'pro',fullAccess:true,hasPurchase:false,purchaseStatus:'none'};if(m.action==='platforms')view={...view,platforms:m.platforms,needsPlatformChoice:false};return {ok:true,view}}}};
- const openedPages=[];
- const billing=createSidepanelBilling({document:w.document,chrome,locale,onOpenPage:page=>{openedPages.push('license');w.document.body.append(page)}});await billing.ready;billing.mountSettings(w.document.querySelector('#settings'));
+ const originalSend=chrome.runtime.sendMessage;let failPlatforms=platformsFail;
+ chrome.runtime.sendMessage=async m=>m.action==='platforms'&&failPlatforms?(requests.push(m),{ok:false}):originalSend(m);
+ const openedPages=[],enabledPlatforms=[];
+ const billing=createSidepanelBilling({document:w.document,chrome,locale,onPlatformEnabled:platform=>enabledPlatforms.push(platform.key),onOpenPage:page=>{openedPages.push('license');w.document.body.append(page)}});await billing.ready;billing.mountSettings(w.document.querySelector('#settings'));
  const click=label=>{const b=[...w.document.querySelectorAll('button')].find(n=>n.textContent===label);assert.ok(b,label);b.click();return b};
- return {dom,w,billing,requests,click,listeners,openedPages};
+ return {dom,w,billing,requests,click,listeners,openedPages,enabledPlatforms,allowPlatformSave(){failPlatforms=false}};
 }
 
 test('upgrade is dismissible and shows authoritative lifetime pricing in both languages',async()=>{
@@ -116,7 +118,7 @@ test('license settings remain usable immediately after redemption or payment act
    }else{
     f.click('以 $12.90 买断');await tick();f.click('我已付款，查看进度');
    }
-   await tick();f.click('返回 Polaris');
+   await tick();f.click('开始使用');
    assert.equal(f.w.document.querySelector('dialog'),null);
    const settingsButtons=[...f.w.document.querySelectorAll('#settings button')];
    assert.ok(settingsButtons.length>0);
@@ -239,4 +241,55 @@ test('trial banner is absent for Free, Pro and license forms; expired or invalid
  const f = await fixture();
  try { f.billing.open('redeem'); assert.equal(f.w.document.querySelector('.billing-trial'),null); }
  finally { f.dom.window.close(); }
+});
+
+test('trial platform choices save for Free without ending full access, and cancellation keeps the old pair',async()=>{
+ const f=await fixture({viewOverrides:{platforms:['chatgpt','kimi']}});
+ try{
+  f.billing.open('platforms');assert.doesNotMatch(f.w.document.querySelector('.billing-copy').textContent,/试用已结束/);
+  f.click('Kimi');f.click('Gemini');f.click('取消');assert.deepEqual(f.billing.getView().platforms,['chatgpt','kimi']);assert.equal(f.requests.some(r=>r.action==='platforms'),false);
+  f.billing.open('platforms');assert.equal(f.w.document.querySelector('[data-platform=kimi]').getAttribute('aria-pressed'),'true');
+  f.click('Kimi');f.click('Gemini');f.click('使用这两个平台');await tick();
+  assert.deepEqual(f.billing.getView().platforms,['chatgpt','gemini']);assert.equal(f.billing.getView().fullAccess,true);assert.equal(f.billing.getView().tier,'trial');
+  assert.equal(f.w.document.querySelector('.billing-page'),null);
+ }finally{f.dom.window.close()}
+});
+
+test('replacing a free platform requires an explicit choice and successful save before enabling the target',async()=>{
+ const f=await fixture({tier:'free',platformsFail:true,viewOverrides:{platforms:['chatgpt','kimi'],needsPlatformChoice:false}});
+ try{
+  f.billing.open('platform-access',{platform:'gemini'});assert.match(f.w.document.querySelector('.billing-title').textContent,/Gemini/);
+  f.click('更换免费平台，启用 Gemini');assert.equal(f.w.document.querySelector('.billing-page').dataset.screen,'replace-platform');
+  assert.equal(f.w.document.querySelector('.billing-body > .billing-action').disabled,true);
+  const choose=()=>f.w.document.querySelector('[name=replace-platform][value=kimi]').click();choose();assert.equal(f.requests.some(r=>r.action==='platforms'),false);
+  f.click('替换并启用 Gemini');await tick();assert.ok(f.w.document.querySelector('[role=alert]'));assert.deepEqual(f.billing.getView().platforms,['chatgpt','kimi']);assert.deepEqual(f.enabledPlatforms,[]);
+  assert.equal(f.w.document.querySelector('[value=kimi]').checked,true);f.allowPlatformSave();f.click('替换并启用 Gemini');await tick();
+  assert.deepEqual(f.billing.getView().platforms,['chatgpt','gemini']);assert.deepEqual(f.enabledPlatforms,['gemini']);assert.equal(f.w.document.querySelector('.billing-page'),null);
+  assert.equal(f.requests.some(r=>r.action==='checkout'),false);
+ }finally{f.dom.window.close()}
+});
+
+test('platform screens return to reading with Back or Escape, and Pro remains an explicit action',async()=>{
+ for(const locale of ['zh','en']){
+  const f=await fixture({tier:'free',locale,viewOverrides:{platforms:['chatgpt','kimi'],needsPlatformChoice:false}});
+  try{
+   f.billing.open('platforms');f.billing.back();assert.equal(f.w.document.querySelector('.billing-page'),null);
+   f.billing.open('platform-access',{platform:'gemini'});f.w.document.querySelector('.billing-body .secondary-button').click();
+   assert.equal(f.w.document.querySelector('.billing-page').dataset.screen,'upgrade');assert.equal(f.requests.some(r=>r.action==='checkout'),false);
+   f.billing.close();f.billing.open('replace-platform',{platform:'gemini'});f.w.document.querySelector('input').click();f.click(locale==='zh'?'取消':'Cancel');assert.equal(f.requests.some(r=>r.action==='platforms'),false);
+  }finally{f.dom.window.close()}
+ }
+});
+
+test('license activation celebrates once with confetti and concise copy',async()=>{
+ const f=await fixture({locale:'en'});try{f.billing.open('redeem');f.w.document.querySelector('input').value='POL-TEST';f.w.document.querySelector('form').dispatchEvent(new f.w.Event('submit',{bubbles:true,cancelable:true}));await tick();
+  const page=f.w.document.querySelector('.billing-page');assert.equal(page.dataset.screen,'success');assert.match(page.querySelector('.billing-title').textContent,/Welcome to Polaris Pro/);assert.ok(page.querySelector('.billing-success-star'));assert.equal(page.querySelector('.billing-note'),null);
+  const layer=f.w.document.querySelectorAll('.billing-confetti');assert.equal(layer.length,1);assert.equal(layer[0].getAttribute('aria-hidden'),'true');assert.ok(layer[0].children.length>0);
+  f.billing.open('success');assert.equal(f.w.document.querySelectorAll('.billing-confetti').length,1);
+  f.click('Start exploring');assert.equal(f.w.document.querySelector('.billing-page'),null)}finally{f.dom.window.close()}
+});
+
+test('license activation skips confetti when reduced motion is requested',async()=>{
+ const f=await fixture();try{f.w.matchMedia=query=>({matches:query.includes('reduce')});f.billing.open('redeem');f.w.document.querySelector('input').value='POL-TEST';f.w.document.querySelector('form').dispatchEvent(new f.w.Event('submit',{bubbles:true,cancelable:true}));await tick();
+  assert.equal(f.w.document.querySelector('.billing-page').dataset.screen,'success');assert.equal(f.w.document.querySelector('.billing-confetti'),null)}finally{f.dom.window.close()}
 });

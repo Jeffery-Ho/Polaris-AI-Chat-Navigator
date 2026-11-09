@@ -286,7 +286,7 @@ async function sendContentMessage(tabId, message, { injectIfMissing = false } = 
 }
 
 async function forwardCommand(message) {
-  if (["search-conversation", "get-index-chapter", "retry-conversation-index", "reload-conversation"].includes(message.command)
+  if (["search-conversation", "get-index-chapter", "retry-conversation-index", "read-loaded-conversation", "reload-conversation"].includes(message.command)
       || (message.command === "update-config" && message.patch?.chatgptHistoryMode === "complete")) {
     if (!billingAllowsIndex(await billingService.getAccess())) return { ok: false, reason: "pro-required" };
   }

@@ -94,9 +94,7 @@ test("Side Panel 使用窗口专属赤陶品牌层级", () => {
   assert.match(windowSource, /window-meta/);
   assert.match(windowSource, /window-settings-button/);
   assert.match(windowSource, /window-platform-icon/);
-  assert.match(windowSource, /platform\.setAttribute\("role", "img"\)/);
   assert.match(windowSource, /function activePlatform\(snapshot\) \{[\s\S]*?\|\| null;/);
-  assert.match(windowSource, /if \(snapshot\?\.supportedRoute && platformData\) \{[\s\S]*?meta\.append\(platform\);/);
   assert.doesNotMatch(windowSource, /favicon: "icons\/gpt-voyager-icon-32\.png"/);
   assert.match(windowSource, /createSettingsIcon/);
   assert.match(windowSource, /createPageNavigation/);

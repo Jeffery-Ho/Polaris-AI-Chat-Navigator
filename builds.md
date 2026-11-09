@@ -10,6 +10,146 @@
 - Version update type must be declared by the user before recording a build.
 - After each build is recorded, confirm the build number and version with the user.
 
+## 416
+
+- Date: 2026-11-09
+- Version: 0.111.0
+- Summary: Celebrate Pro license activation with a one-shot confetti burst and concise copy.
+- Notes: The success screen now centers a popping Pro star, a short title and lead, and a single Start exploring action. Small curled ribbons, balls, strips and stars burst outward from the star center and falls under gravity once on entering the screen, is aria-hidden, removes itself after 3.4s, and is skipped under reduced motion.
+
+## 415
+
+- Date: 2026-11-06
+- Version: 0.110.5
+- Summary: Recognize Claude's observed MessageAttachmentsFile cards and CardLink filenames.
+- Notes: Live validation found file cards without document icons and a CardLink title carrying the complete filename. Read these explicit semantics once per attachment, omit the duplicate caption and MD badge, and retain native card location. Replace the packaged Claude fixture with the observed DOM structure.
+
+## 414
+
+- Date: 2026-11-06
+- Version: 0.110.4
+- Summary: Retain Claude attachments outside the user prompt body and locate their native cards.
+- Notes: Read the full UserMessage envelope while limiting question text to the prompt body. Preserve attachment-only turns and full filenames exposed by file-button accessible names. Make indexed attachment tags independent native buttons that locate their own cards without toggling the question group, including repeated filenames. Keep timestamps and message actions out of question titles.
+
+## 413
+
+- Date: 2026-11-06
+- Version: 0.110.3
+- Summary: Recognize native user file cards without mixing file metadata into labels.
+- Notes: Detect filename and size/type rows in native attachment cards, including generated class names and truncated labels. Keep question text separate from file tags, omit file sizes and type captions from names, and resolve attachment navigation through the same DOM reader. Cover Qwen, DeepSeek, Doubao and Grok card structures, duplicate files and ordinary-text exclusions.
+
+## 412
+
+- Date: 2026-11-06
+- Version: 0.110.2
+- Summary: Refresh store descriptions with Table of Contents and Outline terminology.
+- Notes: Replace the outdated page-edge package summary, keep shared marketplace copy locally, and document Chrome keyword-spam limits. Omit the supported-platform brand list from descriptions. Store edits are saved as drafts only for this update; no new package is uploaded or submitted.
+
+## 411
+
+- Date: 2026-11-06
+- Version: 0.110.1
+- Summary: Separate the full-conversation mode tag from the preferences button.
+- Notes: Show Full conversation is on as a non-interactive status tag and keep Change preferences as a separate outlined action. Use a wrapping row at narrow widths and preserve the existing preferences destination and reading lifecycle.
+
+## 410
+
+- Date: 2026-11-06
+- Version: 0.110.0
+- Summary: Add a permanently dismissible changelog tip to the empty sidepanel.
+- Notes: Show recent release highlights in a floating card at the bottom of the start page and reopen the existing update dialog from View changelog. Store dismissal independently from release-read state, keep it across future versions, and synchronize it between sidepanels. Preserve the Settings entry and support English, Chinese, both themes and narrow sidepanels.
+
+## 409
+
+- Date: 2026-11-06
+- Version: 0.109.4
+- Summary: Show the conversation-reading preferences entry as an outlined button.
+- Notes: Reuse the existing full-width secondary button style for the preferences action in the reading-status card. Keep the full-conversation status text and existing preferences destination, with centered wrapping text for narrow sidepanels. Include the preceding selection-count layout adjustment.
+
+## 408
+
+- Date: 2026-11-06
+- Version: 0.109.3
+- Summary: Move the free-platform selection count beside the title.
+- Notes: Show the live selection count at the top right of the platform-choice heading in billing and onboarding. Remove the repeated Change anytime status line below the grid, while retaining the two-platform limit message and accessible selection announcements.
+
+## 407
+
+- Date: 2026-11-06
+- Version: 0.109.2
+- Summary: Stack platform-menu actions as full-width buttons and show a compact Trial badge.
+- Notes: Use the existing secondary button for Change free platforms and the Clay primary button for Get Pro, with the actions arranged vertically. Replace the long trial status with a localized badge and retain the full-access explanation as its tooltip. Preserve platform switching, free-platform management and the existing Pro destination.
+
+## 406
+
+- Date: 2026-11-06
+- Version: 0.109.1
+- Summary: Hide the header platform switcher outside supported AI websites.
+- Notes: Render the centered circular button only when the current page has a recognized supported platform. Remove the generic AI placeholder and close an open menu when leaving a supported site. Restore the actual platform icon on supported home and conversation pages, while keeping Settings and the empty-state platform shortcuts available elsewhere.
+
+## 405
+
+- Date: 2026-11-06
+- Version: 0.109.0
+- Summary: Add a default-list fallback beside Refresh page when full conversation reading fails.
+- Notes: Use default list switches the existing global reading preference to Follow the page, stopping full-history reading and restoring the default list. Keep the action next to Refresh page, localize both the label and explanation, and remove the recovery actions when reading resumes or full reading is disabled.
+
+## 404
+
+- Date: 2026-11-05
+- Version: 0.108.2
+- Summary: Restore the centered circular platform switcher with a compact menu indicator.
+- Notes: Return the platform icon to the horizontal center of the header. Keep equal button width and height at regular and narrow sizes, center the platform logo, and place the dropdown indicator in a small corner badge. Preserve hover, press, keyboard focus and expanded feedback without widening the circular control.
+
+## 403
+
+- Date: 2026-11-05
+- Version: 0.108.1
+- Summary: Place the platform switcher immediately to the left of Settings.
+- Notes: Replace centered absolute positioning with a trailing flex layout, keeping an 8px gap between the platform and Settings controls at regular and narrow sidepanel widths. Preserve the platform menu and independent button targets.
+
+## 402
+
+- Date: 2026-11-05
+- Version: 0.108.0
+- Summary: Add onboarding platform choices and a platform switcher in the sidepanel header.
+- Notes: Let Free users select two platforms at the end of onboarding and change them anytime. The header menu switches to existing tabs or opens a platform, with explicit free replacement and Pro paths for restricted platforms. Preserve full trial access, existing selections and local data. Save changes only after confirmation and retain the draft on failure. Existing users do not replay onboarding; Pro skips the two-platform step.
+
+## 401
+
+- Date: 2026-11-05
+- Version: 0.107.0
+- Summary: Extend structured conversation indexing and virtual lists across supported platforms.
+- Notes: Keep the ChatGPT and Gemini readers and add a shared DOM reader for the other nine platforms. Preserve message order, native IDs, user/reply ownership, formatting, file names and image targets as mounted windows change. Fix Kimi paragraph titles, thinking-body exclusion and attachment labels. Read native history in both directions with cancellation and explicit coverage; keep unconfirmed history labeled as loaded content. Reuse virtual TOC and Outline, source navigation, user thumbnails and scoped export. Preserve existing platform recognition settings and account-scoped cache boundaries.
+
+## 400
+
+- Date: 2026-11-05
+- Version: 0.106.2
+- Summary: Restore the conversation export entry as a text button.
+- Notes: Show Export or its Chinese label in the content-area toolbar and align its accessible name and tooltip. Preserve conversation copying, the export dialog and the prompt card's top-right copy icon.
+
+## 399
+
+- Date: 2026-11-05
+- Version: 0.106.1
+- Summary: Exclude Grok's screen-reader user role heading from Makers.
+- Notes: Read user content separately from the native role heading so Maker titles, previews and user chapter titles omit the extra You label. Preserve actual prompts beginning with You, You said or YouTube, legacy message markup and the original page accessibility heading.
+
+## 398
+
+- Date: 2026-11-05
+- Version: 0.106.0
+- Summary: Add a copyable conversation handoff prompt to the export dialog.
+- Notes: Place a small helper description above a distinct prompt card between format selection and the export action, without a heading. A top-right copy icon changes to a checkmark on success. Provide localized prompts that retain user and assistant context, recap the last three exchanges, and continue from the final message. Distinguish partial history, allow manual selection, and preserve format selection while reporting retryable clipboard failures.
+
+## 397
+
+- Date: 2026-11-05
+- Version: 0.105.12
+- Summary: Move full-conversation reading progress into the sidepanel above its loading skeleton.
+- Notes: Remove the website status node and native-list placement dependency. Keep data reading and native preparation as separate steps, preserve message counts and scoped partial-read recovery, and show progress in both TOC and Outline only while complete mode is enabled. Reuse sidepanel theme tokens and hide the duplicate skeleton announcement.
+
 ## 396
 
 - Date: 2026-11-04

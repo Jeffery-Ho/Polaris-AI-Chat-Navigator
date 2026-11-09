@@ -73,6 +73,16 @@ test("image labels locate their own mounted reply without image downloads or mat
   } finally { s.finish(); }
 });
 
+test("file labels locate their owning ChatGPT message when no separate file anchor is exposed", async () => {
+  const s = setup('<article data-message-id="files" data-message-author-role="assistant"><p>文件已生成</p></article>');
+  try {
+    await s.send("page", { payload: imagePage([{ id: "files", author: { role: "assistant" }, content: { content_type: "multimodal_text", parts: ["文件已生成", { content_type: "file_asset_pointer", file_name: "report.pdf", mime_type: "application/pdf" }] } }]), replace: true });
+    const item = s.controller.outline().items.find((item) => item.attachment);
+    assert.ok(item);
+    assert.equal(s.controller.resolveLocation(item.markerKey).element, s.win.document.querySelector('[data-message-id="files"]'));
+  } finally { s.finish(); }
+});
+
 test("user image source targets resolve the user's own message without image requests", async () => {
   const s = setup('<article data-message-id="user-picture" data-message-author-role="user"></article><article data-message-id="answer" data-message-author-role="assistant"></article>');
   try {

@@ -53,6 +53,24 @@ test('Gemini preserves image-only uploads and filenames from attachment records'
   assert.equal(messages[0].content.parts[0].asset_pointer,'https://lh3.googleusercontent.com/image');
   assert.equal(messages[0].content.parts[0].alt,'photo.png');
 });
+test('Gemini fixed file slots preserve named attachment parts without private pointers', async () => {
+  const item=turn('files'); item[2][0][0]='分析附件';
+  const file=[null,1,'report.pdf','https://files.example.com/report.pdf',null,null,null,null,1,null,null,'application/pdf'];
+  const privateFile=[null,1,'private.txt','file-service://internal',null,null,null,null,1,null,null,'text/plain'];
+  const image=[null,1,'photo.png','https://lh3.googleusercontent.com/image',null,null,null,null,1,null,null,'image/png'];
+  item[2][0][4]=[[file,image,privateFile]];
+  const messages=geminiMessages([item]);
+  assert.deepEqual(messages[0].content.parts[1],{content_type:'file_asset_pointer',file_name:'report.pdf',mime_type:'application/pdf',url:'https://files.example.com/report.pdf'});
+  assert.equal(messages[0].content.parts[2].content_type,'image_asset_pointer');
+  assert.deepEqual(messages[0].content.parts[3],{content_type:'file_asset_pointer',file_name:'private.txt',mime_type:'text/plain'});
+  assert.doesNotMatch(JSON.stringify(messages),/file-service|internal/);
+  const index=createConversationIndex({platform:'gemini'});
+  await index.ingest({messages,page_info:{has_previous_page:false,has_next_page:false}}); index.finish();
+  const user=index.getOutline().items[0];
+  assert.equal(user.title,'分析附件');
+  assert.deepEqual(user.attachments.map(file=>file.name),['report.pdf','private.txt']);
+  assert.deepEqual(index.exportConversation().messages[0].blocks.map(block=>block.type),['paragraph','attachment','image','attachment']);
+});
 test('history pages publish only new messages and the adjacent branch boundary', async () => {
   const pages=[];
   await readGeminiConversation({route:{kind:'app',id:'test'},rpc:async(id,args)=>args[2]?[[turn('a')],null]:[[turn('c'),turn('b')],'next'],onPage:(payload,options)=>pages.push({payload,options})});
