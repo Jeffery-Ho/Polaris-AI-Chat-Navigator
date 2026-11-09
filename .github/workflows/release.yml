@@ -119,18 +119,16 @@ jobs:
             manifest_path="$(mktemp "$verification_dir/manifest.XXXXXX")"
             unzip -p "$archive_path" manifest.json > "$manifest_path"
             EXPECTED_VERSION="$VERSION" EXPECTED_VERSION_NAME="${VERSION}(${BUILD})" \
-              node - "$manifest_path" <<'NODE'
-          const fs = require("node:fs");
-
-          const [manifestPath] = process.argv.slice(2);
-          const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-          if (manifest.version !== process.env.EXPECTED_VERSION) {
-            throw new Error(`Unexpected manifest version: ${manifest.version}`);
-          }
-          if (manifest.version_name !== process.env.EXPECTED_VERSION_NAME) {
-            throw new Error(`Unexpected manifest version_name: ${manifest.version_name}`);
-          }
-          NODE
+              node -e '
+                const fs = require("node:fs");
+                const manifest = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+                if (manifest.version !== process.env.EXPECTED_VERSION) {
+                  throw new Error("Unexpected manifest version: " + manifest.version);
+                }
+                if (manifest.version_name !== process.env.EXPECTED_VERSION_NAME) {
+                  throw new Error("Unexpected manifest version_name: " + manifest.version_name);
+                }
+              ' "$manifest_path"
             rm -f "$manifest_path"
           }
 
@@ -179,10 +177,8 @@ jobs:
           cmp --silent "$archive" "$stable_archive"
 
           notes="$(mktemp)"
-          cat > "$notes" <<EOF
-Built from source \`${SOURCE_SHA}\`.
-Chrome manifest ${VERSION}(${BUILD}).
-EOF
+          printf 'Built from source `%s`.\nChrome manifest %s(%s).\n' \
+            "$SOURCE_SHA" "$VERSION" "$BUILD" > "$notes"
 
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             release_is_draft="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)"
