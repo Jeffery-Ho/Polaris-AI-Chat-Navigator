@@ -214,7 +214,22 @@ async function route(req, env) {
     const id = crypto.randomUUID();
     const claim = randomToken();
     await stmt(env, "INSERT INTO polaris_billing_purchase_intents(id,installation_hash,claim_hash,claim_expires_at,amount,created_at) VALUES(?,?,?,?,?,?)", id, row.id_hash, await hash(env.LICENSE_HASH_SECRET, `claim:${claim}`), Date.now() + DAY, amount, Date.now()).run();
-    const session = await stripe(env, "checkout/sessions", { method: "POST", idempotencyKey: id, body: { mode: "payment", "line_items[0][price]": priceId, "line_items[0][quantity]": "1", "metadata[purchaseId]": id, success_url: checkoutReturn("success"), cancel_url: checkoutReturn("cancel") } });
+    const session = await stripe(env, "checkout/sessions", { method: "POST", idempotencyKey: id, body: {
+      ui_mode: "hosted_page",
+      mode: "payment",
+      billing_address_collection: "auto",
+      "phone_number_collection[enabled]": "false",
+      "automatic_tax[enabled]": "false",
+      allow_promotion_codes: "false",
+      submit_type: "auto",
+      integration_identifier: "hosted_web_0001",
+      origin_context: "web",
+      "line_items[0][price]": priceId,
+      "line_items[0][quantity]": "1",
+      "metadata[purchaseId]": id,
+      success_url: checkoutReturn("success"),
+      cancel_url: checkoutReturn("cancel")
+    } });
     if (!session.id?.startsWith("cs_live_") || session.livemode !== true || new URL(session.url).origin !== "https://checkout.stripe.com") throw new ApiError(502, "invalid_live_checkout");
     await stmt(env, "UPDATE polaris_billing_purchase_intents SET session_id=? WHERE id=?", session.id, id).run();
     return json({ checkoutUrl: session.url, purchaseId: id, claimToken: claim });
@@ -247,7 +262,22 @@ async function route(req, env) {
     const id = crypto.randomUUID();
     const claim = randomToken();
     await stmt(env, "INSERT INTO polaris_billing_purchase_intents(id,installation_hash,claim_hash,claim_expires_at,amount,created_at) VALUES(?,?,?,?,?,?)", id, await webPurchaseHash(env, id), await hash(env.LICENSE_HASH_SECRET, `claim:${claim}`), Date.now() + DAY, amount, Date.now()).run();
-    const session = await stripe(env, "checkout/sessions", { method: "POST", idempotencyKey: id, body: { mode: "payment", "line_items[0][price]": priceId, "line_items[0][quantity]": "1", "metadata[purchaseId]": id, "metadata[channel]": "web", success_url: checkoutReturn("success", id), cancel_url: checkoutReturn("cancel", id) } });
+    const session = await stripe(env, "checkout/sessions", { method: "POST", idempotencyKey: id, body: {
+      ui_mode: "hosted_page",
+      mode: "payment",
+      billing_address_collection: "auto",
+      "phone_number_collection[enabled]": "false",
+      "automatic_tax[enabled]": "false",
+      allow_promotion_codes: "false",
+      submit_type: "auto",
+      integration_identifier: "hosted_web_0001",
+      origin_context: "web",
+      "line_items[0][price]": priceId,
+      "line_items[0][quantity]": "1",
+      "metadata[purchaseId]": id,
+      success_url: checkoutReturn("success", id),
+      cancel_url: checkoutReturn("cancel", id)
+    } });
     if (!session.id?.startsWith("cs_live_") || session.livemode !== true || new URL(session.url).origin !== "https://checkout.stripe.com") throw new ApiError(502, "invalid_live_checkout");
     await stmt(env, "UPDATE polaris_billing_purchase_intents SET session_id=? WHERE id=?", session.id, id).run();
     return json({ checkoutUrl: session.url, purchaseId: id, claimToken: claim, amount, currency: "usd", originalAmount: REGULAR_AMOUNT });
