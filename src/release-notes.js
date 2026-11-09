@@ -1,5 +1,10 @@
 const RELEASE_NOTES = Object.freeze([
   {
+    version: "1.0.1",
+    en: { title: "Production checkout", changes: ["Pro purchases in Chrome now use the production license service. USD 12.90 remains available only during the server-recorded seven-day trial, and USD 19.99 is the regular lifetime price."] },
+    zh: { title: "正式环境购买", changes: ["Chrome 中的 Pro 购买改为使用正式许可证服务。USD 12.90 只在服务器记录的 7 天试用期内可用，之后为 USD 19.99。"] }
+  },
+  {
     version: "1.0.0",
     en: { title: "Polaris 1.0", changes: ["The Pro page opens with your membership status and device controls.", "What's New in Settings shows the three most recent feature releases and links to the complete release history."] },
     zh: { title: "Polaris 1.0 正式版", changes: ["打开 Pro 页面即可查看会员状态和管理本设备。", "设置中的「更新内容」显示最近三个功能版本，并可打开官网查看完整更新记录。"] }

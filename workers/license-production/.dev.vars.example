@@ -1,0 +1,6 @@
+# Production signing and Stripe credentials. Generate new values.
+# Do not copy polaris-license-test secrets or put live values in git.
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
+LICENSE_HASH_SECRET=
+LICENSE_DELIVERY_ENCRYPTION_KEY=
