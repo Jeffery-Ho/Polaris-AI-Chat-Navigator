@@ -13,9 +13,10 @@
 ## 417
 
 - Date: 2026-11-09
-- Version: 0.111.1
-- Summary: Lead the Pro owner page with the closing card.
+- Version: 1.0.0
+- Summary: Release Polaris 1.0 with the Pro status page and recent update notes.
 - Notes: Pro owners now see the clay closing card (star, Keep exploring, Return to Polaris, Active · Unlimited devices) at the top, with Deactivate this device inside the card. The visible heading, status line, unlocked note and duplicate return button are removed; the page heading stays for screen readers and focus. Pro owners no longer see the Already have a license? link or the trial FAQ. Add the 0.111.0 What's New entry so update notes no longer fall back to generic copy. Settings What's New now lists the three most recent feature notes and links to the full release notes at polaris-ai.work/v2/release-notes/.
+- Release notes: Show the full 1.0.0 version in the update dialog and Settings. The website keeps the previous release entries and dates.
 
 ## 416
 

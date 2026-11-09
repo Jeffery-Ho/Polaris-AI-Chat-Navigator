@@ -221,3 +221,13 @@ test("0.111 shows the Pro welcome note instead of the generic fallback", () => {
   assert.equal(note.en.title, "A warmer Pro welcome");
   assert.equal(note.zh.title, "更有仪式感的 Pro 激活");
 });
+
+test("Polaris 1.0 preserves the major version label in both update views", () => {
+  const upgrade = releaseNotesForUpdate("0.111.1", "1.0.0");
+  assert.deepEqual(upgrade.map((note) => note.version), ["1.0.0"]);
+  assert.equal(upgrade[0].isFallback, undefined);
+  assert.equal(upgrade[0].en.title, "Polaris 1.0");
+  assert.equal(upgrade[0].zh.title, "Polaris 1.0 正式版");
+  assert.deepEqual(releaseNotesForUpdate(null, "1.0.0").map((note) => note.version), ["1.0.0", "0.111", "0.110"]);
+  assert.deepEqual(releaseNotesForUpdate("1.0.0", "1.0.1"), []);
+});

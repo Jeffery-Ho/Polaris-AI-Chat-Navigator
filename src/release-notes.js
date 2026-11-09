@@ -1,5 +1,10 @@
 const RELEASE_NOTES = Object.freeze([
   {
+    version: "1.0.0",
+    en: { title: "Polaris 1.0", changes: ["The Pro page opens with your membership status and device controls.", "What's New in Settings shows the three most recent feature releases and links to the complete release history."] },
+    zh: { title: "Polaris 1.0 正式版", changes: ["打开 Pro 页面即可查看会员状态和管理本设备。", "设置中的「更新内容」显示最近三个功能版本，并可打开官网查看完整更新记录。"] }
+  },
+  {
     version: "0.111.0",
     en: { title: "A warmer Pro welcome", changes: ["Activating Pro with your license now opens a short celebration, with ribbons and confetti bursting from the Pro star. Pro owners see a cleaner Pro page that starts with their status card and skips purchase and trial guidance."] },
     zh: { title: "更有仪式感的 Pro 激活", changes: ["输入许可证激活 Pro 后，彩带与彩球会从星标弹出庆祝；已激活用户打开 Pro 页面时，直接看到状态卡片，不再显示购买与试用相关说明。"] }
@@ -909,6 +914,6 @@ export function releaseNotesForUpdate(lastSeenVersion, currentVersion, maximumNo
 
   return notes.slice(-maximumNotes).reverse().map((note) => ({
     ...note,
-    version: minorVersion(note.version)
+    version: /^[1-9]\d*\.0\.0$/.test(note.version) ? note.version : minorVersion(note.version)
   }));
 }
