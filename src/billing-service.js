@@ -1,4 +1,4 @@
-import { BILLING_API_URL } from "./billing-config.js";
+import { BILLING_API_URL, billingHostPermission } from "./billing-config.js";
 import { SUPPORTED_PLATFORMS } from "./supported-platforms.js";
 
 export const BILLING_STORAGE_KEY = "polaris-billing-v1";
@@ -25,8 +25,17 @@ export function createBillingService({ storage, fetch: request = globalThis.fetc
     onChange(view());
   }
 
+  function requestUrl(path) {
+    const permission = billingHostPermission(apiUrl);
+    if (!permission) throw new Error("billing_unavailable");
+    let endpoint;
+    try { endpoint = new URL(path, apiUrl); } catch { throw new Error("billing_unavailable"); }
+    if (`${endpoint.origin}/*` !== permission) throw new Error("billing_unavailable");
+    return endpoint.href;
+  }
+
   async function call(path, body, headers = {}) {
-    const response = await request(`${apiUrl}${path}`, {
+    const response = await request(requestUrl(path), {
       method: body === undefined ? "GET" : "POST",
       headers: { "Content-Type": "application/json", "X-Installation-Token": data.installationToken, ...headers },
       body: body === undefined ? undefined : JSON.stringify(body),

@@ -16,7 +16,7 @@ export const GECKO_ID = "polaris@polaris-ai.work";
 // sidebar_action there, so drop the Chromium-only keys.
 function browserManifest(browser) {
   const shared = {
-    host_permissions: [...SUPPORTED_MATCHES, BILLING_HOST_PERMISSION],
+    host_permissions: [...SUPPORTED_MATCHES, ...(BILLING_HOST_PERMISSION ? [BILLING_HOST_PERMISSION] : [])],
     web_accessible_resources: web_accessible_resources.map((entry) => ({ ...entry, matches: [...SUPPORTED_MATCHES] }))
   };
   if (browser !== "firefox") return { ...manifest, ...shared };
