@@ -677,6 +677,11 @@ test("manual update page survives conversation snapshots without opening the aut
     s.win.document.querySelector('[data-settings-destination="updates"]').click();
     const page = s.win.document.querySelector('.settings-panel[data-settings-page="updates"]');
     assert.ok(page.textContent.includes("在层级列表中阅读章节"));
+    assert.ok(page.querySelectorAll(".settings-update-note").length > 1);
+    const allUpdates = page.querySelector(".settings-updates-all");
+    assert.equal(allUpdates.textContent, "查看全部更新");
+    assert.equal(allUpdates.href, "https://polaris-ai.work/v2/release-notes/");
+    assert.equal(allUpdates.target, "_blank");
     assert.equal(s.win.document.querySelector("dialog[open]"), null);
     s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...s.snapshot, revision: 2 } });
     assert.equal(s.win.document.querySelector('.settings-panel[data-settings-page="updates"]'), page);

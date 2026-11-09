@@ -1,5 +1,10 @@
 const RELEASE_NOTES = Object.freeze([
   {
+    version: "0.111.0",
+    en: { title: "A warmer Pro welcome", changes: ["Activating Pro with your license now opens a short celebration, with ribbons and confetti bursting from the Pro star. Pro owners see a cleaner Pro page that starts with their status card and skips purchase and trial guidance."] },
+    zh: { title: "更有仪式感的 Pro 激活", changes: ["输入许可证激活 Pro 后，彩带与彩球会从星标弹出庆祝；已激活用户打开 Pro 页面时，直接看到状态卡片，不再显示购买与试用相关说明。"] }
+  },
+  {
     version: "0.110.0",
     en: { title: "Updates within reach", changes: ["The empty sidepanel now has a floating update tip at the bottom. Preview recent highlights and open the changelog, or dismiss the tip once to hide it permanently, including after future updates. Update notes remain available in Settings."] },
     zh: { title: "随手查看近期更新", changes: ["侧栏空页面底部新增悬浮更新提示，可预览近期亮点并打开更新日志；关闭一次后永久隐藏，后续升级也不再出现。仍可在设置中查看更新说明。"] }

@@ -18,6 +18,8 @@ import { createSidepanelPlatformMenu } from "./sidepanel-platform-menu.js";
 import { createVirtualList } from "./virtual-list.js";
 import { createSidepanelConversationStatus } from "./sidepanel-conversation-status.js";
 
+const RELEASE_NOTES_URL = "https://polaris-ai.work/v2/release-notes/";
+
 export function initializeSidepanel() {
   const SYSTEM_THEME_QUERY = "(prefers-color-scheme: dark)";
   const root = document.getElementById("polaris-window");
@@ -1556,7 +1558,7 @@ export function initializeSidepanel() {
 
   function renderSettingsUpdates(panel) {
     const manifest = chrome.runtime.getManifest();
-    for (const note of releaseNotesForUpdate(null, manifest.version, 1)) {
+    for (const note of releaseNotesForUpdate(null, manifest.version, 3)) {
       const localized = note[locale] || note.en;
       const section = element("section", "settings-section settings-update-note");
       section.appendChild(element("h2", "settings-section-title", `${note.version} · ${localized.title}`));
@@ -1565,6 +1567,11 @@ export function initializeSidepanel() {
       section.appendChild(changes);
       panel.appendChild(section);
     }
+    const allUpdates = element("a", "settings-link settings-updates-all", t("settings.updates.viewAll"));
+    allUpdates.href = RELEASE_NOTES_URL;
+    allUpdates.target = "_blank";
+    allUpdates.rel = "noreferrer";
+    panel.appendChild(allUpdates);
   }
 
   function renderSettingsAbout(panel) {

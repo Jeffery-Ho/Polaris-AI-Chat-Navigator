@@ -293,3 +293,16 @@ test('license activation skips confetti when reduced motion is requested',async(
  const f=await fixture();try{f.w.matchMedia=query=>({matches:query.includes('reduce')});f.billing.open('redeem');f.w.document.querySelector('input').value='POL-TEST';f.w.document.querySelector('form').dispatchEvent(new f.w.Event('submit',{bubbles:true,cancelable:true}));await tick();
   assert.equal(f.w.document.querySelector('.billing-page').dataset.screen,'success');assert.equal(f.w.document.querySelector('.billing-confetti'),null)}finally{f.dom.window.close()}
 });
+
+test('pro owners see the closing card first without the purchase heading copy',async()=>{
+ const f=await fixture({tier:'pro',locale:'en'});try{f.billing.open();const body=f.w.document.querySelector('.billing-body');
+  const title=body.querySelector('#billing-title');assert.equal(title.textContent,'Your Polaris Pro');assert.ok(title.classList.contains('billing-visually-hidden'));
+  assert.equal(title.nextElementSibling,body.querySelector('.billing-closing'));assert.equal(body.querySelector(':scope > .billing-copy'),null);assert.equal(body.querySelector(':scope > .billing-note'),null);
+  assert.equal(body.querySelectorAll('.billing-closing').length,1);assert.equal([...body.querySelectorAll('button')].filter(b=>b.textContent==='Return to Polaris').length,1);
+  assert.ok(body.querySelector('.billing-closing').contains([...body.querySelectorAll('button')].find(b=>b.textContent==='Deactivate this device')))}finally{f.dom.window.close()}
+});
+
+test('pro owners do not see redeem or trial guidance on the upgrade page',async()=>{
+ for(const tier of ['pro','trial']){const f=await fixture({tier,locale:'en'});try{f.billing.open();const page=f.w.document.querySelector('.billing-page');const labels=[...page.querySelectorAll('button')].map(b=>b.textContent);const questions=[...page.querySelectorAll('summary')].map(n=>n.textContent);
+  assert.equal(labels.includes('Already have a license?'),tier!=='pro',tier);assert.ok(labels.includes('Recover your license'),tier);assert.equal(questions.includes('What happens after my trial?'),tier!=='pro',tier);assert.ok(questions.includes('How do I activate other devices?'),tier)}finally{f.dom.window.close()}}
+});

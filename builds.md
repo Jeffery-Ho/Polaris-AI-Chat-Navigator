@@ -10,6 +10,13 @@
 - Version update type must be declared by the user before recording a build.
 - After each build is recorded, confirm the build number and version with the user.
 
+## 417
+
+- Date: 2026-11-09
+- Version: 0.111.1
+- Summary: Lead the Pro owner page with the closing card.
+- Notes: Pro owners now see the clay closing card (star, Keep exploring, Return to Polaris, Active · Unlimited devices) at the top, with Deactivate this device inside the card. The visible heading, status line, unlocked note and duplicate return button are removed; the page heading stays for screen readers and focus. Pro owners no longer see the Already have a license? link or the trial FAQ. Add the 0.111.0 What's New entry so update notes no longer fall back to generic copy. Settings What's New now lists the three most recent feature notes and links to the full release notes at polaris-ai.work/v2/release-notes/.
+
 ## 416
 
 - Date: 2026-11-09

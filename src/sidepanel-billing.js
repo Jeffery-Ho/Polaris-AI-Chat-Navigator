@@ -193,10 +193,8 @@ export function createSidepanelBilling({ document, chrome, locale, onChange = ()
     if (screen === "upgrade") {
       if (view?.tier === "pro") {
         heading.textContent = text("你的 Polaris Pro", "Your Polaris Pro");
-        lead.textContent = text("已激活 · 一次买断 · 不限设备", "Active · Lifetime access · Unlimited devices");
-        body.append(note(text("全部支持的平台与长对话索引已解锁。", "Every supported platform and long-conversation indexing are unlocked.")));
-        body.append(button(text("返回 Polaris", "Return to Polaris"), close));
-        body.append(link(text("停用本设备", "Deactivate this device"), confirmDeactivation));
+        heading.classList.add("billing-visually-hidden");
+        lead.remove();
       } else {
         heading.textContent = text("像高手一样，掌握长对话。", "Get long conversation like a pro.");
         lead.textContent = text("全部支持的平台、长对话索引，一次解锁。", "Every supported platform and long-conversation indexing, unlocked with one purchase.");
@@ -293,11 +291,13 @@ export function createSidepanelBilling({ document, chrome, locale, onChange = ()
         if (view?.tier === "free") body.append(link(text("更换免费平台", "Change free platforms"), () => change("platforms")));
       }
       const links = el("div", "billing-license-links");
-      links.append(link(text("已有许可证？", "Already have a license?"), () => change("redeem")), link(text("找回许可证", "Recover your license"), () => change("recover")));
+      const isPro = view?.tier === "pro";
+      if (!isPro) links.append(link(text("已有许可证？", "Already have a license?"), () => change("redeem")));
+      links.append(link(text("找回许可证", "Recover your license"), () => change("recover")));
       body.append(links);
       const faq = el("section", "billing-faq"); faq.append(el("h2", "billing-section-title", text("常见问题", "Common questions")));
       for (const [question, answer] of [
-        [text("试用结束后会怎样？", "What happens after my trial?"), text("自动进入 Free，你可以选择任意两个平台并随时更换。长对话索引将不可用，但已有本地数据不会删除。不会自动扣款。", "You move to Free and can choose any two platforms, switching anytime. Long-conversation indexing becomes unavailable; local data stays. There is no automatic charge.")],
+        ...(isPro ? [] : [[text("试用结束后会怎样？", "What happens after my trial?"), text("自动进入 Free，你可以选择任意两个平台并随时更换。长对话索引将不可用，但已有本地数据不会删除。不会自动扣款。", "You move to Free and can choose any two platforms, switching anytime. Long-conversation indexing becomes unavailable; local data stays. There is no automatic charge.")]]),
         [text("买断是否需要续费？", "Does lifetime access renew?"), text("一次购买，无需续费。首次启用七天内享受优惠，具体价格与截止时间以上方显示为准。", "One purchase, no renewals. A welcome offer is available for seven days from first use. See the price and deadline above.")],
         [text("许可证如何用于其他设备？", "How do I activate other devices?"), text("在其他设备打开「已有许可证？」并输入许可证即可激活，不限制设备数。", "Open “Already have a license?” on another device and enter your license to activate it. There is no device limit.")]
       ]) { const item = el("details"); item.append(el("summary", "", question), el("p", "billing-copy", answer)); faq.append(item); }
@@ -313,8 +313,13 @@ export function createSidepanelBilling({ document, chrome, locale, onChange = ()
         : view?.price ? text(`立即购买 · $${(view.price.amount / 100).toFixed(2)}`, `Buy now · $${(view.price.amount / 100).toFixed(2)}`) : text("重试连接", "Retry connection");
       const purchase = button(label, buy); purchase.classList.add("billing-closing-buy");
       closing.append(purchase, el("p", "billing-closing-fine", view?.tier === "pro" ? text("已激活 · 不限设备", "Active · Unlimited devices") : pending ? text("已有订单，无需重复购买。", "Your purchase is in progress. No need to buy again.") : text("USD · 一次买断 · 无自动续费", "USD · Lifetime access · No recurring charges")));
-      if (view?.tier !== "pro") closing.append(link(text("也可以继续免费使用", "Or continue for free"), () => view?.needsPlatformChoice ? change("platforms") : close()));
-      body.append(closing);
+      if (view?.tier === "pro") {
+        closing.append(link(text("停用本设备", "Deactivate this device"), confirmDeactivation));
+        heading.after(closing);
+      } else {
+        closing.append(link(text("也可以继续免费使用", "Or continue for free"), () => view?.needsPlatformChoice ? change("platforms") : close()));
+        body.append(closing);
+      }
     } else if (screen === "checkout" || screen === "processing") {
       const activating = view?.purchaseStatus === "paid";
       heading.textContent = screen === "checkout" ? text("在 Stripe 完成付款", "Complete payment with Stripe") : activating ? text("正在激活 Polaris Pro", "Activating Polaris Pro") : text("正在确认付款", "Confirming your payment");

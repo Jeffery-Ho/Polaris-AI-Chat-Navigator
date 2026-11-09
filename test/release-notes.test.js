@@ -213,3 +213,11 @@ test("章节目录与阅读卡片功能提供内置更新说明", () => {
   assert.match(note.zh.changes[0], /完整目录/);
   assert.match(note.zh.changes[0], /Markdown/);
 });
+
+test("0.111 shows the Pro welcome note instead of the generic fallback", () => {
+  const [note] = releaseNotesForUpdate("0.110.5", "0.111.1");
+  assert.equal(note.version, "0.111");
+  assert.equal(note.isFallback, undefined);
+  assert.equal(note.en.title, "A warmer Pro welcome");
+  assert.equal(note.zh.title, "更有仪式感的 Pro 激活");
+});

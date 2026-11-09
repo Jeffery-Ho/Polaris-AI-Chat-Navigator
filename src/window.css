@@ -1125,6 +1125,7 @@ button { color: inherit; }
 .settings-platform-icon { flex: 0 0 20px; width: 20px; height: 20px; object-fit: contain; }
 .settings-update-changes { margin: 0; padding-left: 20px; font-size: 14px; line-height: 1.65; }
 .settings-update-changes > li + li { margin-top: 8px; }
+.settings-updates-all { display: inline-flex; align-items: center; min-height: 44px; margin: 4px 0 0; font-size: 13px; text-decoration: underline; text-underline-offset: 4px; }
 
 .settings-range {
   display: grid;
@@ -1809,6 +1810,9 @@ body.billing-open { min-width: 0; }
 .billing-closing .billing-closing-buy:hover { filter: brightness(.97); }
 .billing-closing :is(button, .billing-link):focus-visible { outline-color: #fff; }
 :root[data-theme="dark"] .billing-closing { background-color: var(--polaris-clay-800); }
+.billing-visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+/* Pro owners see the closing card first, in place of the purchase heading. */
+.billing-visually-hidden + .billing-closing { margin-top: 0; }
 @media (min-width: 640px) { .billing-closing { margin-top: 56px; padding: 40px 32px; } }
 
 /* Reference-led pricing typography; Polaris retains its terracotta palette. */
