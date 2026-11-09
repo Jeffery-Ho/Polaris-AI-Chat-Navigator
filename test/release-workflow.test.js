@@ -8,19 +8,25 @@ const [workflow, validator] = await Promise.all([
 ]);
 
 test("发布工作流保留扩展构建与发布门槛", () => {
-  assert.match(workflow, /push:\s+branches:\s+- main/);
   assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /tags:\s+- "v\*-build\.\*"/);
+  assert.doesNotMatch(workflow, /push:\s+branches:\s+- main/);
+  assert.match(workflow, /permissions:\s+contents: read/);
   assert.match(workflow, /permissions:\s+contents: write/);
   assert.match(workflow, /pnpm install --frozen-lockfile/);
   assert.match(workflow, /run: pnpm check/);
   assert.match(workflow, /run: pnpm test/);
   assert.match(workflow, /run: pnpm build/);
   assert.match(workflow, /node scripts\/validate-extension-package\.js/);
+  assert.match(workflow, /node scripts\/release-gate\.js/);
   assert.match(validator, /Root manifest\.json must not exist/);
   assert.match(validator, /built\.version !== source\.version/);
   assert.match(validator, /references files missing from dist/);
   assert.doesNotMatch(workflow, /files = \["manifest\.json"/);
   assert.match(workflow, /-x '\*\.DS_Store'/);
+  const gate = workflow.indexOf("node scripts/release-gate.js");
+  const publish = workflow.indexOf("gh release create");
+  assert.ok(gate > 0 && gate < publish);
 });
 
 test("发布工作流为最新版本提供经过校验的稳定 ZIP 资产", () => {

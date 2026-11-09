@@ -27,6 +27,12 @@ test("WXT produces self-contained content scripts without volatile loaders", asy
 test("production manifest preserves permissions, supported sites, and script timing", () => {
   assert.deepEqual([...distManifest.permissions].sort(), [...sourceManifest.permissions].sort());
   assert.deepEqual(distManifest.host_permissions, [...SUPPORTED_MATCHES, BILLING_HOST_PERMISSION]);
+  assert.equal(BILLING_HOST_PERMISSION, "https://polaris-license-production.hexianji.workers.dev/*");
+  assert.equal(distManifest.manifest_version, 3);
+  assert.equal(distManifest.browser_specific_settings, undefined);
+  const manifestText = JSON.stringify(distManifest);
+  assert.equal(manifestText.includes("polaris-license-test"), false);
+  assert.equal(manifestText.includes("polaris-license-production.hexianji.workers.dev"), true);
   assert.deepEqual(distManifest.web_accessible_resources.map((entry) => entry.matches), [SUPPORTED_MATCHES]);
   assert.equal(distManifest.minimum_chrome_version, "114");
   assert.equal(distManifest.content_scripts.length, 1);
@@ -36,6 +42,14 @@ test("production manifest preserves permissions, supported sites, and script tim
   assert.equal(built.run_at, "document_idle");
   assert.ok(built.css.length > 0);
   assert.equal(distManifest.background.type, "module");
+});
+
+test("built background does not embed the test license worker", async () => {
+  const background = await readFile(new URL(`../dist/${distManifest.background.service_worker}`, import.meta.url), "utf8");
+  assert.equal(background.includes("polaris-license-test"), false);
+  assert.equal(background.includes("https://polaris-license-production.hexianji.workers.dev"), true);
+  assert.equal(background.includes("invalid_test_checkout"), true);
+  assert.equal(background.includes("invalid_live_checkout"), true);
 });
 
 test("production package retains the sidepanel and stable public resources", async () => {
