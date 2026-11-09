@@ -90,7 +90,9 @@ test("an unconfigured billing API never contacts the network and refuses checkou
   const service = createBillingService({
     storage,
     fetch: async () => { calls += 1; throw new Error("network"); },
-    now: () => 1000
+    now: () => 1000,
+    apiUrl: "",
+    stripeMode: "closed"
   });
   const view = await service.getView();
   assert.equal(view.available, false);

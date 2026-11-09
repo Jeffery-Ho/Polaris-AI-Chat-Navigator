@@ -1,4 +1,4 @@
-import { BILLING_API_URL, billingHostPermission } from "./billing-config.js";
+import { BILLING_API_URL, BILLING_STRIPE_MODE, billingHostPermission } from "./billing-config.js";
 import { SUPPORTED_PLATFORMS } from "./supported-platforms.js";
 
 export const BILLING_STORAGE_KEY = "polaris-billing-v1";
@@ -6,7 +6,7 @@ const DAY = 86400000;
 const REFRESH_INTERVAL = 600000;
 const platformKeys = new Set(SUPPORTED_PLATFORMS.map(({ key }) => key));
 
-export function createBillingService({ storage, fetch: request = globalThis.fetch, now = Date.now, apiUrl = BILLING_API_URL, stripeMode = "closed", onChange = () => {} }) {
+export function createBillingService({ storage, fetch: request = globalThis.fetch, now = Date.now, apiUrl = BILLING_API_URL, stripeMode = BILLING_STRIPE_MODE, onChange = () => {} }) {
   let data = null;
   let initialization = null;
   let loading = null;

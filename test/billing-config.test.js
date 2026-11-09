@@ -3,12 +3,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { BILLING_API_URL, BILLING_HOST_PERMISSION, billingHostPermission } from "../src/billing-config.js";
 
-test("release billing config does not embed the test license worker", async () => {
-  assert.equal(BILLING_API_URL, "");
-  assert.equal(BILLING_HOST_PERMISSION, null);
+test("release billing config calls only the production license worker", async () => {
+  assert.equal(BILLING_API_URL, "https://polaris-license-production.hexianji.workers.dev");
+  assert.equal(BILLING_HOST_PERMISSION, "https://polaris-license-production.hexianji.workers.dev/*");
   const source = await readFile(new URL("../src/billing-config.js", import.meta.url), "utf8");
-  assert.equal(source.includes("workers.dev"), false);
-  assert.equal(source.includes("hexianji"), false);
+  assert.equal(source.includes("polaris-license-test"), false);
   assert.equal(source.includes("cs_test_"), false);
   assert.equal(source.includes("cs_live_"), false);
 });

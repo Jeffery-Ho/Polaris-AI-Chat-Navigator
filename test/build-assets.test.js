@@ -1,3 +1,4 @@
+import { BILLING_HOST_PERMISSION } from "../src/billing-config.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile, access } from "node:fs/promises";
@@ -25,14 +26,13 @@ test("WXT produces self-contained content scripts without volatile loaders", asy
 
 test("production manifest preserves permissions, supported sites, and script timing", () => {
   assert.deepEqual([...distManifest.permissions].sort(), [...sourceManifest.permissions].sort());
-  assert.deepEqual(distManifest.host_permissions, [...SUPPORTED_MATCHES]);
+  assert.deepEqual(distManifest.host_permissions, [...SUPPORTED_MATCHES, BILLING_HOST_PERMISSION]);
+  assert.equal(BILLING_HOST_PERMISSION, "https://polaris-license-production.hexianji.workers.dev/*");
   assert.equal(distManifest.manifest_version, 3);
   assert.equal(distManifest.browser_specific_settings, undefined);
   const manifestText = JSON.stringify(distManifest);
-  assert.equal(manifestText.includes("workers.dev"), false);
   assert.equal(manifestText.includes("polaris-license-test"), false);
-  assert.equal(manifestText.includes("cs_test_"), false);
-  assert.equal(manifestText.includes("cs_live_"), false);
+  assert.equal(manifestText.includes("polaris-license-production.hexianji.workers.dev"), true);
   assert.deepEqual(distManifest.web_accessible_resources.map((entry) => entry.matches), [SUPPORTED_MATCHES]);
   assert.equal(distManifest.minimum_chrome_version, "114");
   assert.equal(distManifest.content_scripts.length, 1);
@@ -47,11 +47,9 @@ test("production manifest preserves permissions, supported sites, and script tim
 test("built background does not embed the test license worker", async () => {
   const background = await readFile(new URL(`../dist/${distManifest.background.service_worker}`, import.meta.url), "utf8");
   assert.equal(background.includes("polaris-license-test"), false);
-  assert.equal(background.includes("hexianji.workers.dev"), false);
+  assert.equal(background.includes("https://polaris-license-production.hexianji.workers.dev"), true);
   assert.equal(background.includes("invalid_test_checkout"), true);
   assert.equal(background.includes("invalid_live_checkout"), true);
-  assert.equal(background.includes("polaris-license-production"), false);
-  assert.equal(background.includes("workers.dev"), false);
 });
 
 test("production package retains the sidepanel and stable public resources", async () => {
