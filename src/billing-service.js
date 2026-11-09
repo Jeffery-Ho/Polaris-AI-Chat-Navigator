@@ -1,4 +1,4 @@
-import { BILLING_API_URL } from "./billing-config.js";
+import { BILLING_API_URL, BILLING_STRIPE_MODE, billingHostPermission } from "./billing-config.js";
 import { SUPPORTED_PLATFORMS } from "./supported-platforms.js";
 
 export const BILLING_STORAGE_KEY = "polaris-billing-v1";
@@ -6,7 +6,7 @@ const DAY = 86400000;
 const REFRESH_INTERVAL = 600000;
 const platformKeys = new Set(SUPPORTED_PLATFORMS.map(({ key }) => key));
 
-export function createBillingService({ storage, fetch: request = globalThis.fetch, now = Date.now, apiUrl = BILLING_API_URL, onChange = () => {} }) {
+export function createBillingService({ storage, fetch: request = globalThis.fetch, now = Date.now, apiUrl = BILLING_API_URL, stripeMode = BILLING_STRIPE_MODE, onChange = () => {} }) {
   let data = null;
   let initialization = null;
   let loading = null;
@@ -25,8 +25,17 @@ export function createBillingService({ storage, fetch: request = globalThis.fetc
     onChange(view());
   }
 
+  function requestUrl(path) {
+    const permission = billingHostPermission(apiUrl);
+    if (!permission) throw new Error("billing_unavailable");
+    let endpoint;
+    try { endpoint = new URL(path, apiUrl); } catch { throw new Error("billing_unavailable"); }
+    if (`${endpoint.origin}/*` !== permission) throw new Error("billing_unavailable");
+    return endpoint.href;
+  }
+
   async function call(path, body, headers = {}) {
-    const response = await request(`${apiUrl}${path}`, {
+    const response = await request(requestUrl(path), {
       method: body === undefined ? "GET" : "POST",
       headers: { "Content-Type": "application/json", "X-Installation-Token": data.installationToken, ...headers },
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -169,8 +178,14 @@ export function createBillingService({ storage, fetch: request = globalThis.fetc
           if (error.message === "price_changed") { await loadCatalog(); await save(); }
           throw error;
         }
-        const url = new URL(purchase.checkoutUrl);
-        if (url.origin !== "https://checkout.stripe.com" || !url.pathname.includes("cs_test_")) throw new Error("invalid_test_checkout");
+        let url;
+        try { url = new URL(purchase.checkoutUrl); } catch { throw new Error("invalid_checkout"); }
+        const secureStripe = url.origin === "https://checkout.stripe.com" && !url.username && !url.password && !url.hash;
+        const live = secureStripe && url.pathname.includes("cs_live_") && !url.pathname.includes("cs_test_");
+        const testSession = secureStripe && url.pathname.includes("cs_test_") && !url.pathname.includes("cs_live_");
+        if (stripeMode === "live" && live) { /* accept a live Checkout session */ }
+        else if (stripeMode === "test" && testSession) { /* accept a test Checkout session */ }
+        else throw new Error(stripeMode === "live" ? "invalid_live_checkout" : stripeMode === "test" ? "invalid_test_checkout" : "billing_unavailable");
         if (!purchase.purchaseId || !purchase.claimToken) throw new Error("invalid_checkout");
         data.purchase = { ...purchase, status: "pending" };
         await save();

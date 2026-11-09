@@ -1,0 +1,54 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "polaris-license-production",
+  "main": "src/index.js",
+  "compatibility_date": "2026-11-09",
+  "workers_dev": true,
+  "preview_urls": false,
+  "vars": {
+    "ENVIRONMENT": "production",
+    "PUBLIC_APP_URL": "https://polaris-ai.work",
+    "ALLOWED_ORIGINS": "https://polaris-ai.work",
+    "EMAIL_FROM_ADDRESS": "licenses@polaris-ai.work"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "polaris-license-production",
+      "database_id": "57ad4d10-75f5-4a98-99ba-176de7b1d53f",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "send_email": [
+    {
+      "name": "EMAIL",
+      "allowed_sender_addresses": ["licenses@polaris-ai.work"]
+    }
+  ],
+  "secrets": {
+    "required": [
+      "LICENSE_HASH_SECRET",
+      "LICENSE_DELIVERY_ENCRYPTION_KEY",
+      "STRIPE_SECRET_KEY",
+      "STRIPE_WEBHOOK_SECRET"
+    ]
+  },
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": false,
+      "head_sampling_rate": 1,
+      "persist": true
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": true
+    }
+  }
+}

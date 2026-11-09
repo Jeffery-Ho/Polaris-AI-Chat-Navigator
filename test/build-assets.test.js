@@ -36,6 +36,8 @@ test("production manifest preserves permissions, supported sites, and script tim
   assert.equal(built.run_at, "document_idle");
   assert.ok(built.css.length > 0);
   assert.equal(distManifest.background.type, "module");
+  assert.equal(distManifest.browser_specific_settings, undefined);
+  assert.equal(BILLING_HOST_PERMISSION, "https://polaris-license-production.hexianji.workers.dev/*");
 });
 
 test("production package retains the sidepanel and stable public resources", async () => {

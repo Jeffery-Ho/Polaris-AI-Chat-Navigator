@@ -1,21 +1,25 @@
-name: Build extension release
+name: Package Chrome release
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
+  push:
+    tags:
+      - "v*-build.*"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: extension-release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  release:
+  package:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      build: ${{ steps.metadata.outputs.build }}
+      sha: ${{ steps.sha.outputs.sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -47,6 +51,10 @@ jobs:
         id: metadata
         run: node scripts/validate-extension-package.js
 
+      - name: Record source SHA
+        id: sha
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Package release assets
         env:
           VERSION: ${{ steps.metadata.outputs.version }}
@@ -60,12 +68,35 @@ jobs:
           unzip -Z1 "release/${archive}" | grep -qx 'manifest.json'
           unzip -Z1 "$stable_archive" | grep -qx 'manifest.json'
 
+      - name: Require ready production billing
+        run: node scripts/release-gate.js
+
+      - name: Upload packaged extension
+        uses: actions/upload-artifact@v4
+        with:
+          name: chrome-release
+          path: release/
+          if-no-files-found: error
+
+  publish:
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download packaged extension
+        uses: actions/download-artifact@v4
+        with:
+          name: chrome-release
+          path: release
+
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.metadata.outputs.version }}
-          BUILD: ${{ steps.metadata.outputs.build }}
-          TAG: v${{ steps.metadata.outputs.version }}-build.${{ steps.metadata.outputs.build }}
+          VERSION: ${{ needs.package.outputs.version }}
+          BUILD: ${{ needs.package.outputs.build }}
+          SOURCE_SHA: ${{ needs.package.outputs.sha }}
+          TAG: v${{ needs.package.outputs.version }}-build.${{ needs.package.outputs.build }}
         run: |
           archive="release/Polaris-AI-${VERSION}-build-${BUILD}.zip"
           stable_archive="release/Polaris-AI.zip"
@@ -73,6 +104,11 @@ jobs:
           verification_dir="$(mktemp -d)"
           download_check="$verification_dir/latest.zip"
           trap 'rm -rf "$verification_dir"' EXIT
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" != "$TAG" ]]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match manifest tag $TAG."
+            exit 1
+          fi
 
           verify_archive() {
             local archive_path="$1"
@@ -83,18 +119,16 @@ jobs:
             manifest_path="$(mktemp "$verification_dir/manifest.XXXXXX")"
             unzip -p "$archive_path" manifest.json > "$manifest_path"
             EXPECTED_VERSION="$VERSION" EXPECTED_VERSION_NAME="${VERSION}(${BUILD})" \
-              node - "$manifest_path" <<'NODE'
-          const fs = require("node:fs");
-
-          const [manifestPath] = process.argv.slice(2);
-          const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-          if (manifest.version !== process.env.EXPECTED_VERSION) {
-            throw new Error(`Unexpected manifest version: ${manifest.version}`);
-          }
-          if (manifest.version_name !== process.env.EXPECTED_VERSION_NAME) {
-            throw new Error(`Unexpected manifest version_name: ${manifest.version_name}`);
-          }
-          NODE
+              node -e '
+                const fs = require("node:fs");
+                const manifest = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+                if (manifest.version !== process.env.EXPECTED_VERSION) {
+                  throw new Error("Unexpected manifest version: " + manifest.version);
+                }
+                if (manifest.version_name !== process.env.EXPECTED_VERSION_NAME) {
+                  throw new Error("Unexpected manifest version_name: " + manifest.version_name);
+                }
+              ' "$manifest_path"
             rm -f "$manifest_path"
           }
 
@@ -142,6 +176,10 @@ jobs:
           verify_archive "$stable_archive"
           cmp --silent "$archive" "$stable_archive"
 
+          notes="$(mktemp)"
+          printf 'Built from source `%s`.\nChrome manifest %s(%s).\n' \
+            "$SOURCE_SHA" "$VERSION" "$BUILD" > "$notes"
+
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             release_is_draft="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)"
             if [[ "$release_is_draft" != "true" ]]; then
@@ -158,12 +196,12 @@ jobs:
             gh release create "$TAG" \
               --draft \
               --title "Polaris AI ${VERSION} build ${BUILD}" \
-              --generate-notes \
+              --notes-file "$notes" \
               --repo "$GITHUB_REPOSITORY"
           fi
 
           gh release upload "$TAG" "$archive" "$stable_archive" --clobber --repo "$GITHUB_REPOSITORY"
           download_release_assets
 
-          gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
+          gh release edit "$TAG" --draft=false --notes-file "$notes" --repo "$GITHUB_REPOSITORY"
           verify_latest_release
