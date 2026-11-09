@@ -20,7 +20,7 @@ function fixture(checkoutUrl = "https://checkout.stripe.com/c/pay/cs_test_fixtur
   if(path==='/api/licenses/recover')return Response.json({message:'generic'});
   return Response.json({error:'unexpected'},{status:404});
  };
- const service=createBillingService({storage,fetch,now:()=>now,apiUrl:FIXTURE_API});
+ const service=createBillingService({storage,fetch,now:()=>now,apiUrl:FIXTURE_API,stripeMode:"test"});
  return {service,storage,local,requests,setPaid(){paid=true},revoke(){valid=false},setOffline(){offline=true},advance(ms){now+=ms},checkouts:()=>checkoutCount};
 }
 
@@ -99,6 +99,33 @@ test("an unconfigured billing API never contacts the network and refuses checkou
   await assert.rejects(service.checkout(), /billing_unavailable/);
   assert.equal(calls, 0);
   assert.equal(JSON.stringify(local).includes("workers.dev"), false);
+});
+
+test("checkout accepts only a live Stripe session when live mode is selected", async () => {
+  const rejected = fixture("https://checkout.stripe.com/c/pay/cs_test_fixture");
+  rejected.service = createBillingService({ storage: rejected.storage, fetch: async (url, options) => {
+    const path = new URL(url).pathname;
+    if (path === "/api/trial/start") return Response.json({ serverTime: 1000000000, trialEndsAt: 1000000000 + 604800000, offerEndsAt: 1000000000 + 604800000 });
+    if (path === "/api/plans") return Response.json({ serverTime: 1000000000, plans: [{ id: "pro", amount: 1290, originalAmount: 1999, currency: "usd" }] });
+    if (path === "/api/checkout/session") return Response.json({ purchaseId: "purchase-1", claimToken: "secret-claim", checkoutUrl: "https://checkout.stripe.com/c/pay/cs_test_fixture" });
+    return Response.json({ error: "unexpected" }, { status: 404 });
+  }, now: () => 1000000000, apiUrl: FIXTURE_API, stripeMode: "live" });
+  await rejected.service.getView();
+  await assert.rejects(rejected.service.checkout(), /invalid_live_checkout/);
+  const accepted = createBillingService({
+    storage: { async get(key) { return { [key]: undefined }; }, async set() {} },
+    fetch: async (url) => {
+      const path = new URL(url).pathname;
+      if (path === "/api/trial/start") return Response.json({ serverTime: 1000000000, trialEndsAt: 1000000000 + 604800000, offerEndsAt: 1000000000 + 604800000 });
+      if (path === "/api/plans") return Response.json({ serverTime: 1000000000, plans: [{ id: "pro", amount: 1290, originalAmount: 1999, currency: "usd" }] });
+      if (path === "/api/checkout/session") return Response.json({ purchaseId: "purchase-1", claimToken: "secret-claim", checkoutUrl: "https://checkout.stripe.com/c/pay/cs_live_fixture" });
+      return Response.json({ error: "unexpected" }, { status: 404 });
+    },
+    now: () => 1000000000,
+    apiUrl: FIXTURE_API,
+    stripeMode: "live"
+  });
+  assert.equal((await accepted.checkout()).checkoutUrl, "https://checkout.stripe.com/c/pay/cs_live_fixture");
 });
 
 test("checkout still rejects a live Stripe session and does not store it", async () => {

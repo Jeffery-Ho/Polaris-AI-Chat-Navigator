@@ -6,7 +6,7 @@ const DAY = 86400000;
 const REFRESH_INTERVAL = 600000;
 const platformKeys = new Set(SUPPORTED_PLATFORMS.map(({ key }) => key));
 
-export function createBillingService({ storage, fetch: request = globalThis.fetch, now = Date.now, apiUrl = BILLING_API_URL, onChange = () => {} }) {
+export function createBillingService({ storage, fetch: request = globalThis.fetch, now = Date.now, apiUrl = BILLING_API_URL, stripeMode = "closed", onChange = () => {} }) {
   let data = null;
   let initialization = null;
   let loading = null;
@@ -178,8 +178,14 @@ export function createBillingService({ storage, fetch: request = globalThis.fetc
           if (error.message === "price_changed") { await loadCatalog(); await save(); }
           throw error;
         }
-        const url = new URL(purchase.checkoutUrl);
-        if (url.origin !== "https://checkout.stripe.com" || !url.pathname.includes("cs_test_")) throw new Error("invalid_test_checkout");
+        let url;
+        try { url = new URL(purchase.checkoutUrl); } catch { throw new Error("invalid_checkout"); }
+        const secureStripe = url.origin === "https://checkout.stripe.com" && !url.username && !url.password && !url.hash;
+        const live = secureStripe && url.pathname.includes("cs_live_") && !url.pathname.includes("cs_test_");
+        const testSession = secureStripe && url.pathname.includes("cs_test_") && !url.pathname.includes("cs_live_");
+        if (stripeMode === "live" && live) { /* accept a live Checkout session */ }
+        else if (stripeMode === "test" && testSession) { /* accept a test Checkout session */ }
+        else throw new Error(stripeMode === "live" ? "invalid_live_checkout" : stripeMode === "test" ? "invalid_test_checkout" : "billing_unavailable");
         if (!purchase.purchaseId || !purchase.claimToken) throw new Error("invalid_checkout");
         data.purchase = { ...purchase, status: "pending" };
         await save();

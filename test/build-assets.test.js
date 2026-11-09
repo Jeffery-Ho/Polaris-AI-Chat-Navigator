@@ -49,6 +49,9 @@ test("built background does not embed the test license worker", async () => {
   assert.equal(background.includes("polaris-license-test"), false);
   assert.equal(background.includes("hexianji.workers.dev"), false);
   assert.equal(background.includes("invalid_test_checkout"), true);
+  assert.equal(background.includes("invalid_live_checkout"), true);
+  assert.equal(background.includes("polaris-license-production"), false);
+  assert.equal(background.includes("workers.dev"), false);
 });
 
 test("production package retains the sidepanel and stable public resources", async () => {
