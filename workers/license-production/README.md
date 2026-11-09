@@ -4,7 +4,7 @@ Separate from `polaris-license-test`. This Worker uses its own D1 database and i
 
 `GET /health` returns `env: "production"`. `billingReady` is true only when the live Stripe key, webhook secret, both Price IDs, signing secrets, and email binding are all present. Health alone does not mean purchasing is open.
 
-Checkout accepts only live Stripe sessions (`cs_live_`) and sends buyers back to `https://polaris-ai.work/checkout-return`. The welcome price is USD 12.90 and the later price is USD 19.99, both one-time, with no device limit. Test-mode keys, test sessions, and localhost returns are rejected.
+Checkout accepts only live Stripe sessions (`cs_live_`) and sends buyers back to `https://polaris-ai.work/checkout-return`. USD 19.99 is the regular one-time lifetime price. USD 12.90 applies only while the installation's server-recorded seven-day trial is still open. The client cannot choose or extend that window. There is no device limit. Test-mode keys, test sessions, and localhost returns are rejected.
 
 The extension build does not call this Worker until those Stripe values exist. Do not publish a download that advertises purchasing before `billingReady` is true.
 

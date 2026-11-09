@@ -72,6 +72,32 @@ test("catalog is the lifetime welcome price and an empty mail queue sends nothin
   } finally { env.DB.close(); }
 });
 
+test("USD 12.90 is available only during the server-recorded seven-day trial", async (t) => {
+  const env = environment();
+  const start = Date.now();
+  t.mock.method(globalThis, "fetch", async () => {
+    throw new Error("stripe must not be called for a rejected price");
+  });
+  try {
+    await request(env, "/api/trial/start", install);
+    const during = await request(env, "/api/checkout/session", {
+      planId: "pro", installationId: install.installationId, expectedAmount: 1999, discount: true
+    });
+    assert.equal(during.status, 409);
+    assert.equal(during.data.error, "price_changed");
+    t.mock.method(Date, "now", () => start + 8 * 86400000);
+    const priced = await request(env, "/api/plans?installationId=installation-a");
+    assert.equal(priced.data.plans[0].amount, 1999);
+    assert.equal(priced.data.plans[0].originalAmount, 1999);
+    const after = await request(env, "/api/checkout/session", {
+      planId: "pro", installationId: install.installationId, expectedAmount: 1290
+    });
+    assert.equal(after.status, 409);
+    assert.equal(after.data.error, "price_changed");
+    assert.equal((await env.DB.prepare("SELECT count(*) AS count FROM polaris_billing_purchase_intents").first()).count, 0);
+  } finally { env.DB.close(); }
+});
+
 test("live checkout, webhook, and claim reject test mode and replay safely", async (t) => {
   const env = environment();
   let paid = false;

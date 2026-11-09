@@ -174,12 +174,15 @@ async function route(req, env) {
   }
   if (path === "/api/plans" && req.method === "GET") {
     const row = await installation(env, url.searchParams.get("installationId"), req.headers.get("X-Installation-Token"));
+    // USD 19.99 is the regular lifetime price. USD 12.90 applies only while this
+    // installation's server-recorded 7-day trial is open. The client cannot select it.
     return json({ serverTime: Date.now(), trialEndsAt: row.trial_ends_at, offerEndsAt: row.trial_ends_at, plans: [{ id: PLAN, currency: "usd", amount: row.trial_ends_at > Date.now() ? 1290 : 1999, originalAmount: 1999, billing: "one_time", maxActivations: null }] });
   }
   if (path === "/api/checkout/session" && req.method === "POST") {
     const data = await body(req);
     if (data.planId !== PLAN) throw new ApiError(400, "invalid_plan");
     const row = await installation(env, data.installationId, req.headers.get("X-Installation-Token"));
+    // Same server trial window as /api/plans. A client flag cannot choose USD 12.90.
     const promo = row.trial_ends_at > Date.now();
     const priceId = promo ? env.STRIPE_PRICE_PRO_PROMO : env.STRIPE_PRICE_PRO_DEFAULT;
     if (!liveStripeConfigured(env)) throw new ApiError(503, "live_stripe_not_configured");
