@@ -8,9 +8,15 @@ const [workflow, validator] = await Promise.all([
 ]);
 
 test("发布工作流保留扩展构建与发布门槛", () => {
-  assert.match(workflow, /push:\s+branches:\s+- main/);
   assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /tags:\s+- "v\*-build\.\*"/);
+  assert.doesNotMatch(workflow, /push:\s+branches:\s+- main/);
+  assert.match(workflow, /permissions:\s+contents: read/);
   assert.match(workflow, /permissions:\s+contents: write/);
+  assert.match(workflow, /node scripts\/release-gate\.js/);
+  const gate = workflow.indexOf("node scripts/release-gate.js");
+  const publish = workflow.indexOf("gh release create");
+  assert.ok(gate > 0 && gate < publish);
   assert.match(workflow, /pnpm install --frozen-lockfile/);
   assert.match(workflow, /run: pnpm check/);
   assert.match(workflow, /run: pnpm test/);

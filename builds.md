@@ -10,6 +10,13 @@
 - Version update type must be declared by the user before recording a build.
 - After each build is recorded, confirm the build number and version with the user.
 
+## 418
+
+- Date: 2026-11-09
+- Version: 1.0.1
+- Summary: Send Chrome purchases to the production license Worker and keep the trial price on the server.
+- Notes: The package calls the production Worker and accepts only live Checkout sessions. USD 12.90 remains available only during an installation's server-recorded seven-day trial. USD 19.99 is the regular lifetime price. A website buyer with no verified trial cannot select the promotional price. Stripe returns to `https://polaris-ai.work/v2/checkout-return/`.
+
 ## 417
 
 - Date: 2026-11-09
