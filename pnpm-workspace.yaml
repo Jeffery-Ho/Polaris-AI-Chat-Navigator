@@ -1,2 +1,5 @@
 allowBuilds:
   esbuild: true
+  # miniflare native tooling only. The Chrome extension build does not run it.
+  sharp: false
+  workerd: false
