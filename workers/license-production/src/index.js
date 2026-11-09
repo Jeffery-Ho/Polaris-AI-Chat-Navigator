@@ -223,25 +223,34 @@ async function route(req, env) {
     if (req.headers.get("Origin") !== RETURN_ORIGIN) throw new ApiError(403, "origin_not_allowed");
     const data = await body(req);
     if (data.planId !== PLAN) throw new ApiError(400, "invalid_plan");
-    if (data.installationId !== undefined || data.discount !== undefined || data.priceId !== undefined || data.amount !== undefined || data.returnUrl !== undefined || data.successUrl !== undefined || data.cancelUrl !== undefined || data.trial !== undefined) {
+    if (data.priceId !== undefined || data.amount !== undefined || data.returnUrl !== undefined || data.successUrl !== undefined || data.cancelUrl !== undefined || data.trial !== undefined) {
       throw new ApiError(400, "invalid_request");
     }
+    let amount = REGULAR_AMOUNT;
+    let priceId = env.STRIPE_PRICE_PRO_DEFAULT;
+    if (data.installationId !== undefined || data.discount === true) {
+      if (typeof data.installationId !== "string") throw new ApiError(401, "invalid_installation");
+      const row = await installation(env, data.installationId, req.headers.get("X-Installation-Token"));
+      if (row.trial_ends_at > Date.now()) {
+        amount = PROMO_AMOUNT;
+        priceId = env.STRIPE_PRICE_PRO_PROMO;
+      }
+    }
     if (!liveStripeConfigured(env)) throw new ApiError(503, "live_stripe_not_configured");
-    const priceId = env.STRIPE_PRICE_PRO_DEFAULT;
     if (!priceId) throw new ApiError(503, "prices_not_configured");
-    if (data.expectedAmount !== undefined && data.expectedAmount !== REGULAR_AMOUNT) {
-      return json({ error: "price_changed", amount: REGULAR_AMOUNT, currency: "usd", originalAmount: REGULAR_AMOUNT }, 409);
+    if (data.expectedAmount !== undefined && data.expectedAmount !== amount) {
+      return json({ error: "price_changed", amount, currency: "usd", originalAmount: REGULAR_AMOUNT }, 409);
     }
     const price = await stripe(env, `prices/${encodeURIComponent(priceId)}`);
-    if (price.active !== true || price.currency !== "usd" || price.unit_amount !== REGULAR_AMOUNT || price.type !== "one_time" || price.livemode !== true) throw new ApiError(503, "price_configuration_mismatch");
+    if (price.active !== true || price.currency !== "usd" || price.unit_amount !== amount || price.type !== "one_time" || price.livemode !== true) throw new ApiError(503, "price_configuration_mismatch");
     returnOrigin(env);
     const id = crypto.randomUUID();
     const claim = randomToken();
-    await stmt(env, "INSERT INTO polaris_billing_purchase_intents(id,installation_hash,claim_hash,claim_expires_at,amount,created_at) VALUES(?,?,?,?,?,?)", id, await webPurchaseHash(env, id), await hash(env.LICENSE_HASH_SECRET, `claim:${claim}`), Date.now() + DAY, REGULAR_AMOUNT, Date.now()).run();
+    await stmt(env, "INSERT INTO polaris_billing_purchase_intents(id,installation_hash,claim_hash,claim_expires_at,amount,created_at) VALUES(?,?,?,?,?,?)", id, await webPurchaseHash(env, id), await hash(env.LICENSE_HASH_SECRET, `claim:${claim}`), Date.now() + DAY, amount, Date.now()).run();
     const session = await stripe(env, "checkout/sessions", { method: "POST", idempotencyKey: id, body: { mode: "payment", "line_items[0][price]": priceId, "line_items[0][quantity]": "1", "metadata[purchaseId]": id, "metadata[channel]": "web", success_url: checkoutReturn("success", id), cancel_url: checkoutReturn("cancel", id) } });
     if (!session.id?.startsWith("cs_live_") || session.livemode !== true || new URL(session.url).origin !== "https://checkout.stripe.com") throw new ApiError(502, "invalid_live_checkout");
     await stmt(env, "UPDATE polaris_billing_purchase_intents SET session_id=? WHERE id=?", session.id, id).run();
-    return json({ checkoutUrl: session.url, purchaseId: id, claimToken: claim, amount: REGULAR_AMOUNT, currency: "usd", originalAmount: REGULAR_AMOUNT });
+    return json({ checkoutUrl: session.url, purchaseId: id, claimToken: claim, amount, currency: "usd", originalAmount: REGULAR_AMOUNT });
   }
   if (path === "/api/web-purchases/claim" && req.method === "POST") {
     const data = await body(req);
