@@ -20,3 +20,6 @@ design-qa.md
 # One-off archives and screenshots.
 dist.zip
 image [0-9]*.png
+
+# Landing-site files that must not enter the extension bundle.
+llms.txt
