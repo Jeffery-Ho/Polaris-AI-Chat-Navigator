@@ -103,7 +103,7 @@ export function createVirtualList({ element, createRow, updateRow = () => {}, es
   function scrollToKey(key, { focus = false } = {}) {
     const index = items.findIndex((item) => item.key === key);
     if (index < 0) return false;
-    const header = scrollElement ? 0 : doc.querySelector(".window-header")?.getBoundingClientRect().bottom || 0;
+    const header = scrollElement ? 0 : doc.querySelector(".window-search-bar")?.getBoundingClientRect().bottom || 0;
     scrollBy(offsets[index] - top() - header - 12);
     paint();
     if (focus) {

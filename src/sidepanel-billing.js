@@ -230,7 +230,7 @@ export function createSidepanelBilling({ document, chrome, locale, onChange = ()
         free.append(el("p", "billing-plan-assurance", text("无需填写支付信息。", "No payment details needed.")), button(text("继续免费使用", "Continue for free"), () => view?.needsPlatformChoice ? change("platforms") : close(), true));
         const pro = el("section", "billing-plan billing-plan-pro");
         pro.append(el("div", "billing-plan-banner", text("解锁完整体验", "Unlock the full experience")));
-        pro.append(el("h2", "billing-plan-name", "Pro"), el("p", "billing-plan-description", text("跨平台阅读，完整索引长对话。", "Read across platforms. Index long conversations.")));
+        pro.append(el("h2", "billing-plan-name", "Pro"), el("p", "billing-plan-description", text("跨平台查找更早的回答，保留已加载的长对话内容。", "Find earlier answers across platforms. Keep loaded messages searchable.")));
         if (view?.price) {
           if (view.price.amount < view.price.originalAmount) pro.append(el("span", "billing-plan-saving", text(`省 $${((view.price.originalAmount - view.price.amount) / 100).toFixed(2)}`, `Save $${((view.price.originalAmount - view.price.amount) / 100).toFixed(2)}`)));
           const price = el("div", "billing-price-row");
@@ -517,7 +517,7 @@ export function createSidepanelBilling({ document, chrome, locale, onChange = ()
       star.append(image);
       const copy = el("div", "settings-pro-copy");
       copy.append(el("h2", "settings-pro-title", "Get Pro"),
-        el("p", "settings-pro-subtitle", text("全部平台 · 完整长对话", "Every platform · Full chat history")));
+        el("p", "settings-pro-subtitle", text("全部平台 · 长对话模式", "Every platform · Long conversation mode")));
       header.append(star, copy);
       const action = button("", () => open());
       action.className = "settings-pro-cta";
@@ -529,7 +529,7 @@ export function createSidepanelBilling({ document, chrome, locale, onChange = ()
     entry.querySelector(".settings-pro-title").textContent = view?.tier === "pro" ? "Polaris Pro" : "Get Pro";
     entry.querySelector(".settings-pro-subtitle").textContent = view?.tier === "pro"
       ? text("已激活 · 不限设备", "Active · Unlimited devices")
-      : text("全部平台 · 完整长对话", "Every platform · Full chat history");
+      : text("全部平台 · 长对话模式", "Every platform · Long conversation mode");
     entry.querySelector(".settings-pro-cta").textContent = view?.tier === "pro" ? text("查看会员信息", "View membership")
       : text("了解 Pro", "Explore Pro");
   }

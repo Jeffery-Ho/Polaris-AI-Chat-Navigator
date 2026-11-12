@@ -1,42 +1,5 @@
 import { matchesSearch } from "./window-search.js";
-import { parseChapterMarkdown } from "./chapter-markdown.js";
-import { CONVERSATION_SNAPSHOT_VERSION, publicConversationSnapshot } from "./conversation-snapshot.js";
-import { publicImageMessage } from "../public/src/chatgpt-image-data.js";
 import { visitConversationImages } from "./conversation-images.js";
-
-export function chatGptConversationId(value) {
-  try {
-    const url = new URL(value);
-    if (!/^(chatgpt\.com|chat\.openai\.com)$/.test(url.hostname)) return "";
-    return url.pathname.match(/^\/share\/([a-zA-Z0-9-]+)\/?$/)?.[1]
-      || url.pathname.match(/\/c\/([a-zA-Z0-9-]+)(?:\/|$)/)?.[1] || "";
-  } catch { return ""; }
-}
-
-export function conversationPage(payload) {
-  if (!payload || typeof payload !== "object") throw new Error("unsupported-format");
-  if (Array.isArray(payload.messages) && payload.page_info) {
-    const info = payload.page_info;
-    if (typeof info.has_previous_page !== "boolean" || typeof info.has_next_page !== "boolean") throw new Error("unsupported-format");
-    return { messages: payload.messages, previous: info.has_previous_page, next: info.has_next_page,
-      cursor: info.start_cursor || "", branch: payload.current_node || "", tree: false };
-  }
-  if (payload.mapping && payload.current_node) {
-    const messages = [];
-    const seen = new Set();
-    let key = payload.current_node;
-    while (key) {
-      if (seen.has(key) || !payload.mapping[key]) throw new Error("incomplete-chain");
-      seen.add(key);
-      const node = payload.mapping[key];
-      if (!Object.prototype.hasOwnProperty.call(node, "parent")) throw new Error("incomplete-chain");
-      if (node.message) messages.push(node.message);
-      key = node.parent;
-    }
-    return { messages: messages.reverse(), previous: false, next: false, cursor: "", branch: payload.current_node, tree: true };
-  }
-  throw new Error("unsupported-format");
-}
 
 function inlineText(nodes = [], imagePlaceholder = "[Image]", imageLabelsOnly = false) {
   return nodes.map((node) => {
@@ -67,12 +30,6 @@ function blockAnchorText(block) {
 export function normalizeAnchorText(value) {
   // ChatGPT includes this memory-citation token in API text but does not paint it.
   return normalizeIndexedText(value).replace(/\uE200memcite\uE201/gu, "").replace(/\s/gu, "");
-}
-
-export function messageText(message) {
-  const content = message?.content || {};
-  if (!['text', 'multimodal_text'].includes(content.content_type)) return "";
-  return (content.parts || []).map((part) => typeof part === "string" ? part : part?.content_type === "file_asset_pointer" ? part.file_name : "[Attachment]").join("\n");
 }
 
 export function normalizeIndexedText(value) {
@@ -134,50 +91,6 @@ export function indexedSnippet(text, query) {
   ];
 }
 
-function recordFor(source, previous, parseMarkdown, imagePlaceholder) {
-  const message = publicImageMessage(source);
-  const role = message?.author?.role;
-  if (!message) return null;
-  const markdown = messageText(message);
-  if (!markdown && !['text', 'multimodal_text'].includes(message.content?.content_type)) return null;
-  // Compare exact source as well as its fingerprint; a hash collision must never
-  // make an edited message look unchanged. A streaming patch clears the hash.
-  const parts = message.content.parts;
-  const hasMedia = parts.some((part) => ["image_asset_pointer", "file_asset_pointer"].includes(part?.content_type));
-  const sourceText = hasMedia ? JSON.stringify(parts) : markdown;
-  let hash = 2166136261;
-  for (let i = 0; i < sourceText.length; i++) hash = Math.imul(hash ^ sourceText.charCodeAt(i), 16777619);
-  const fingerprint = `${role}:${sourceText.length}:${hash >>> 0}`;
-  if (!hasMedia && previous?.fingerprint === fingerprint && previous.markdown === markdown && previous.role === role)
-    return { ...previous, time: message.create_time ?? null };
-  const parse = (value) => parseMarkdown(value) || [{ type: "paragraph", children: [{ type: "text", value }] }];
-  const blocks = [];
-  if (hasMedia) {
-    let textParts = [];
-    const flush = () => { if (textParts.length) { blocks.push(...parse(textParts.join("\n"))); textParts = []; } };
-    for (const part of parts) {
-      if (part?.content_type === "image_asset_pointer") {
-        flush(); blocks.push({ type: "image", src: part.asset_pointer, alt: part.alt || "",
-          ...(part.width ? { width: part.width } : {}), ...(part.height ? { height: part.height } : {}),
-          ...(part.mime_type ? { mimeType: part.mime_type } : {}) });
-      } else if (part?.content_type === "file_asset_pointer") {
-        flush(); blocks.push({ type: "attachment", name: part.file_name,
-          ...(part.mime_type ? { mimeType: part.mime_type } : {}), ...(part.url ? { url: part.url } : {}) });
-      } else textParts.push(typeof part === "string" ? part : "[Attachment]");
-    }
-    flush();
-  } else blocks.push(...parse(markdown));
-  let ordinal = 0;
-  visitConversationImages(blocks, (image) => { image.imageKey = `${message.id}:image:${ordinal++}`; });
-  let attachmentOrdinal = 0;
-  visitAttachments(blocks, (attachment) => { attachment.attachmentKey = `${message.id}:attachment:${attachmentOrdinal++}`; });
-  if (hasMedia && previous?.fingerprint === fingerprint && previous.markdown === markdown && previous.role === role
-    && JSON.stringify(previous.blocks) === JSON.stringify(blocks)) return { ...previous, time: message.create_time ?? null };
-  const text = blocks.map((block) => blockText(block, imagePlaceholder)).join("\n\n");
-  return { id: message.id, role, time: message.create_time ?? null, markdown, text, blocks, fingerprint,
-    anchorText: normalizeAnchorText(blocks.map(blockAnchorText).join("")), searchText: normalizeIndexedText(text) };
-}
-
 function visitAttachments(nodes, visit) {
   for (const node of nodes || []) {
     if (node.type === "attachment") visit(node);
@@ -195,6 +108,56 @@ function userMessageTitle(record, imagePlaceholder) {
   return hasImages ? imagePlaceholder : "";
 }
 
+// Public AST projection: keep only whitelisted block fields and validate the
+// structure the DOM reader produced, without any cache or private API payload.
+function normalizeImageNode(node) {
+  if (typeof node.src !== "string" || typeof node.alt !== "string" || typeof node.imageKey !== "string") throw new Error("invalid-ast");
+  return { type: "image", src: node.src, alt: node.alt, imageKey: node.imageKey,
+    ...Object.fromEntries(["width", "height"].filter((key) => Number.isFinite(node[key]) && node[key] > 0).map((key) => [key, node[key]])),
+    ...(typeof node.mimeType === "string" ? { mimeType: node.mimeType } : {}) };
+}
+
+function normalizeInlineNodes(nodes, depth) {
+  if (!Array.isArray(nodes) || depth > 128) throw new Error("invalid-ast");
+  return nodes.map((node) => {
+    if (node?.type === "image") return normalizeImageNode(node);
+    if (["text", "code"].includes(node?.type) && typeof node.value === "string") return { type: node.type, value: node.value };
+    if (node?.type === "break") return { type: "break" };
+    if (["strong", "em", "del", "link"].includes(node?.type)) {
+      const result = { type: node.type, children: normalizeInlineNodes(node.children, depth + 1) };
+      if (node.type === "link") { if (typeof node.href !== "string") throw new Error("invalid-ast"); result.href = node.href; }
+      return result;
+    }
+    throw new Error("invalid-ast");
+  });
+}
+
+function normalizeBlocks(nodes, depth = 0) {
+  if (!Array.isArray(nodes) || depth > 128) throw new Error("invalid-ast");
+  return nodes.map((node) => {
+    if (node?.type === "image") return normalizeImageNode(node);
+    if (node?.type === "attachment" && typeof node.name === "string" && node.name.trim()) return {
+      type: "attachment", name: node.name,
+      ...Object.fromEntries(["mimeType", "url", "attachmentKey"].filter((key) => typeof node[key] === "string").map((key) => [key, node[key]]))
+    };
+    if (node?.type === "paragraph" || node?.type === "heading" && Number.isInteger(node.level) && node.level >= 1 && node.level <= 6)
+      return { type: node.type, ...(node.type === "heading" ? { level: node.level } : {}), children: normalizeInlineNodes(node.children, depth + 1) };
+    if (node?.type === "rule") return { type: "rule" };
+    if (node?.type === "codeBlock" && typeof node.value === "string") return { type: node.type, value: node.value,
+      ...(/^[a-zA-Z0-9_+-]+$/.test(node.language || "") ? { language: node.language } : {}) };
+    if (node?.type === "quote") return { type: node.type, blocks: normalizeBlocks(node.blocks, depth + 1) };
+    if (node?.type === "table" && Array.isArray(node.headers) && Array.isArray(node.rows))
+      return { type: node.type, headers: node.headers.map((cell) => normalizeInlineNodes(cell, depth + 1)), rows: node.rows.map((row) => {
+        if (!Array.isArray(row)) throw new Error("invalid-ast"); return row.map((cell) => normalizeInlineNodes(cell, depth + 1));
+      }) };
+    if (node?.type === "list" && typeof node.ordered === "boolean" && Array.isArray(node.items)) return {
+      type: node.type, ordered: node.ordered, items: node.items.map((item) => ({ inline: normalizeInlineNodes(item.inline, depth + 1),
+        children: normalizeBlocks(item.children, depth + 1), ...(typeof item.checked === "boolean" ? { checked: item.checked } : {}) }))
+    };
+    throw new Error("invalid-ast");
+  });
+}
+
 function structuredRecordFor(source, previous, imagePlaceholder) {
   if (typeof source?.id !== "string" || !source.id || !["user", "assistant"].includes(source.role) || !Array.isArray(source.blocks)
     || source.replyTo !== undefined && typeof source.replyTo !== "string") throw new Error("unsupported-format");
@@ -202,17 +165,16 @@ function structuredRecordFor(source, previous, imagePlaceholder) {
   let imageOrdinal = 0; let attachmentOrdinal = 0;
   visitConversationImages(blocks, (image) => { image.imageKey = `${source.id}:image:${imageOrdinal++}`; });
   visitAttachments(blocks, (attachment) => { attachment.attachmentKey = `${source.id}:attachment:${attachmentOrdinal++}`; });
-  const projected = publicConversationSnapshot({ version: CONVERSATION_SNAPSHOT_VERSION, title: "", branch: "", records: [{
-    id: source.id, role: source.role, time: source.time ?? null, blocks,
-    markdown: typeof source.markdown === "string" ? source.markdown : "",
-    text: "", anchorText: "", searchText: "", fingerprint: "structured",
-    ...(typeof source.replyTo === "string" ? { replyTo: source.replyTo } : {})
-  }] })?.records[0];
-  if (!projected) throw new Error("unsupported-format");
-  const signature = JSON.stringify([projected.role, projected.markdown, projected.blocks, projected.replyTo]);
+  let normalizedBlocks;
+  try { normalizedBlocks = normalizeBlocks(blocks); } catch { throw new Error("unsupported-format"); }
+  const markdown = typeof source.markdown === "string" ? source.markdown : "";
+  const replyTo = typeof source.replyTo === "string" ? source.replyTo : undefined;
+  const signature = JSON.stringify([source.role, markdown, normalizedBlocks, replyTo]);
   let hash = 2166136261;
   for (let i = 0; i < signature.length; i++) hash = Math.imul(hash ^ signature.charCodeAt(i), 16777619);
-  projected.fingerprint = `structured:${signature.length}:${hash >>> 0}`;
+  const projected = { id: source.id, role: source.role, time: typeof source.time === "number" ? source.time : null,
+    blocks: normalizedBlocks, markdown, text: "", anchorText: "", searchText: "", fingerprint: `structured:${signature.length}:${hash >>> 0}`,
+    ...(replyTo !== undefined ? { replyTo } : {}) };
   if (previous?.fingerprint === projected.fingerprint && previous.markdown === projected.markdown && previous.role === projected.role
     && previous.replyTo === projected.replyTo && JSON.stringify(previous.blocks) === JSON.stringify(projected.blocks))
     return previous.time === projected.time ? previous : { ...previous, time: projected.time };
@@ -243,64 +205,53 @@ function mergeMountedOrder(order, incoming, older) {
   return order.flatMap((id) => [...(before.get(id) || []), id, ...(after.get(id) || [])]);
 }
 
-export function createConversationIndex({ platform = "chatgpt", yieldTask = () => new Promise((resolve) => setTimeout(resolve, 0)), parseMarkdown = parseChapterMarkdown, imagePlaceholder = "[Image]" } = {}) {
+export function createConversationIndex({ platform = "chatgpt", yieldTask = () => new Promise((resolve) => setTimeout(resolve, 0)), imagePlaceholder = "[Image]" } = {}) {
   let records = new Map();
-  let reusableRecords = new Map();
   let order = [];
   let title = "";
   let revision = 0;
   let phase = "loading";
   let coverage = "loaded";
-  let branch = "";
   let error = "";
   const listeners = new Set();
   const notify = () => { revision++; listeners.forEach((listener) => listener(status())); };
-  const status = () => ({ phase, coverage, title, count: records.size, total: phase === "complete" && coverage === "complete" ? records.size : null, revision, branch, error });
+  const status = () => ({ phase, coverage, title, count: records.size, total: phase === "complete" && coverage === "complete" ? records.size : null, revision, error });
 
-  async function ingest(payload, { older = false, replace = false, signal, complete = false } = {}) {
-    const page = conversationPage(payload);
-    if (replace) reusableRecords = records;
-    const normalized = [];
-    let budgetStart = performance.now();
-    for (const message of page.messages) {
-      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-      const record = recordFor(message, records.get(message.id) || reusableRecords.get(message.id), parseMarkdown, imagePlaceholder);
-      if (record) normalized.push(record);
-      if (performance.now() - budgetStart > 8) { await yieldTask(); budgetStart = performance.now(); }
-    }
-    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-    if (replace) { records = new Map(); order = []; }
-    const ids = []; const incoming = new Set();
-    for (const record of normalized) {
-      if (!incoming.has(record.id)) { ids.push(record.id); incoming.add(record.id); }
-      records.set(record.id, record);
-    }
-    order = older ? [...ids, ...order.filter((id) => !incoming.has(id))] : [...order.filter((id) => !incoming.has(id)), ...ids];
-    if (typeof payload.title === "string") title = payload.title;
-    branch = replace ? page.branch : page.branch || branch;
-    if (complete) reusableRecords.clear();
-    phase = complete ? "complete" : "loading"; coverage = complete ? "complete" : "loaded"; error = "";
-    notify();
-    return page;
-  }
-
-  async function upsertMessages(messages, { complete = true, replace = false, older = false, coverage: nextCoverage = "loaded", signal } = {}) {
+  async function upsertMessages(messages, { complete = true, replace = false, older = false, coverage: nextCoverage = "loaded", signal, onProgress, progressive = false, unchangedIds = new Set() } = {}) {
     if (!Array.isArray(messages)) throw new Error("unsupported-format");
+    const publishInitial = progressive && !records.size;
+    if (publishInitial) { phase = "loading"; coverage = "loaded"; error = ""; }
     const normalized = new Map(); let budgetStart = performance.now();
+    let processed = 0;
+    onProgress?.({ count: processed, total: messages.length });
     for (const message of messages) {
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-      const record = structuredRecordFor(message, normalized.get(message?.id) || records.get(message?.id), imagePlaceholder);
+      const previous = normalized.get(message?.id) || records.get(message?.id);
+      const reuse = unchangedIds.has(message?.id) && previous && previous.role === message.role
+        && previous.replyTo === message.replyTo && previous.markdown === (message.markdown || "")
+        && previous.time === (typeof message.time === "number" ? message.time : null);
+      const record = reuse ? previous : structuredRecordFor(message, previous, imagePlaceholder);
       normalized.set(record.id, record);
-      if (performance.now() - budgetStart > 8) { await yieldTask(); budgetStart = performance.now(); }
+      if (publishInitial) {
+        if (!records.has(record.id)) order.push(record.id);
+        records.set(record.id, record);
+      }
+      processed++;
+      if (performance.now() - budgetStart > 8) {
+        onProgress?.({ count: processed, total: messages.length });
+        if (publishInitial) notify();
+        await yieldTask(); budgetStart = performance.now();
+      }
     }
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    onProgress?.({ count: processed, total: messages.length });
     const ids = [...normalized.keys()];
     const nextOrder = replace ? ids : mergeMountedOrder(order, ids, older);
     const nextPhase = complete ? "complete" : "loading";
     nextCoverage = nextCoverage === "complete" ? "complete" : "loaded";
-    const changed = nextPhase !== phase || nextCoverage !== coverage || Boolean(error) || nextOrder.length !== order.length
+    const changed = publishInitial && normalized.size > 0 || nextPhase !== phase || nextCoverage !== coverage || Boolean(error) || nextOrder.length !== order.length
       || nextOrder.some((id, index) => id !== order[index]) || [...normalized].some(([id, record]) => records.get(id) !== record);
-    if (replace) { records = new Map(); reusableRecords.clear(); }
+    if (replace) { records = new Map(); }
     for (const [id, record] of normalized) records.set(id, record);
     order = nextOrder; phase = nextPhase; coverage = nextCoverage; error = "";
     if (changed) notify();
@@ -445,7 +396,12 @@ export function createConversationIndex({ platform = "chatgpt", yieldTask = () =
   }
 
   return {
-    ingest, upsertMessages, getOutline, search, status,
+    upsertMessages, getOutline, search, status,
+    messageChapter(id, title = "") {
+      const record = records.get(id);
+      return record ? { markerKey: `index:${id}`, sourceKey: `index:${id}`, parentKey: "", title: title || record.text.slice(0, 80),
+        contents: record.blocks.map((block) => ({ type: "block", text: blockText(block, imagePlaceholder), ast: block })) } : null;
+    },
     exportConversation(scope) {
       if (phase !== "complete" || order.some((id) => !records.get(id)?.fingerprint)) return null;
       return { title, scope: scope === "loaded" || coverage !== "complete" ? "loaded" : "complete", messages: order.map((id) => {
@@ -460,33 +416,9 @@ export function createConversationIndex({ platform = "chatgpt", yieldTask = () =
       if (record) visitConversationImages(record.blocks, (image) => { if (image.imageKey === imageKey) found = image; });
       return found;
     },
-    exportSnapshot() {
-      return publicConversationSnapshot({ version: CONVERSATION_SNAPSHOT_VERSION, title, branch, coverage, records: order.map((id) => records.get(id)) });
-    },
-    restoreSnapshot(value) {
-      const snapshot = publicConversationSnapshot(value);
-      if (!snapshot) return false;
-      records = new Map(snapshot.records.map((record) => [record.id, record]));
-      order = snapshot.records.map((record) => record.id);
-      reusableRecords = new Map(); title = snapshot.title; branch = snapshot.branch;
-      phase = "loading"; coverage = snapshot.coverage || "loaded"; error = ""; notify(); return true;
-    },
-    async reconcile(payload, options = {}) {
-      const page = conversationPage(payload);
-      if (page.previous || page.next) throw new Error("incomplete-chain");
-      return ingest(payload, { ...options, replace: true });
-    },
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
-    begin() { phase = "loading"; error = ""; notify(); },
-    reset() { records.clear(); reusableRecords.clear(); order = []; title = ""; branch = ""; phase = "loading"; coverage = "loaded"; error = ""; notify(); },
-    finish() { reusableRecords.clear(); phase = "complete"; coverage = "complete"; error = ""; notify(); },
     fail(reason) { error = reason; phase = records.size ? "partial" : "error"; notify(); },
     setTitle(value) { if (value && title !== value) { title = value; notify(); } },
-    updateMessage(id, text) {
-      const record = records.get(id);
-      if (!record || record.text === text) return;
-      records.set(id, { ...record, fingerprint: "", text, anchorText: normalizeAnchorText(text), searchText: normalizeIndexedText(text) }); notify();
-    },
-    dispose() { records.clear(); reusableRecords.clear(); order = []; listeners.clear(); }
+    dispose() { records.clear(); order = []; listeners.clear(); }
   };
 }

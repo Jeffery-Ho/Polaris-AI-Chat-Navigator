@@ -7,14 +7,9 @@ import { domMessageBlocks } from "../src/dom-message-blocks.js";
 const paragraph = (value) => ({ type: "paragraph", children: [{ type: "text", value }] });
 const heading = (value) => ({ type: "heading", level: 2, children: [{ type: "text", value }] });
 const pause = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
-async function waitForIdle(controller) {
-  const deadline = Date.now() + 4000;
-  while (controller.snapshot()?.refreshing && Date.now() < deadline) await pause(10);
-  assert.equal(controller.snapshot()?.refreshing, false, "native reading should settle");
-}
 
 function setup({ url = "https://www.kimi.com/chat/one" } = {}) {
-  const dom = new JSDOM('<title>测试会话 - Kimi</title><div id="scroller"></div>', { url });
+  const dom = new JSDOM('<title>测试会话 - Kimi</title><div id="scroller"></div>', { url, pretendToBeVisual: true });
   const win = dom.window; const scroller = win.document.querySelector("#scroller");
   let source = { messages: [], scroller };
   const controller = createDOMIndexController({ window: win, platform: "kimi", readMessages: () => source, onChange() {} });
@@ -31,7 +26,7 @@ function setup({ url = "https://www.kimi.com/chat/one" } = {}) {
   }
   return { win, scroller, controller, message, mount,
     setSource: (value) => { source = value; },
-    async ready(full = false) { controller.configure(true, { readFull: full }); await controller.syncMounted(); },
+    async ready(retainLoaded = true) { controller.configure(true, { retainLoaded }); await controller.syncMounted(); },
     close() { controller.dispose(); win.close(); }
   };
 }
@@ -76,11 +71,8 @@ test("a quiet native top stays loaded and a known complete source retains covera
     s.scroller.scrollTo = ({ top }) => { s.scroller.scrollTop = top; };
     const user = s.message("u", "user", "提问");
     s.mount([user]); await s.ready(true);
-    await waitForIdle(s.controller);
     assert.equal(s.controller.snapshot().coverage, "loaded");
     assert.equal(s.controller.snapshot().phase, "complete");
-    assert.equal(s.controller.snapshot().native.phase, "ready");
-    assert.equal(s.controller.snapshot().refreshing, false);
     s.mount([user], { coverage: "complete" }); await s.controller.syncMounted();
     assert.equal(s.controller.exportConversation().scope, "complete");
     s.mount([user], { coverage: "loaded" }); await s.controller.syncMounted();
@@ -115,55 +107,6 @@ test("route changes discard queued old records and ignore old searches", async (
   } finally { s.close(); }
 });
 
-test("native history rehydrates an unmounted message before reporting a located heading", async () => {
-  const s = setup();
-  try {
-    const older = s.message("old", "assistant", "目标章节"); const newer = s.message("new", "user", "新问题");
-    Object.defineProperties(s.scroller, { scrollHeight: { value: 2000 }, clientHeight: { value: 500 } });
-    s.mount([older]); await s.ready();
-    s.mount([newer]); await s.controller.syncMounted(); s.scroller.scrollTop = 1000;
-    s.scroller.scrollTo = ({ top }) => {
-      s.scroller.scrollTop = top;
-      if (top < 900) s.mount([older, newer]);
-    };
-    const located = await s.controller.ensureLocation("index:old:0:0", {});
-    assert.equal(located.element, older.element.querySelector("h2"));
-    assert.equal(located.reason, "");
-    assert.equal(located.element.isConnected, true);
-  } finally { s.close(); }
-});
-
-test("user input cancels native navigation while retaining readable indexed messages", async () => {
-  const s = setup();
-  try {
-    const older = s.message("old", "assistant", "旧标题"); const newer = s.message("new", "user", "新问题");
-    s.mount([older]); await s.ready(); s.mount([newer]); await s.controller.syncMounted();
-    Object.defineProperties(s.scroller, { scrollHeight: { value: 2000 }, clientHeight: { value: 500 } });
-    s.scroller.scrollTop = 1000; s.scroller.scrollTo = ({ top }) => { s.scroller.scrollTop = top; };
-    const pending = s.controller.ensureLocation("index:old:0:0", {});
-    await pause(); s.win.dispatchEvent(new s.win.WheelEvent("wheel"));
-    assert.deepEqual(await pending, { element: null, reason: "user-cancelled" });
-    assert.equal(s.controller.snapshot().count, 2);
-    assert.equal(s.controller.snapshot().native.phase, "ready");
-    assert.equal((await s.controller.search("旧标题")).total, 1);
-  } finally { s.close(); }
-});
-
-test("route changes cancel native navigation and disposal releases its pending waits", async () => {
-  const s = setup();
-  try {
-    const older = s.message("old", "assistant", "旧标题");
-    s.mount([older]); await s.ready(); s.mount([]); await s.controller.syncMounted();
-    Object.defineProperties(s.scroller, { scrollHeight: { value: 2000 }, clientHeight: { value: 500 } });
-    s.scroller.scrollTop = 1000; s.scroller.scrollTo = ({ top }) => { s.scroller.scrollTop = top; };
-    const pending = s.controller.ensureLocation("index:old:0:0", {});
-    await pause(); s.win.history.pushState({}, "", "/chat/two"); await s.ready();
-    assert.deepEqual(await pending, { element: null, reason: "source-changed" });
-    const idle = s.controller.retry(); s.controller.dispose(); await idle;
-    assert.equal(s.controller.snapshot(), null);
-  } finally { s.close(); }
-});
-
 test("duplicate heading titles use their source ordinal, and image/file targets stay native", async () => {
   const s = setup();
   try {
@@ -178,49 +121,6 @@ test("duplicate heading titles use their source ordinal, and image/file targets 
   } finally { s.close(); }
 });
 
-test("turning off full reading cancels scanning without clearing the currently loaded index", async () => {
-  const s = setup();
-  try {
-    Object.defineProperties(s.scroller, { scrollHeight: { value: 2000 }, clientHeight: { value: 500 } });
-    s.scroller.scrollTop = 1000; s.scroller.scrollTo = ({ top }) => { s.scroller.scrollTop = top; };
-    s.mount([s.message("u", "user", "提问")]); await s.ready(true); await pause();
-    s.controller.configure(true, { readFull: false }); await pause(10);
-    assert.equal(s.controller.snapshot().count, 1);
-    assert.equal(s.controller.snapshot().refreshing, false);
-    s.controller.configure(false); assert.equal(s.controller.snapshot(), null);
-  } finally { s.close(); }
-});
-
-test("native history collects older pages through an explicit load action without inventing completeness", async () => {
-  const s = setup();
-  try {
-    const older = s.message("old", "user", "更早的问题"); const newer = s.message("new", "user", "当前问题");
-    const load = s.win.document.createElement("button"); load.textContent = "Load earlier"; s.win.document.body.append(load);
-    Object.defineProperties(s.scroller, { scrollHeight: { value: 500 }, clientHeight: { value: 500 } });
-    s.scroller.scrollTo = ({ top }) => { s.scroller.scrollTop = top; };
-    s.mount([newer], { loadEarlier: load, hasEarlier: true });
-    load.addEventListener("click", () => { load.remove(); s.mount([older, newer], { loadEarlier: null, hasEarlier: false }); });
-    await s.ready(true); await waitForIdle(s.controller);
-    assert.deepEqual(s.controller.outline({}).items.map((item) => item.markerKey), ["index:old", "index:new"]);
-    assert.equal(s.controller.snapshot().coverage, "loaded");
-    assert.equal(s.controller.snapshot().refreshing, false);
-  } finally { s.close(); }
-});
-
-test("native navigation timeout leaves previously read content available", async () => {
-  const s = setup();
-  try {
-    const older = s.message("old", "assistant", "旧标题");
-    s.mount([older]); await s.ready(); s.mount([]); await s.controller.syncMounted();
-    let clock = 0;
-    Object.defineProperty(s.win.performance, "now", { value: () => { clock += 25000; return clock; } });
-    assert.deepEqual(await s.controller.ensureLocation("index:old:0:0", {}), { element: null, reason: "native-load-timeout" });
-    assert.equal(s.controller.snapshot().count, 1);
-    assert.equal((await s.controller.search("旧标题")).total, 1);
-    assert.equal(s.controller.exportConversation().scope, "loaded");
-  } finally { s.close(); }
-});
-
 test("duplicate mounted source IDs fail location instead of picking an arbitrary message", async () => {
   const s = setup();
   try {
@@ -228,99 +128,6 @@ test("duplicate mounted source IDs fail location instead of picking an arbitrary
     s.mount([first, second]); await s.ready();
     assert.deepEqual(s.controller.resolveLocation("index:same", {}), { element: null, reason: "ambiguous-message" });
     assert.equal(s.controller.snapshot().count, 1);
-  } finally { s.close(); }
-});
-
-for (const reverseFlow of [false, true]) {
-  test(`full reading visits both ends from a middle virtual window (column-reverse: ${reverseFlow})`, async () => {
-    const s = setup();
-    try {
-      const messages = Array.from({ length: 5 }, (_, i) => s.message(`u${i}`, "user", `问题${i}`));
-      s.scroller.style.display = "flex";
-      s.scroller.style.flexDirection = reverseFlow ? "column-reverse" : "column";
-      Object.defineProperties(s.scroller, { scrollHeight: { value: 500 }, clientHeight: { value: 100 } });
-      const initialTop = reverseFlow ? -200 : 200;
-      s.scroller.scrollTop = initialTop;
-      const visited = [];
-      s.scroller.scrollTo = ({ top }) => {
-        s.scroller.scrollTop = top; visited.push(top);
-        const position = Math.round((reverseFlow ? top + 400 : top) / 100);
-        s.mount([messages[position]]);
-      };
-      s.mount([messages[2]]);
-      await s.ready(true); await waitForIdle(s.controller);
-      assert.deepEqual(s.controller.outline({}).items.map((item) => item.markerKey), messages.map((message) => `index:${message.id}`));
-      assert.ok(visited.includes(reverseFlow ? -400 : 0));
-      assert.ok(visited.includes(reverseFlow ? 0 : 400));
-      assert.equal(s.scroller.scrollTop, initialTop);
-      assert.equal(s.controller.snapshot().coverage, "loaded");
-      assert.equal(s.controller.snapshot().historyError, "");
-    } finally { s.close(); }
-  });
-}
-
-for (const reverseFlow of [false, true]) {
-  test(`retry preserves the newer sweep and eventually visits both ends (column-reverse: ${reverseFlow})`, async () => {
-    const s = setup();
-    try {
-      const messages = Array.from({ length: 5 }, (_, i) => s.message(`u${i}`, "user", `问题${i}`));
-      s.scroller.style.cssText = `display:flex;flex-direction:${reverseFlow ? "column-reverse" : "column"}`;
-      Object.defineProperties(s.scroller, { scrollHeight: { value: 500 }, clientHeight: { value: 100 } });
-      const initialTop = reverseFlow ? -200 : 200; let clock = 0; const visits = [];
-      Object.defineProperty(s.win.performance, "now", { value: () => clock });
-      s.scroller.scrollTop = initialTop;
-      s.scroller.scrollTo = ({ top }) => {
-        if (top > s.scroller.scrollTop) clock += 11000;
-        s.scroller.scrollTop = top; visits.push(top);
-        s.mount([messages[Math.round((reverseFlow ? top + 400 : top) / 100)]]);
-      };
-      s.mount([messages[2]]); await s.ready(true); await waitForIdle(s.controller);
-      assert.equal(s.controller.snapshot().historyError, "native-load-timeout");
-      const nextStart = visits.length;
-      await s.controller.retry();
-      assert.equal(visits[nextStart], reverseFlow ? -220 : 180, "retry resumes the newer sweep with overlap");
-      assert.ok(s.controller.outline({}).items.some((item) => item.markerKey === "index:u3"));
-      let final;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        final = await s.controller.retry();
-        if (!final.reason) break;
-      }
-      assert.equal(final.reason, "");
-      assert.deepEqual(s.controller.outline({}).items.map((item) => item.markerKey), messages.map((message) => `index:${message.id}`));
-      assert.equal(s.scroller.scrollTop, initialTop);
-      assert.equal(s.controller.snapshot().coverage, "loaded");
-    } finally { s.close(); }
-  });
-}
-
-test("column-reverse native navigation reaches negative history offsets before reporting success", async () => {
-  const s = setup();
-  try {
-    const older = s.message("old", "assistant", "旧章节"); const middle = s.message("middle", "user", "当前问题");
-    s.scroller.style.cssText = "display:flex;flex-direction:column-reverse";
-    Object.defineProperties(s.scroller, { scrollHeight: { value: 500 }, clientHeight: { value: 100 } });
-    s.mount([older]); await s.ready(); s.mount([middle]); await s.controller.syncMounted();
-    s.scroller.scrollTop = -200;
-    s.scroller.scrollTo = ({ top }) => { s.scroller.scrollTop = top; if (top <= -400) s.mount([older]); };
-    const result = await s.controller.ensureLocation("index:old:0:0", {});
-    assert.equal(result.element, older.element.querySelector("h2"));
-    assert.equal(result.reason, "");
-    assert.equal(s.scroller.scrollTop, -400);
-  } finally { s.close(); }
-});
-
-test("cancelling a column-reverse full scan preserves the user's chosen scroll position", async () => {
-  const s = setup();
-  try {
-    s.scroller.style.cssText = "display:flex;flex-direction:column-reverse";
-    Object.defineProperties(s.scroller, { scrollHeight: { value: 1000 }, clientHeight: { value: 100 } });
-    s.mount([s.message("u", "user", "问题")]); s.scroller.scrollTop = -300;
-    s.scroller.scrollTo = ({ top }) => { s.scroller.scrollTop = top; };
-    await s.ready(true); await pause();
-    s.scroller.scrollTop = -175; s.win.dispatchEvent(new s.win.WheelEvent("wheel"));
-    await waitForIdle(s.controller);
-    assert.equal(s.scroller.scrollTop, -175);
-    assert.equal(s.controller.snapshot().historyError, "user-cancelled");
   } finally { s.close(); }
 });
 
@@ -365,33 +172,137 @@ test("Kimi duplicate file labels use attachment ordinals and omit file metadata"
   } finally { s.close(); }
 });
 
-for (const reverseFlow of [false, true]) {
-  test(`retry resumes a budget-limited scan beyond the previously read history (column-reverse: ${reverseFlow})`, async () => {
-    const s = setup();
-    try {
-      const messages = Array.from({ length: 30 }, (_, i) => s.message(`u${i}`, "user", `问题${i}`));
-      s.scroller.style.cssText = `display:flex;flex-direction:${reverseFlow ? "column-reverse" : "column"}`;
-      Object.defineProperties(s.scroller, { scrollHeight: { value: 3000 }, clientHeight: { value: 100 } });
-      const initialTop = reverseFlow ? 0 : 2900; let clock = 0;
-      Object.defineProperty(s.win.performance, "now", { value: () => clock });
-      s.scroller.scrollTop = initialTop;
-      s.scroller.scrollTo = ({ top }) => {
-        clock += 11000; s.scroller.scrollTop = top;
-        const position = Math.round((reverseFlow ? top + 2900 : top) / 100);
-        s.mount([messages[position]]);
-      };
-      s.mount([messages[29]]);
-      await s.ready(true); await waitForIdle(s.controller);
-      assert.equal(s.controller.snapshot().historyError, "native-load-timeout");
-      const firstCount = s.controller.snapshot().count;
-      assert.equal(firstCount, 2);
-      assert.equal(s.scroller.scrollTop, initialTop);
-      const result = await s.controller.retry();
-      assert.equal(result.reason, "native-load-timeout");
-      assert.ok(s.controller.snapshot().count > firstCount, "retry must read a new earlier message");
-      assert.ok(s.controller.outline({}).items.some((item) => item.markerKey === "index:u27"));
-      assert.equal(s.scroller.scrollTop, initialTop);
-      assert.equal(s.controller.snapshot().coverage, "loaded");
-    } finally { s.close(); }
-  });
+async function waitForBackfill(controller, timeout = 6000) {
+  const deadline = Date.now() + timeout;
+  await pause(5);
+  while (controller.snapshot()?.backfill?.phase === "running" && Date.now() < deadline) await pause(10);
+  // Allow the restore frame to remove the mask.
+  await pause(80);
+  return controller.snapshot()?.backfill?.phase;
 }
+
+// A scroller whose older page mounts above the reader when its top is reached,
+// keeping the reader's message in place like a native anchored list.
+function lazyHistory(s, { older, newer }) {
+  let loaded = false; const seen = [];
+  Object.defineProperties(s.scroller, {
+    scrollHeight: { get: () => loaded ? 1000 : 500 }, clientHeight: { value: 400 }
+  });
+  newer.element.getBoundingClientRect = () => ({ top: (loaded ? 900 : 400) - s.scroller.scrollTop });
+  s.scroller.scrollTo = ({ top }) => {
+    seen.push({ top, opacity: s.scroller.style.opacity, masked: Boolean(s.win.document.querySelector("[data-polaris-backfill]")) });
+    s.scroller.scrollTop = top;
+    if (top <= 0 && !loaded) { loaded = true; s.mount([older, newer]); s.scroller.scrollTop = 500; }
+  };
+  s.scroller.scrollTop = 100;
+  return { seen, viewportTop: () => newer.element.getBoundingClientRect().top };
+}
+
+test("long mode backfills older messages beneath a mask and restores the reader's place", async () => {
+  const s = setup();
+  try {
+    const older = s.message("old", "assistant", "更早章节"); const newer = s.message("new", "user", "当前问题");
+    s.scroller.style.opacity = "0.9";
+    s.mount([newer]);
+    const page = lazyHistory(s, { older, newer });
+    const before = page.viewportTop();
+    s.controller.configure(true, { retainLoaded: true, backfill: true }); await s.controller.syncMounted();
+    assert.equal(await waitForBackfill(s.controller), "done");
+    assert.ok(page.seen.length > 0);
+    assert.ok(page.seen.every((entry) => entry.opacity === "0" && entry.masked), "the list must be hidden whenever it is scrolled");
+    assert.deepEqual(s.controller.outline({}).items.map((item) => item.markerKey), ["index:old:0:0", "index:new"]);
+    assert.equal(s.controller.snapshot().coverage, "loaded", "reaching the top is not proof of complete history");
+    assert.equal(page.viewportTop(), before);
+    assert.equal(s.scroller.style.opacity, "0.9");
+    assert.equal(s.win.document.querySelector("[data-polaris-backfill]"), null);
+  } finally { s.close(); }
+});
+
+test("user input stops backfill, restores the page and continue resumes it", async () => {
+  const s = setup();
+  try {
+    const older = s.message("old", "assistant", "更早章节"); const newer = s.message("new", "user", "当前问题");
+    s.mount([newer]);
+    const page = lazyHistory(s, { older, newer });
+    const before = page.viewportTop();
+    s.controller.configure(true, { retainLoaded: true, backfill: true }); await s.controller.syncMounted();
+    await pause(5);
+    assert.equal(s.controller.snapshot().backfill.phase, "running");
+    assert.ok(s.win.document.querySelector("[data-polaris-backfill]"));
+    s.win.dispatchEvent(new s.win.Event("pointerdown"));
+    assert.equal(await waitForBackfill(s.controller), "stopped");
+    assert.equal(page.viewportTop(), before);
+    assert.equal(s.scroller.style.opacity, "");
+    assert.equal(s.win.document.querySelector("[data-polaris-backfill]"), null);
+    void s.controller.backfill({ resume: true });
+    assert.equal(await waitForBackfill(s.controller), "done");
+    assert.ok(s.controller.outline({}).items.some((item) => item.markerKey === "index:old:0:0"));
+  } finally { s.close(); }
+});
+
+test("backfill timeout keeps read messages and removes the mask", async () => {
+  const s = setup();
+  try {
+    const older = s.message("old", "assistant", "更早章节"); const newer = s.message("new", "user", "当前问题");
+    s.mount([newer]); lazyHistory(s, { older, newer });
+    let clock = 0;
+    Object.defineProperty(s.win.performance, "now", { configurable: true, value: () => { clock += 100000; return clock; } });
+    s.controller.configure(true, { retainLoaded: true, backfill: true }); await s.controller.syncMounted();
+    assert.equal(await waitForBackfill(s.controller), "timeout");
+    assert.equal(s.controller.snapshot().count, 1);
+    assert.equal(s.scroller.style.opacity, "");
+    assert.equal(s.win.document.querySelector("[data-polaris-backfill]"), null);
+  } finally { s.close(); }
+});
+
+test("backfill runs once per index, never in Follow the page mode, and not after a confirmed rebuild", async () => {
+  const s = setup();
+  try {
+    const scrolls = [];
+    s.scroller.scrollTo = ({ top }) => scrolls.push(top);
+    s.mount([s.message("u", "user", "问题")]);
+    await s.ready(true); await pause(30);
+    assert.equal(scrolls.length, 0);
+    assert.equal(s.controller.snapshot().backfill, undefined);
+    s.controller.configure(true, { retainLoaded: true, backfill: true }); await s.controller.syncMounted();
+    assert.equal(await waitForBackfill(s.controller), "done");
+    s.mount([s.message("u", "user", "问题"), s.message("a", "assistant", "回答")]); await s.controller.syncMounted();
+    await pause(30);
+    assert.equal(s.controller.snapshot().backfill.phase, "done", "later batches do not start another backfill");
+    await s.controller.rebuild(); await pause(30);
+    assert.equal(s.controller.snapshot().backfill, undefined);
+  } finally { s.close(); }
+});
+
+test("disposing during backfill restores the list and removes the mask", async () => {
+  const s = setup();
+  try {
+    const older = s.message("old", "assistant", "更早章节"); const newer = s.message("new", "user", "当前问题");
+    s.mount([newer]); lazyHistory(s, { older, newer });
+    s.controller.configure(true, { retainLoaded: true, backfill: true }); await s.controller.syncMounted();
+    await pause(5);
+    assert.ok(s.win.document.querySelector("[data-polaris-backfill]"));
+    s.controller.dispose();
+    await pause(250);
+    assert.equal(s.scroller.style.opacity, "");
+    assert.equal(s.win.document.querySelector("[data-polaris-backfill]"), null);
+  } finally { s.win.close(); }
+});
+
+test("backfill waits while the page is hidden and continues once it is visible again", async () => {
+  const s = setup();
+  try {
+    let hidden = true;
+    Object.defineProperty(s.win.document, "hidden", { configurable: true, get: () => hidden });
+    const older = s.message("old", "assistant", "更早章节"); const newer = s.message("new", "user", "当前问题");
+    s.mount([newer]);
+    const page = lazyHistory(s, { older, newer });
+    s.controller.configure(true, { retainLoaded: true, backfill: true }); await s.controller.syncMounted();
+    await pause(300);
+    assert.equal(s.controller.snapshot().backfill.phase, "running");
+    assert.equal(page.seen.length, 0, "no scrolling while the user cannot see the page");
+    hidden = false; s.win.document.dispatchEvent(new s.win.Event("visibilitychange"));
+    assert.equal(await waitForBackfill(s.controller), "done");
+    assert.ok(page.seen.length > 0);
+  } finally { s.close(); }
+});

@@ -127,6 +127,46 @@ button { color: inherit; }
   background: var(--window-header-background);
 }
 
+/* Sidepanel main header scrolls away instead of sticking; only the search bar stays pinned. */
+#polaris-window > .window-header--main {
+  position: static;
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+/* The centered platform switcher overhangs the header; keep it above the search bar until the bar is stuck. */
+#polaris-window:not([data-search-stuck]) > .window-header--main {
+  position: relative;
+  z-index: 4;
+}
+
+.window-search-bar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  margin: 0 calc(var(--polaris-space-4) * -1);
+  padding: var(--polaris-space-3) var(--polaris-space-4) var(--polaris-space-2);
+  border-bottom: 1px solid transparent;
+  background: var(--window-header-background);
+  transition: border-color var(--window-fast-duration) var(--polaris-ease), box-shadow var(--window-fast-duration) var(--polaris-ease);
+}
+
+#polaris-window[data-search-stuck] > .window-search-bar {
+  border-bottom-color: var(--polaris-border);
+  box-shadow: 0 8px 16px -14px rgba(0, 0, 0, 0.35);
+}
+
+.window-search-bar .window-search {
+  margin: 0;
+}
+
+.window-tabs-bar {
+  margin: 0 calc(var(--polaris-space-4) * -1);
+  padding: 0 var(--polaris-space-4) var(--polaris-space-3);
+  border-bottom: 1px solid var(--polaris-border);
+  background: var(--window-header-background);
+}
+
 .window-identity {
   position: relative;
   display: flex;
@@ -440,8 +480,6 @@ button { color: inherit; }
 .index-current-title { margin: 0; font-size: 17px; overflow-wrap: anywhere; }
 .index-current-status, .index-list-status { margin: 0; color: var(--polaris-text-secondary); font-size: 12px; line-height: 1.6; }
 .index-list-status { padding: 12px 0; }
-.index-progress { width: 100%; height: 5px; accent-color: var(--polaris-accent); }
-.index-progress[hidden] { display: none; }
 .index-mode-cards { display: grid; gap: 10px; margin: 0; padding: 0; border: 0; min-width: 0; }
 .index-mode-cards legend { font-size: 12px; margin-bottom: 8px; }
 .index-mode-card { display: flex; align-items: flex-start; gap: 10px; padding: 14px; border: 1px solid var(--polaris-border); border-radius: 14px; cursor: pointer; }
@@ -455,6 +493,13 @@ button { color: inherit; }
 .index-result-snippet { white-space: normal; overflow-wrap: anywhere; line-height: 1.6; font-size: 13px; }
 .index-result-snippet mark { background: var(--polaris-accent-subtle); color: var(--polaris-accent); }
 .index-notice { position: fixed; bottom: 16px; left: 16px; right: 16px; z-index: 100; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--polaris-border); background: var(--polaris-bg-elevated); color: var(--polaris-text); font-size: 12px; box-shadow: 0 6px 24px #0002; }
+.index-notice-actions { display: flex; flex-wrap: wrap; gap: var(--polaris-space-2); margin-top: var(--polaris-space-2); }
+.index-reset-confirm { display: grid; gap: var(--polaris-space-2); }
+.index-reset-confirm[hidden], [data-index-rebuild][hidden], [data-index-retry][hidden] { display: none; }
+.index-backfill-toggle { display: flex; align-items: flex-start; gap: 10px; padding: 14px; border: 1px solid var(--polaris-border); border-radius: 14px; cursor: pointer; }
+.index-backfill-toggle input { margin: 3px 0 0; accent-color: var(--polaris-accent); }
+.index-backfill-toggle[hidden] { display: none; }
+.retained-reading-status { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--polaris-space-2); padding-bottom: var(--polaris-space-3); color: var(--polaris-text-secondary); font-size: 12px; }
 
 .maker-card {
   display: flex;
@@ -1462,7 +1507,9 @@ button { color: inherit; }
 @media (max-width: 380px) {
   #polaris-window { padding-inline: var(--polaris-space-3); }
 
-  .window-header {
+  .window-header,
+  .window-search-bar,
+  .window-tabs-bar {
     margin-inline: calc(var(--polaris-space-3) * -1);
     padding-inline: var(--polaris-space-3);
   }

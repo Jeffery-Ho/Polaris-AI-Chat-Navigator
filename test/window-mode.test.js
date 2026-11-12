@@ -216,3 +216,12 @@ test("空状态使用每个平台打包的 favicon 资源", async () => {
   const resources = buildManifest.web_accessible_resources?.flatMap((entry) => entry.resources) || [];
   for (const name of platformFaviconFiles) assert.ok(resources.includes(`icons/platform-${name}.png`));
 });
+
+test("居中平台切换器在搜索栏吸顶前位于搜索栏之上，不被裁剪", () => {
+  const rule = windowCss.match(/#polaris-window:not\(\[data-search-stuck\]\) > \.window-header--main \{([^}]*)\}/);
+  assert.ok(rule, "unstuck main header has its own stacking rule");
+  assert.match(rule[1], /position: relative;/);
+  const headerZ = Number(rule[1].match(/z-index: (\d+);/)?.[1]);
+  const barZ = Number(windowCss.match(/\.window-search-bar \{[^}]*z-index: (\d+);/)?.[1]);
+  assert.ok(headerZ > barZ, `header z-index ${headerZ} must exceed search bar ${barZ}`);
+});

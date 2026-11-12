@@ -2,7 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
 import { readFile } from "node:fs/promises";
-import { createConversationCacheHandler } from "../src/conversation-cache.js";
 
 const packagedContentScripts = [{
   css: ["assets/content-styles-HASH.css"],
@@ -21,8 +20,7 @@ for (const match of backgroundSource.matchAll(/import\s+\{([^}]+)\}\s+from\s+"([
 const executableBackgroundSource = backgroundSource.replace(
   'import { snapshotDeliveryResult } from "./snapshot-delivery.js";\n',
   deliverySource.replaceAll("export ", "")
-).replace('import { createConversationCacheHandler } from "./conversation-cache.js";\n', "")
-  .replace(/import\s+\{[^}]+\}\s+from\s+"[^"]+";\n/g, "")
+).replace(/import\s+\{[^}]+\}\s+from\s+"[^"]+";\n/g, "")
   .replace("export function initializeBackground", "function initializeBackground") + "\ninitializeBackground();";
 
 function createEvent() {
@@ -37,7 +35,7 @@ function createEvent() {
   };
 }
 
-async function runAction({ storedWindow, getError = null, updateError = null, syncGetError = null, sidePanel = false, behaviorError = null, sidebarAction = false, toggleError = null, contentScriptFailures = 0, contentResponse, scripting = false, cssError = null, scriptError = null, contentScripts = packagedContentScripts, settleMs = 0, historyMode = "default", reloadError = null }) {
+async function runAction({ storedWindow, getError = null, updateError = null, syncGetError = null, sidePanel = false, behaviorError = null, sidebarAction = false, toggleError = null, contentScriptFailures = 0, contentResponse, scripting = false, cssError = null, scriptError = null, contentScripts = packagedContentScripts, settleMs = 0 }) {
   const windowUrl = "chrome-extension://test/polaris-home.html";
   const sourceTab = { id: 42, windowId: 9, active: true, url: "https://chatgpt.com/c/test" };
   const local = {
@@ -93,7 +91,7 @@ async function runAction({ storedWindow, getError = null, updateError = null, sy
       sync: {
         async get() {
           if (syncGetError) throw syncGetError;
-          return { "gpt-paragraph-nav-config": { chatgptHistoryMode: historyMode } };
+          return {};
         },
         async set() {},
         async remove() {}
@@ -119,7 +117,6 @@ async function runAction({ storedWindow, getError = null, updateError = null, sy
     },
     tabs: {
       async query() { return [sourceTab]; },
-      async reload(tabId) { calls.reloads.push(tabId); if (reloadError) throw reloadError; },
       async sendMessage(tabId, message) {
         calls.contentRequests.push({ tabId, message });
         if (contentRequestAttempts < contentScriptFailures) {
@@ -139,7 +136,6 @@ async function runAction({ storedWindow, getError = null, updateError = null, sy
   vm.runInNewContext(executableBackgroundSource, {
     ...backgroundImports,
     chrome,
-    createConversationCacheHandler,
     URL,
     Number,
     Date,
@@ -161,38 +157,11 @@ async function runAction({ storedWindow, getError = null, updateError = null, sy
   return calls;
 }
 
-test("全文读取失败的刷新动作直接重载匹配会话，无需内容脚本响应", async () => {
-  const calls = await runAction({ historyMode: "complete", contentScriptFailures: 5 });
-  const requests = calls.contentRequests.length;
-  const response = await calls.command({ type: "POLARIS_WINDOW_COMMAND", command: "reload-conversation", expectResult: true,
-    expectedTabId: 42, expectedRouteKey: "https://chatgpt.com/c/test" });
-  assert.equal(response.ok, true);
-  assert.deepEqual(calls.reloads, [42]);
-  assert.equal(calls.contentRequests.length, requests);
-});
-
-test("刷新动作拒绝关闭全文读取、旧标签页、旧路由和非会话页面", async () => {
-  const command = { type: "POLARIS_WINDOW_COMMAND", command: "reload-conversation", expectResult: true,
-    expectedTabId: 42, expectedRouteKey: "https://chatgpt.com/c/test" };
-  const off = await runAction({});
-  assert.equal((await off.command(command)).reason, "complete-mode-disabled");
-  assert.deepEqual(off.reloads, []);
-  const on = await runAction({ historyMode: "complete" });
-  for (const patch of [{ expectedTabId: 99 }, { expectedRouteKey: "https://chatgpt.com/c/old" }, { expectedRouteKey: undefined }]) {
-    assert.equal((await on.command({ ...command, ...patch })).reason, "source-changed");
-  }
-  for (const url of ["https://chatgpt.com/", "https://example.com/c/test"]) {
-    on.sourceTab.url = url;
-    assert.equal((await on.command({ ...command, expectedRouteKey: url })).reason, "source-changed");
-  }
-  assert.deepEqual(on.reloads, []);
-});
-
-test("浏览器拒绝刷新时向侧栏返回失败", async () => {
-  const calls = await runAction({ historyMode: "complete", reloadError: new Error("tab closed") });
-  const response = await calls.command({ type: "POLARIS_WINDOW_COMMAND", command: "reload-conversation", expectResult: true,
-    expectedTabId: 42, expectedRouteKey: "https://chatgpt.com/c/test" });
-  assert.equal(response.ok, false);
+test("非 Pro 用户无法开启「保留已加载内容」模式", async () => {
+  const calls = await runAction({ storedWindow: null });
+  calls.local["polaris-billing-v1"] = { trialEndsAt: 1, platforms: [], recentPlatforms: [] };
+  const response = await calls.command({ type: "POLARIS_WINDOW_COMMAND", command: "update-config", patch: { historyMode: "loaded" }, expectResult: true });
+  assert.equal(response.reason, "pro-required");
 });
 
 test("章节来源定位将 content script 的成功响应返回侧栏", async () => {
@@ -279,7 +248,7 @@ async function runSidePanelReady() {
     }
   };
 
-  vm.runInNewContext(executableBackgroundSource, { ...backgroundImports, chrome, createConversationCacheHandler, URL, Number, Date, Promise, console });
+  vm.runInNewContext(executableBackgroundSource, { ...backgroundImports, chrome, URL, Number, Date, Promise, console });
   runtimeMessage.emit({ type: "POLARIS_WINDOW_READY", windowType: "sidepanel" });
   await new Promise((resolve) => setTimeout(resolve, 0));
   return { local, sends };
@@ -408,14 +377,4 @@ test("系统 side panel 就绪时不会把宿主浏览器窗口登记为 Polaris
   assert.equal(local["polaris-window-id"], undefined);
   assert.equal(local["polaris-window-tab-id"], undefined);
   assert.deepEqual(sends, [42]);
-});
-
-test('Gemini read failures reload only the matching signed-in or shared conversation',async()=>{
- const calls=await runAction({historyMode:'complete'});
- for(const url of ['https://gemini.google.com/u/1/app/one','https://gemini.google.com/share/one']){
-  calls.sourceTab.url=url;
-  const result=await calls.command({type:'POLARIS_WINDOW_COMMAND',command:'reload-conversation',expectResult:true,expectedTabId:42,expectedRouteKey:url});
-  assert.equal(result.ok,true);
- }
- assert.deepEqual(calls.reloads,[42,42]);
 });

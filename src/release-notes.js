@@ -1,5 +1,30 @@
 const RELEASE_NOTES = Object.freeze([
   {
+    version: "1.5.0",
+    en: { title: "Backfill your own long chats", changes: ["With your permission, long conversation mode renders the unmounted messages of your open chat using only the page's own list, beneath a cover, then restores your place. Shared chats are skipped.", "It pauses while the page is hidden and stops when you use the page; the progress card offers Continue loading. Polaris still does not call website APIs."] },
+    zh: { title: "自动补齐你自己的长对话", changes: ["经你同意后，长对话模式会只用网页自身的列表，在遮罩下补齐当前对话未显示的消息，结束后恢复原阅读位置；分享页不补齐。", "页面不可见时暂停，操作网页即停止，进度卡片提供「继续补齐」。Polaris 仍不调用网站接口。"] }
+  },
+  {
+    version: "1.4.0",
+    en: { title: "Read while your outline takes shape", changes: ["Long conversation mode shows indexed Makers in batches beneath the progress card. The sidebar starts at the earliest indexed content once, then preserves your reading position.", "Long conversation mode remains off by default. Preparing the list only scrolls Polaris; it does not scroll the website or automatically load older history."] },
+    zh: { title: "边整理，边阅读目录", changes: ["长对话模式会在进度卡片下方逐批显示已整理的 Maker。首批内容出现时，侧栏自动回到最早已读内容；后续更新保留阅读位置。", "长对话模式保持默认关闭。整理和对齐仅滚动 Polaris 列表，不滚动聊天网页或自动加载更早历史。"] }
+  },
+  {
+    version: "1.3.0",
+    en: { title: "Keep reading long conversations", changes: ["When an original message is no longer on the page, choose Read in Outline to read the retained content. Return to the same TOC search and position.", "Page updates reuse unchanged messages. Clear and rebuild the current index from Preferences when needed; retained history is removed only after confirmation."] },
+    zh: { title: "已保留的长对话，随时接着读", changes: ["原文已从网页卸载时，可选择「在大纲阅读」查看本页保留内容，返回目录仍保持搜索和位置。", "页面更新复用未变化消息；需要重新整理时，可在偏好设置确认「清除并重建当前索引」，释放已保留历史。"] }
+  },
+  {
+    version: "1.2.1",
+    en: { title: "Long conversation mode without moving the page", changes: ["Choose Follow the page or Long conversation mode. Search and export use only messages already loaded by the website, without automatically scrolling or loading history.", "Private conversation API readers and the local conversation cache have been removed. Previous complete-reading preferences now retain loaded messages in this page's memory only."] },
+    zh: { title: "长对话模式，阅读位置由你掌握", changes: ["可选择「跟随页面」或「长对话模式」，目录、搜索和导出只使用页面已加载的消息，不再自动滚动或加载历史。", "移除私有会话接口读取和本地会话缓存；旧版完整读取偏好迁移到长对话模式，已加载消息只保存在当前页面内存中。"] }
+  },
+  {
+    version: "1.1.0",
+    en: { title: "A header that scrolls away", changes: ["The sidepanel header now scrolls up with the outline instead of staying pinned. The search bar stays at the top while you scroll, and the full header returns when you scroll back up."] },
+    zh: { title: "随滚动收起的主 header", changes: ["侧栏主 header 现在会随目录一起向上滚动，不再一直固定；滚动时搜索框吸顶，回到顶部后恢复完整显示。"] }
+  },
+  {
     version: "1.0.0",
     en: { title: "Polaris 1.0", changes: ["The Pro page opens with your membership status and device controls.", "What's New in Settings shows the three most recent feature releases and links to the complete release history."] },
     zh: { title: "Polaris 1.0 正式版", changes: ["打开 Pro 页面即可查看会员状态和管理本设备。", "设置中的「更新内容」显示最近三个功能版本，并可打开官网查看完整更新记录。"] }

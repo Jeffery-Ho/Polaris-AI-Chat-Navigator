@@ -1,12 +1,15 @@
-import { geminiRoute } from "../public/src/gemini-conversation.js";
 import { billingAllowsIndex } from "./billing-access.js";
 import { SUPPORTED_MATCHES } from "./supported-sites.js";
 import { createBillingService } from "./billing-service.js";
 import { createBillingMessageHandler } from "./billing-messages.js";
 import { snapshotDeliveryResult } from "./snapshot-delivery.js";
-import { createConversationCacheHandler } from "./conversation-cache.js";
+import { normalizeHistoryMode } from "./history-mode.js";
+import { removeLegacyConversationCache } from "./legacy-conversation-cache-cleanup.js";
 
 export function initializeBackground() {
+void removeLegacyConversationCache().catch(() => {
+  console.warn("[Polaris] Legacy conversation cache could not be removed.");
+});
 let billingSignature = "";
 const billingService = createBillingService({
   storage: chrome.storage.local,
@@ -23,7 +26,6 @@ const billingService = createBillingService({
   }
 });
 const handleBilling = createBillingMessageHandler({ chrome, service: billingService });
-const handleConversationCache = createConversationCacheHandler({ runtimeId: chrome.runtime.id, extensionOrigin: chrome.runtime.getURL(""), incognito: chrome.extension?.inIncognitoContext === true });
 const SOURCE_WINDOW_STORAGE_KEY = "polaris-source-window-id";
 const SOURCE_TAB_STORAGE_KEY = "polaris-source-tab-id";
 
@@ -286,8 +288,8 @@ async function sendContentMessage(tabId, message, { injectIfMissing = false } = 
 }
 
 async function forwardCommand(message) {
-  if (["search-conversation", "get-index-chapter", "retry-conversation-index", "read-loaded-conversation", "reload-conversation"].includes(message.command)
-      || (message.command === "update-config" && message.patch?.chatgptHistoryMode === "complete")) {
+  if (["search-conversation", "get-index-chapter", "read-retained-message", "resume-conversation-backfill"].includes(message.command)
+      || (message.command === "update-config" && normalizeHistoryMode(message.patch?.historyMode) === "loaded")) {
     if (!billingAllowsIndex(await billingService.getAccess())) return { ok: false, reason: "pro-required" };
   }
   const tab = await activeNormalTab();
@@ -296,16 +298,6 @@ async function forwardCommand(message) {
   }
   if (message.expectedTabId != null && message.expectedTabId !== tab.id) return { ok: false, reason: "source-changed" };
   currentTabId = tab.id;
-  if (message.command === "reload-conversation") {
-    const url = new URL(tab.pendingUrl || tab.url || "");
-    const routeKey = `${url.origin}${url.pathname}${url.search}`;
-    if (message.expectedTabId !== tab.id || message.expectedRouteKey !== routeKey
-      || !(geminiRoute(url.href) || /^(chatgpt\.com|chat\.openai\.com)$/.test(url.hostname) && /\/(?:c|share)\/[a-zA-Z0-9-]+(?:\/|$)/.test(url.pathname))) return { ok: false, reason: "source-changed" };
-    const stored = await chrome.storage.sync.get("gpt-paragraph-nav-config");
-    if (stored["gpt-paragraph-nav-config"]?.chatgptHistoryMode !== "complete") return { ok: false, reason: "complete-mode-disabled" };
-    await chrome.tabs.reload(tab.id);
-    return { ok: true };
-  }
   let result;
   try {
     result = await sendContentMessage(tab.id, message, {
@@ -354,6 +346,7 @@ async function persistWindowConfigCommand(message) {
   const stored = await chrome.storage.sync.get(key);
   const current = stored[key] && typeof stored[key] === "object" ? stored[key] : {};
   const patch = { ...message.patch };
+  if (Object.hasOwn(patch, "historyMode")) patch.historyMode = normalizeHistoryMode(patch.historyMode);
   ["enabledLevelsByPlatform", "enabledOrderedListByPlatform", "enabledStrongByPlatform", "enabledUnorderedListByPlatform"].forEach((nestedKey) => {
     if (patch[nestedKey] && typeof patch[nestedKey] === "object") {
       patch[nestedKey] = { ...(current[nestedKey] || {}), ...patch[nestedKey] };
@@ -443,11 +436,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === "POLARIS_BILLING") {
     void handleBilling(message, sender).then(sendResponse).catch(() => sendResponse({ ok: false }));
-    return true;
-  }
-
-  if (message.type === "POLARIS_CONVERSATION_CACHE") {
-    void handleConversationCache(message, sender).then(sendResponse).catch(() => sendResponse(null));
     return true;
   }
 

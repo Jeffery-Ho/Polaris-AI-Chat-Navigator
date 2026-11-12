@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { readFile } from "node:fs/promises";
 import { createContentLifecycle } from "../src/content-lifecycle.js";
+import { attachVirtualList, virtualConversationHtml, virtualConversationTurns } from "./fixtures/chatgpt-virtual-conversation.js";
 
 test("disposal removes page and Chrome listeners and cancels pending work", async () => {
   const dom = new JSDOM("<html><body></body></html>", { pretendToBeVisual: true });
@@ -55,7 +56,7 @@ test("route bridge can be disposed and reloaded without wrapping history twice",
   dom.window.close();
 });
 
-async function bootPackagedContent({ delayConfig = false, pageUrl = "https://chatgpt.com/c/wxt-test", html } = {}) {
+async function bootPackagedContent({ delayConfig = false, pageUrl = "https://chatgpt.com/c/wxt-test", html, savedConfig } = {}) {
   const errors = [];
   const { VirtualConsole } = await import("jsdom");
   const console = new VirtualConsole();
@@ -67,7 +68,7 @@ async function bootPackagedContent({ delayConfig = false, pageUrl = "https://cha
   const win = dom.window;
   win.CSS = { escape: (value) => String(value).replace(/[^a-zA-Z0-9_-]/g, (char) => `\\${char}`) };
   win.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
-  win.ResizeObserver = class { observe() {} disconnect() {} };
+  win.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
   win.HTMLElement.prototype.getBoundingClientRect = () => ({ top: 0, bottom: 100, left: 0, right: 600, height: 100, width: 600 });
   win.HTMLElement.prototype.scrollTo = () => {};
   win.scrollTo = () => {};
@@ -78,9 +79,11 @@ async function bootPackagedContent({ delayConfig = false, pageUrl = "https://cha
   const runtime = event();
   const storage = event();
   const messages = [];
+  const configWrites = [];
   const pendingConfigReads = [];
   const get = (_keys, callback) => {
-    const result = { "polaris.makerSnapshotCleanup.v1": true };
+    const result = { "polaris.makerSnapshotCleanup.v1": true,
+      ...(savedConfig ? { "gpt-paragraph-nav-config": savedConfig } : {}) };
     callback?.(result);
     return Promise.resolve(result);
   };
@@ -93,7 +96,7 @@ async function bootPackagedContent({ delayConfig = false, pageUrl = "https://cha
     },
     storage: {
       local: { get, set: async () => {}, remove: async () => {} },
-      sync: { get: delayConfig ? (_keys, callback) => pendingConfigReads.push(callback) : get, set: async () => {} },
+      sync: { get: delayConfig ? (_keys, callback) => pendingConfigReads.push(callback) : get, set: async (value) => { configWrites.push(value); } },
       onChanged: storage
     }
   };
@@ -102,7 +105,167 @@ async function bootPackagedContent({ delayConfig = false, pageUrl = "https://cha
   const invalidate = () => win.document.dispatchEvent(new win.CustomEvent("wxttest:content:wxt:content-script-started", {
     detail: { contentScriptName: "content", messageId: "test-disposal" }
   }));
-  return { dom, win, runtime, storage, messages, errors, pendingConfigReads, flush, inject, invalidate };
+  return { dom, win, runtime, storage, messages, errors, configWrites, pendingConfigReads, flush, inject, invalidate };
+}
+
+test("packaged long mode publishes readable batches without scrolling the website", async () => {
+  const html = `<html><body><main>${Array.from({ length: 7 }, (_, i) =>
+    `<article data-message-author-role="user" data-message-id="m${i}"><p>Loaded message ${i}</p></article>`).join("")}</main></body></html>`;
+  const s = await bootPackagedContent({ savedConfig: { historyMode: "loaded" }, html });
+  try {
+    let clock = 0;
+    s.win.performance.now = () => clock += 10;
+    s.win.structuredClone = structuredClone;
+    const scrolls = [];
+    s.win.scrollTo = (...args) => scrolls.push(args);
+    s.win.HTMLElement.prototype.scrollTo = (...args) => scrolls.push(args);
+    s.win.HTMLElement.prototype.scrollIntoView = (...args) => scrolls.push(args);
+    const main = s.win.document.querySelector("main"); main.scrollTop = 600;
+    await s.inject();
+    await new Promise(resolve => setTimeout(resolve, 160));
+    const snapshots = s.messages.filter(message => message.type === "POLARIS_CONTENT_STATE").map(message => message.snapshot);
+    const partial = snapshots.find(snapshot => snapshot.conversationLoading && snapshot.conversationIndex.count > 0 && snapshot.conversationIndex.count < 7);
+    assert.ok(partial, "the packaged content must expose actual indexed messages while the remaining batch is processing");
+    assert.ok(partial.markerItems.length > 0);
+    assert.equal(partial.markerItems[0].title, "Loaded message 0");
+    assert.equal(snapshots.at(-1).conversationIndex.count, 7);
+    assert.equal(snapshots.at(-1).conversationLoading, false);
+    assert.equal(main.scrollTop, 600);
+    assert.deepEqual(scrolls, []);
+    assert.deepEqual(s.errors, []);
+  } finally { s.invalidate(); s.win.close(); }
+});
+
+test("refreshing in long mode waits for asynchronously mounted messages before reporting initial progress", async () => {
+  const s = await bootPackagedContent({ savedConfig: { historyMode: "loaded" }, pageUrl: "https://chatgpt.com/share/refresh-progress", html: "<html><body><main></main></body></html>" });
+  try {
+    s.win.structuredClone = structuredClone;
+    await s.inject();
+    await new Promise(resolve => setTimeout(resolve, 160));
+    const empty = s.messages.findLast(message => message.type === "POLARIS_CONTENT_STATE")?.snapshot;
+    assert.equal(empty.config.historyMode, "loaded");
+    assert.equal(empty.conversationIndex.count, 0);
+    s.messages.length = 0;
+    s.win.document.querySelector("main").innerHTML = Array.from({ length: 7 }, (_, i) =>
+      `<article data-message-author-role="${i % 2 ? "assistant" : "user"}" data-message-id="m${i}"><div class="markdown"><p>Loaded message ${i}</p></div></article>`).join("");
+    await new Promise(resolve => setTimeout(resolve, 160));
+    const snapshots = s.messages.filter(message => message.type === "POLARIS_CONTENT_STATE").map(message => message.snapshot);
+    assert.ok(snapshots.some(snapshot => snapshot.conversationLoading && snapshot.conversationIndex.progress?.total === 7),
+      "the empty page shell must not consume the first real indexing progress after refresh");
+    assert.equal(snapshots.at(-1).conversationIndex.count, 7);
+    assert.equal(snapshots.at(-1).conversationLoading, false);
+    assert.deepEqual(s.errors, []);
+  } finally { s.invalidate(); s.win.close(); }
+});
+
+test("enabling long mode delivers initial progress before a small loaded batch completes", async () => {
+  const html = `<html><body><main>${Array.from({ length: 7 }, (_, i) =>
+    `<article data-message-author-role="${i % 2 ? "assistant" : "user"}" data-message-id="m${i}"><div class="markdown"><p>Loaded message ${i}</p></div></article>`).join("")}</main></body></html>`;
+  const s = await bootPackagedContent({ savedConfig: { historyMode: "default" }, pageUrl: "https://chatgpt.com/share/progress-repro", html });
+  try {
+    s.win.structuredClone = structuredClone;
+    await s.inject();
+    await new Promise(resolve => setTimeout(resolve, 160));
+    s.messages.length = 0;
+    for (const listener of s.runtime.listeners) listener({ type: "POLARIS_WINDOW_COMMAND", command: "update-config", patch: { historyMode: "loaded" } }, {}, () => {});
+    await new Promise(resolve => setTimeout(resolve, 160));
+    const snapshots = s.messages.filter(message => message.type === "POLARIS_CONTENT_STATE").map(message => message.snapshot);
+    assert.ok(snapshots.some(snapshot => snapshot.config.historyMode === "loaded" && snapshot.conversationLoading),
+      "the sidepanel must receive loading even when all seven messages finish within one task");
+    assert.equal(snapshots.at(-1).conversationLoading, false);
+    assert.equal(snapshots.at(-1).conversationIndex.count, 7);
+    assert.equal(snapshots.at(-1).conversationIndex.phase, "complete");
+    s.messages.length = 0;
+    s.win.document.querySelector(".markdown p").textContent = "Updated loaded message";
+    await new Promise(resolve => setTimeout(resolve, 160));
+    const updates = s.messages.filter(message => message.type === "POLARIS_CONTENT_STATE");
+    assert.ok(updates.length);
+    assert.ok(updates.every(message => !message.snapshot.conversationLoading), "later mutations must not show the initial cover again");
+    assert.deepEqual(s.errors, []);
+  } finally { s.invalidate(); s.win.close(); }
+});
+
+for (const historyMode of ["default", "loaded", "complete", "legacy-key"]) {
+  test(`packaged content stays passive across startup, updates, commands and route changes (${historyMode})`, async () => {
+    const s = await bootPackagedContent({ savedConfig: historyMode === "legacy-key" ? { chatgptHistoryMode: "complete" }
+      : { historyMode, ...(historyMode === "loaded" ? { backfillConsent: "granted" } : {}) }, html: '<html><body><main style="overflow-y:auto"><article data-message-author-role="assistant" data-message-id="old"><div class="markdown"><h2>Original heading</h2></div></article></main><button id="earlier">Load earlier</button></body></html>' });
+    try {
+      s.win.structuredClone = structuredClone;
+      const main = s.win.document.querySelector("main");
+      Object.defineProperties(main, { scrollHeight: { value: 3000 }, clientHeight: { value: 500 } });
+      main.scrollTop = 1800;
+      const scrolls = []; const loads = []; const requests = [];
+      const masked = [];
+      main.scrollTo = (options) => {
+        masked.push(main.style.opacity === "0" && Boolean(s.win.document.querySelector("[data-polaris-backfill]")));
+        scrolls.push(options);
+      };
+      s.win.scrollTo = (options) => scrolls.push(options);
+      s.win.HTMLElement.prototype.scrollIntoView = (options) => scrolls.push(options);
+      s.win.document.querySelector("#earlier").addEventListener("click", () => loads.push(true));
+      const originalFetch = s.win.fetch = (...args) => { requests.push(args); throw new Error("No conversation requests are allowed"); };
+      const originalOpen = s.win.XMLHttpRequest.prototype.open = (...args) => requests.push(args);
+      await s.inject();
+      await new Promise((resolve) => setTimeout(resolve, 160));
+      const latest = () => s.messages.findLast((message) => message.type === "POLARIS_CONTENT_STATE")?.snapshot;
+      const first = latest();
+      assert.equal(first.config.historyMode, ["complete", "legacy-key"].includes(historyMode) ? "loaded" : historyMode);
+      assert.equal(first.conversationIndex.count, 1);
+      const oldKey = first.markerItems.find((item) => item.title === "Original heading").markerKey;
+      if (historyMode === "complete") assert.ok(s.configWrites.some((write) => write["gpt-paragraph-nav-config"]?.historyMode === "loaded"));
+      const command = (values) => new Promise((resolve) => {
+        for (const listener of s.runtime.listeners) listener({ type: "POLARIS_WINDOW_COMMAND", expectResult: true, ...values }, {}, resolve);
+      });
+      for (const listener of s.runtime.listeners) listener({ type: "POLARIS_WINDOW_REQUEST_STATE" }, {}, () => {});
+      s.win.document.dispatchEvent(new s.win.Event("visibilitychange"));
+      main.innerHTML = '<article data-message-author-role="assistant" data-message-id="new"><div class="markdown"><h2>Current heading</h2></div></article>';
+      await new Promise((resolve) => setTimeout(resolve, 160));
+      await command({ command: "retry-conversation-index" });
+      const search = await command({ command: "search-conversation", query: "Original heading" });
+      assert.equal(search.total, historyMode === "default" ? 0 : 1);
+      const exported = await command({ command: "get-conversation-export" });
+      assert.equal(exported.scope, "loaded");
+      assert.equal(exported.messages.length, historyMode === "default" ? 1 : 2);
+      const target = await command({ command: "jump-to-marker", markerKey: oldKey });
+      assert.equal(target.ok, false);
+      assert.equal(target.reason, historyMode === "default" ? "target-missing" : "not-mounted");
+      const retained = await command({ command: "read-retained-message", markerKey: oldKey });
+      assert.equal(retained.ok, historyMode !== "default");
+      if (retained.ok) assert.ok(retained.chapter.contents.some(part => part.text === "Original heading"));
+      const staleReset = await command({ command: "rebuild-conversation-index", generation: "old-generation" });
+      assert.equal(staleReset.reason, "source-changed");
+      assert.equal((await command({ command: "get-conversation-export" })).messages.length, historyMode === "default" ? 1 : 2);
+      const rebuilt = await command({ command: "rebuild-conversation-index", generation: first.conversationIndex.generation });
+      assert.equal(rebuilt.ok, true);
+      assert.equal((await command({ command: "get-conversation-export" })).messages.length, 1);
+      assert.equal((await command({ command: "read-retained-message", markerKey: oldKey })).ok, false);
+      s.win.history.pushState({}, "", "/c/another");
+      s.win.dispatchEvent(new s.win.Event("polaris-for-web-route-change"));
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      assert.equal(latest().conversationIndex.count, 0, "the previous chat must stay cleared while the new page is still loading");
+      main.innerHTML = '<article data-message-author-role="assistant" data-message-id="another"><div class="markdown"><h2>Next chat</h2></div></article>';
+      for (let i = 0; i < 50 && latest()?.conversationIndex?.count !== 1; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      assert.equal(latest().conversationIndex.count, 1);
+      // The new chat runs its own masked backfill; let it settle.
+      for (let i = 0; i < 150 && s.win.document.querySelector("[data-polaris-backfill]"); i++) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      // Long mode may scroll the website's own list, but only while it is
+      // hidden beneath the backfill mask; Follow the page never scrolls it.
+      // Without the user's backfill consent the website list is never scrolled.
+      if (historyMode !== "loaded") assert.deepEqual(scrolls, []);
+      else assert.ok(masked.length && masked.every(Boolean), "backfill must never scroll the visible list");
+      assert.deepEqual(loads, []); assert.deepEqual(requests, []);
+      assert.equal(main.scrollTop, 1800);
+      assert.equal(main.style.opacity, "");
+      assert.equal(s.win.document.querySelector("[data-polaris-backfill]"), null);
+      assert.equal(s.win.fetch, originalFetch);
+      assert.equal(s.win.XMLHttpRequest.prototype.open, originalOpen);
+      assert.deepEqual(s.errors, []);
+    } finally { s.invalidate(); s.win.close(); }
+  });
 }
 
 test("packaged Kimi builds a structured index with files, images and final-answer Makers", async () => {
@@ -164,12 +327,11 @@ for (const fixture of [
   });
 }
 
-test("complete mode leaves ChatGPT settings pages free of the pick-a-chat notice", async () => {
+test("settings pages stay free of the pick-a-chat notice", async () => {
   for (const pageUrl of ["https://chatgpt.com/settings", "https://chatgpt.com/settings/billing", "https://chatgpt.com/settings/account?tab=profile", "https://chat.openai.com/settings/billing/"]) {
     const s = await bootPackagedContent({ pageUrl });
     try {
       await s.inject();
-      for (const listener of s.runtime.listeners) listener({ type: "POLARIS_WINDOW_COMMAND", command: "update-config", patch: { chatgptHistoryMode: "complete" } }, {}, () => {});
       await s.flush();
       assert.equal(s.win.document.getElementById("polaris-conversation-notice"), null, pageUrl);
       assert.equal(s.win.document.getElementById("polaris-conversation-cover"), null, pageUrl);
@@ -178,86 +340,6 @@ test("complete mode leaves ChatGPT settings pages free of the pick-a-chat notice
       assert.deepEqual(s.errors, []);
     } finally { s.invalidate(); s.dom.window.close(); }
   }
-});
-
-test("home guidance is published only to the sidepanel and settings or chats clear its state", async () => {
-  const s = await bootPackagedContent({ pageUrl: "https://chatgpt.com/" });
-  const routeTo = async (path) => {
-    s.win.history.pushState({}, "", path);
-    s.win.dispatchEvent(new s.win.Event("polaris-for-web-route-change"));
-    await s.flush();
-  };
-  try {
-    await s.inject();
-    for (const listener of s.runtime.listeners) listener({ type: "POLARIS_WINDOW_COMMAND", command: "update-config", patch: { chatgptHistoryMode: "complete" } }, {}, () => {});
-    await s.flush();
-    assert.equal(s.win.document.getElementById("polaris-conversation-notice"), null);
-    const awaiting = () => s.messages.findLast((item) => item.type === "POLARIS_CONTENT_STATE")?.snapshot.conversationAwaiting;
-    assert.equal(awaiting(), true);
-    await routeTo("/settings/billing");
-    assert.equal(s.win.document.getElementById("polaris-conversation-notice"), null);
-    assert.equal(awaiting(), false);
-    await routeTo("/");
-    assert.equal(s.win.document.getElementById("polaris-conversation-notice"), null);
-    assert.equal(awaiting(), true);
-    await routeTo("/c/wxt-test");
-    assert.equal(s.win.document.getElementById("polaris-conversation-notice"), null);
-    assert.equal(s.win.document.getElementById("polaris-conversation-cover"), null, "reading progress belongs in the sidepanel");
-    assert.equal(s.messages.findLast((item) => item.type === "POLARIS_CONTENT_STATE")?.snapshot.conversationLoading, true, "background reading and sidepanel loading continue without the card");
-    assert.equal(awaiting(), false);
-    await routeTo("/settings/account");
-    assert.equal(s.win.document.getElementById("polaris-conversation-notice"), null);
-    assert.equal(s.win.document.getElementById("polaris-conversation-cover"), null);
-    assert.equal(s.win.document.querySelector("main").hasAttribute("inert"), false);
-    assert.equal(awaiting(), false);
-    await routeTo("/c/wxt-test");
-    assert.equal(s.win.document.getElementById("polaris-conversation-cover"), null);
-    assert.equal(s.messages.findLast((item) => item.type === "POLARIS_CONTENT_STATE")?.snapshot.conversationLoading, true);
-    assert.deepEqual(s.errors, []);
-  } finally { s.invalidate(); s.dom.window.close(); }
-});
-
-test("packaged reading state reaches the sidepanel without inserting a website card", async () => {
-  const s = await bootPackagedContent();
-  const commands = [];
-  s.win.postMessage = (data) => commands.push(data);
-  s.win.document.querySelector('main').replaceChildren();
-  try {
-    await s.inject();
-    for (const listener of s.runtime.listeners) listener({ type: 'POLARIS_WINDOW_COMMAND', command: 'update-config', patch: { chatgptHistoryMode: 'complete' } }, {}, () => {});
-    await s.flush();
-    const bridge = s.win.document.querySelector('script[data-polaris-conversation-bridge]');
-    assert.ok(bridge);
-    bridge.dispatchEvent(new s.win.Event('load'));
-    const requestId = commands.findLast(message => message.command === 'start')?.requestId;
-    assert.ok(requestId);
-    const send = async (event, fields = {}) => {
-      s.win.dispatchEvent(new s.win.MessageEvent('message', { source: s.win, origin: s.win.location.origin, data: {
-        type: 'polaris-conversation-index-result', conversationId: 'wxt-test', requestId, runId: 1, event, ...fields
-      } }));
-      await s.flush(); await s.flush();
-    };
-    await send('page', { payload: { title: 'Read before native rendering', messages: [
-      { id: 'first', author: { role: 'assistant' }, content: { content_type: 'text', parts: ['## First message\nActual conversation content'] } }
-    ], page_info: { has_previous_page: false, has_next_page: false } } });
-    const snapshot = s.messages.findLast(message => message.type === 'POLARIS_CONTENT_STATE')?.snapshot;
-    assert.equal(snapshot?.conversationIndex?.count, 1, 'conversation data has arrived');
-    assert.equal(s.win.document.getElementById('polaris-conversation-cover'), null);
-    assert.equal(snapshot.conversationLoading, true, 'sidepanel progress begins before native messages mount');
-    await send('complete');
-    assert.equal(s.win.document.getElementById('polaris-conversation-cover'), null);
-    assert.equal(s.messages.findLast(message => message.type === 'POLARIS_CONTENT_STATE')?.snapshot.conversationLoading, true);
-    await send('native-state', { phase: 'error' });
-    for (const listener of s.runtime.listeners) listener({ type: 'POLARIS_WINDOW_COMMAND', command: 'read-loaded-conversation', generation: 'stale' }, {}, () => {});
-    await s.flush();
-    assert.equal(s.messages.findLast(message => message.type === 'POLARIS_CONTENT_STATE')?.snapshot.conversationLoading, true, 'stale actions cannot dismiss a new read');
-    for (const listener of s.runtime.listeners) listener({ type: 'POLARIS_WINDOW_COMMAND', command: 'read-loaded-conversation', generation: snapshot.conversationIndex.generation }, {}, () => {});
-    await s.flush();
-    assert.equal(s.messages.findLast(message => message.type === 'POLARIS_CONTENT_STATE')?.snapshot.conversationLoading, false, 'partial messages become available after the user chooses them');
-    await send('native-state', { phase: 'ready' });
-    assert.equal(s.win.document.getElementById('polaris-conversation-cover'), null);
-    assert.deepEqual(s.errors, []);
-  } finally { s.invalidate(); s.dom.window.close(); }
 });
 
 test("Gemini can replace its body while asynchronous content initialization is pending", async () => {
@@ -284,7 +366,6 @@ test("a shared chat in Follow ChatGPT mode includes visible AI image labels alon
     await s.inject();
     for (let i = 0; i < 30 && !s.messages.some((message) => message.type === "POLARIS_CONTENT_STATE"); i++) await s.flush();
     const snapshot = s.messages.findLast((message) => message.type === "POLARIS_CONTENT_STATE")?.snapshot;
-    assert.equal(snapshot?.config.chatgptHistoryMode, "default");
     assert.ok(snapshot?.markerItems.some((item) => item.title === "Text heading"));
     assert.equal(snapshot?.markerItems.filter((item) => item.image).length, 1);
   } finally { s.invalidate(); s.dom.window.close(); }
@@ -303,131 +384,6 @@ test("image-only shared turns keep multiple labels without exposing user attachm
     assert.doesNotMatch(JSON.stringify(labels), /images.example.com|hidden|avatar/);
   } finally { s.invalidate(); s.dom.window.close(); }
 });
-
-test("packaged content keeps indexed body data available without native history mounted", async () => {
-  const s = await bootPackagedContent();
-  try {
-    const posted = [];
-    s.win.postMessage = (data) => posted.push(data);
-    await s.inject();
-    const command = (name, fields = {}) => {
-      let response;
-      for (const listener of s.runtime.listeners) listener({ type: "POLARIS_WINDOW_COMMAND", command: name, ...fields }, {}, (value) => { response = value; });
-      return response;
-    };
-    command("update-config", { patch: { chatgptHistoryMode: "complete" } });
-    command("request-state");
-    s.win.document.querySelector('[data-polaris-conversation-bridge]').dispatchEvent(new s.win.Event("load"));
-    const start = posted.find((item) => item.command === "start");
-    assert.ok(start);
-    s.win.dispatchEvent(new s.win.MessageEvent("message", { source: s.win, origin: s.win.location.origin, data: {
-      type: "polaris-conversation-index-result", requestId: start.requestId, conversationId: start.conversationId, runId: 1, event: "page",
-      payload: { messages: [{ id: "server-answer", author: { role: "assistant" }, content: { content_type: "text", parts: ["| 市场 | 财富 |\n| --- | --- |\n| 日本 | 10 |\n\n表格后的解释。"] } }], page_info: { has_previous_page: false, has_next_page: false } }
-    } }));
-    await s.flush(); await s.flush();
-    const markerKey = "index:server-answer:0:0";
-    const source = { generation: start.requestId, expectedRouteKey: s.win.location.href };
-    command("request-chapters", source);
-    const published = s.messages.findLast((item) => item.type === "POLARIS_WINDOW_CHAPTERS");
-    assert.ok(published.treeChapters.some((node) => node.markerKey === "index:server-answer"));
-    const body = command("get-index-chapter", { ...source, markerKey: "index:server-answer", expectResult: true });
-    assert.equal(body.contents[0].ast.type, "table");
-    assert.equal(command("get-conversation-export", { ...source, expectResult: true }).reason, "not-ready");
-    s.win.dispatchEvent(new s.win.MessageEvent("message", { source: s.win, origin: s.win.location.origin, data: {
-      type: "polaris-conversation-index-result", requestId: start.requestId, conversationId: start.conversationId, runId: 1, event: "complete"
-    } }));
-    await s.flush(); await s.flush();
-    const exported = command("get-conversation-export", { ...source, expectResult: true });
-    assert.equal(exported.ok, true);
-    assert.equal(exported.scope, "complete");
-    assert.match(exported.messages[0].markdown, /表格后的解释/);
-    assert.equal(command("get-conversation-export", { ...source, generation: "stale", expectResult: true }).ok, false);
-    assert.equal(s.win.document.querySelector('[data-message-id="server-answer"]'), null);
-    const mounted = s.win.document.createElement("div");
-    mounted.dataset.chatgptSearchMessageIds = "tool-id server-answer";
-    mounted.innerHTML = '<div>Tool activity absent from the answer</div><div class="MarkdownRoot-first"><table><thead><tr><th>市场</th><th>财富</th></tr></thead><tbody><tr><td>日本</td><td>10</td></tr></tbody></table></div><div class="MarkdownRoot-last"><p>表格后的解释。</p></div>';
-    mounted.getBoundingClientRect = () => ({ top: 120, bottom: 620, left: 100, right: 700, width: 600, height: 500 });
-    mounted.querySelector("table").getBoundingClientRect = () => ({ top: 150, bottom: 250, left: 100, right: 700, width: 600, height: 100 });
-    s.win.document.querySelector("main").append(mounted);
-    const scrolls = [];
-    s.win.HTMLElement.prototype.scrollIntoView = function () { scrolls.push(this); };
-    command("jump-to-marker", { ...source, markerKey, expectResult: true });
-    await s.flush();
-    assert.equal(scrolls.at(-1), mounted.querySelector("table"));
-    assert.equal(s.win.document.querySelector("[data-polaris-locate-flash]"), null, "wait for scroll settling before painting");
-    await new Promise((resolve) => setTimeout(resolve, 220));
-    const highlight = s.win.document.querySelector("[data-polaris-locate-flash]");
-    assert.ok(highlight, "the sidepanel runtime command paints the mounted indexed reply");
-    assert.equal(highlight.style.top, "112px");
-    assert.equal(highlight.style.height, "516px", "includes the rest of the reply after the table");
-    const replacement = mounted.cloneNode(true);
-    replacement.getBoundingClientRect = () => ({ top: 220, bottom: 620, left: 100, right: 700, width: 600, height: 400 });
-    mounted.replaceWith(replacement);
-    await new Promise((resolve) => setTimeout(resolve, 220));
-    assert.equal(highlight.style.top, "212px", "a remounted target resolves the whole reply again");
-    assert.equal(highlight.style.height, "416px");
-    assert.deepEqual(s.errors, []);
-  } finally { s.invalidate(); s.dom.window.close(); }
-});
-
-for (const pageUrl of ["https://chatgpt.com/c/wxt-test", "https://chatgpt.com/share/share-one"]) {
-  test(`full indexed TOC includes every user group without an earlier-groups summary: ${new URL(pageUrl).pathname}`, async () => {
-    const s = await bootPackagedContent({ pageUrl });
-    try {
-      const posted = []; s.win.postMessage = (data) => posted.push(data);
-      s.win.fetch = () => { throw new Error("Image labels must not request resources"); };
-      await s.inject();
-      const command = (name, fields = {}) => {
-        for (const listener of s.runtime.listeners) listener({ type: "POLARIS_WINDOW_COMMAND", command: name, ...fields }, {}, () => {});
-      };
-      command("update-config", { patch: { chatgptHistoryMode: "complete", maxVisibleUserGroups: 1 } });
-      s.win.document.querySelector('[data-polaris-conversation-bridge]').dispatchEvent(new s.win.Event("load"));
-      const start = posted.findLast((item) => item.command === "start"); assert.ok(start);
-      const send = async (event, fields = {}) => {
-        s.win.dispatchEvent(new s.win.MessageEvent("message", { source: s.win, origin: s.win.location.origin, data: {
-          type: "polaris-conversation-index-result", requestId: start.requestId, conversationId: start.conversationId, runId: 1, event, ...fields
-        } }));
-        await s.flush(); await s.flush();
-      };
-      const messages = Array.from({ length: 179 }, (_, i) => [
-        { id: `u-${i}`, author: { role: "user" }, content: { content_type: "multimodal_text", parts: [
-          { content_type: "image_asset_pointer", asset_pointer: `sediment://user_file_${i}` }, `Question ${i}`
-        ] } },
-        { id: `a-${i}`, author: { role: "assistant" }, content: { content_type: "multimodal_text", parts: [0, 1].map((n) => ({
-          content_type: "image_asset_pointer", asset_pointer: `sediment://file_${i}_${n}`
-        })) } }
-      ]).flat();
-      await send("page", { payload: { messages, page_info: { has_previous_page: false, has_next_page: false } }, replace: true });
-      await send("native-state", { phase: "ready" }); await send("complete", { source: new URL(pageUrl).pathname.startsWith("/share/") ? "shared" : "native" });
-      const snapshot = () => s.messages.findLast((message) => message.type === "POLARIS_CONTENT_STATE")?.snapshot;
-      const items = snapshot().markerItems;
-      assert.equal(snapshot().conversationIndex.phase, "complete");
-      assert.equal(items.filter((item) => item.type === "user").length, 179);
-      assert.equal(items.filter((item) => item.image).length, 358);
-      assert.equal(items.some((item) => item.type === "earlier"), false);
-      assert.equal(items.find((item) => item.type === "user").title, "Question 0");
-      assert.equal(items.find((item) => item.type === "user").imageCount, 1);
-      assert.equal(items.some((item) => item.title.includes("[Attachment]")), false);
-      assert.deepEqual(Array.from(items.filter((item) => item.type === "user"), (item) => item.groupKey), Array.from({ length: 179 }, (_, i) => `index:u-${i}`));
-      command("toggle-user-group", { groupKey: "index:u-0" }); await s.flush();
-      assert.equal(snapshot().markerItems.filter((item) => item.type === "user").length, 179);
-      assert.equal(snapshot().markerItems.filter((item) => item.image).length, 356, "only the explicitly folded question hides its image labels");
-      command("toggle-user-group", { groupKey: "index:u-0" }); await s.flush();
-      assert.equal(snapshot().markerItems.filter((item) => item.image).length, 358);
-      const generation = snapshot().conversationIndex.generation;
-      const before = posted.length;
-      Object.defineProperty(s.win.document, "visibilityState", { configurable: true, value: "hidden" });
-      s.win.document.dispatchEvent(new s.win.Event("visibilitychange")); await s.flush();
-      s.win.dispatchEvent(new s.win.PageTransitionEvent("pagehide", { persisted: true })); await s.flush();
-      Object.defineProperty(s.win.document, "visibilityState", { configurable: true, value: "visible" });
-      s.win.document.dispatchEvent(new s.win.Event("visibilitychange")); await s.flush();
-      assert.equal(snapshot().conversationIndex.generation, generation);
-      assert.equal(snapshot().conversationIndex.phase, "complete");
-      assert.equal(posted.slice(before).some((item) => ["stop", "disarm", "start"].includes(item.command)), false);
-      assert.deepEqual(s.errors, []);
-    } finally { s.invalidate(); s.dom.window.close(); }
-  });
-}
 
 for (const theme of ["light", "dark"]) {
   for (const markup of ["legacy", "modern"]) {
@@ -612,5 +568,61 @@ test("clipboard completion from an old instance cannot add a toast to a new over
   } finally {
     s.invalidate();
     s.dom.window.close();
+  }
+});
+
+async function bootVirtualChat(pageUrl, savedConfig) {
+  const s = await bootPackagedContent({ pageUrl, html: virtualConversationHtml(), savedConfig });
+  s.win.structuredClone = structuredClone;
+  const requests = [];
+  s.win.fetch = (...args) => { requests.push(args); throw new Error("No conversation requests are allowed"); };
+  s.win.XMLHttpRequest.prototype.open = (...args) => requests.push(args);
+  const list = attachVirtualList(s.win, { turns: virtualConversationTurns() });
+  return { ...s, list, requests };
+}
+
+test("packaged backfill renders a virtualized, image-heavy ChatGPT chat beneath a mask and restores the reader", async () => {
+  const s = await bootVirtualChat("https://chatgpt.com/c/virtual-images", { historyMode: "loaded", backfillConsent: "granted" });
+  try {
+    const start = s.list.top();
+    assert.ok(s.list.mounted() < 20, "the fixture starts with only the newest turns mounted");
+    await s.inject();
+    const latest = () => s.messages.findLast((message) => message.type === "POLARIS_CONTENT_STATE")?.snapshot;
+    for (let i = 0; i < 300 && latest()?.conversationIndex?.backfill?.phase !== "done"; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const snapshot = latest();
+    assert.equal(snapshot.conversationIndex.backfill?.phase, "done");
+    // 40 questions and 40 answers, including image-only generation turns.
+    assert.equal(snapshot.conversationIndex.count, 80, "remounted turns must not be indexed twice");
+    const titles = snapshot.markerItems.map((item) => item.title);
+    assert.ok(titles.includes("第 1 章 方案") && titles.includes("第 39 章 方案"), "both the oldest and newest answers are indexed");
+    assert.equal(snapshot.conversationIndex.coverage, "loaded", "reaching both ends is not proof of complete history");
+    assert.ok(s.list.scrolls.length > 10);
+    assert.ok(s.list.scrolls.some((entry) => entry.top === 0), "older turns are rendered up to the top");
+    assert.ok(s.list.scrolls.every((entry) => entry.masked), "the list is only ever moved beneath the mask");
+    assert.equal(s.list.top(), start, "the reader's position is restored");
+    assert.equal(s.list.scroller.style.opacity, "");
+    assert.equal(s.win.document.querySelector("[data-polaris-backfill]"), null);
+    assert.deepEqual(s.requests, []);
+    assert.deepEqual(s.errors, []);
+  } finally { s.invalidate(); s.win.close(); }
+});
+
+test("shared chats and undecided consent never backfill", async () => {
+  for (const [url, config] of [
+    ["https://chatgpt.com/share/virtual-images", { historyMode: "loaded", backfillConsent: "granted" }],
+    ["https://chatgpt.com/c/virtual-images", { historyMode: "loaded" }],
+    ["https://chatgpt.com/c/virtual-images", { historyMode: "loaded", backfillConsent: "declined" }]
+  ]) {
+    const s = await bootVirtualChat(url, config);
+    try {
+      await s.inject();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      assert.deepEqual(s.list.scrolls, [], `${url} ${config.backfillConsent || "undecided"}`);
+      assert.equal(s.win.document.querySelector("[data-polaris-backfill]"), null);
+      assert.ok(s.messages.findLast((message) => message.type === "POLARIS_CONTENT_STATE")?.snapshot.conversationIndex.count > 0);
+    } finally { s.invalidate(); s.win.close(); }
   }
 });

@@ -308,13 +308,39 @@ test("scroll controls use English labels and respect reduced motion", async () =
   } finally { s.dom.window.close(); }
 });
 
+test("pinned search bar shows its divider only after the main header scrolls away", async () => {
+  const s = await boot("sidepanel", { openChapters: false });
+  try {
+    const { document } = s.win;
+    const root = document.getElementById("polaris-window");
+    const header = () => document.querySelector("#polaris-window > .window-header--main");
+    let headerBottom = 56;
+    header().getBoundingClientRect = () => ({ bottom: headerBottom - s.win.scrollY });
+    s.win.dispatchEvent(new s.win.Event("scroll"));
+    assert.equal(root.hasAttribute("data-search-stuck"), false);
+    s.win.scrollTo({ top: 30 });
+    s.win.dispatchEvent(new s.win.Event("scroll"));
+    assert.equal(root.hasAttribute("data-search-stuck"), false, "header still partly visible");
+    s.win.scrollTo({ top: 200 });
+    s.win.dispatchEvent(new s.win.Event("scroll"));
+    assert.equal(root.hasAttribute("data-search-stuck"), true);
+    s.win.scrollTo({ top: 0 });
+    s.win.dispatchEvent(new s.win.Event("scroll"));
+    assert.equal(root.hasAttribute("data-search-stuck"), false);
+    document.querySelector(".window-settings-button").click();
+    s.win.scrollTo({ top: 200 });
+    s.win.dispatchEvent(new s.win.Event("scroll"));
+    assert.equal(root.hasAttribute("data-search-stuck"), false, "settings has no pinned search bar");
+  } finally { s.dom.window.close(); }
+});
+
 test("current Maker control scrolls and focuses the active row without navigating the source or toggling groups", async () => {
   const s = await boot("sidepanel", { openChapters: false });
   try {
     const { document } = s.win;
     const current = document.querySelector('[aria-label="定位当前 Maker"]');
     const row = document.querySelector('.maker-card.is-active');
-    document.querySelector('.window-header').getBoundingClientRect = () => ({ bottom: 80 });
+    document.querySelector('.window-search-bar').getBoundingClientRect = () => ({ bottom: 80 });
     row.getBoundingClientRect = () => ({ top: 720 });
     s.win.scrollTo({ top: 300 });
     const commandCount = s.commands.length;
@@ -386,43 +412,30 @@ test("current Maker control clears search and mounts an off-screen row in a 10,0
   } finally { s.dom.window.close(); }
 });
 
-test("complete indexing settings show the actual title and two exclusive mode cards", async () => {
+test("long conversation settings show the actual title and two mode cards", async () => {
   const s = await boot("sidepanel", { openChapters: false });
   try {
-    const snapshot = { ...s.snapshot, conversationTitle: "我的真实会话标题", config: { chatgptHistoryMode: "complete" },
+    const snapshot = { ...s.snapshot, conversationTitle: "我的真实会话标题",
       conversationIndex: { generation: "run", revision: 1, phase: "loading", count: 123, total: null } };
     s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot });
     s.win.document.querySelector('.window-settings-button').click();
     s.win.document.querySelector('[data-settings-destination="preferences"]').click();
     assert.equal(s.win.document.querySelector('.index-current-title').textContent, "我的真实会话标题");
     assert.equal(s.win.document.querySelectorAll('.index-mode-card').length, 2);
-    assert.match(s.win.document.querySelector('.index-mode-cards').textContent, /后续会话.*浏览器同步.*其他已登录浏览器/);
-    assert.match(s.win.document.querySelector('.index-settings').textContent, /关闭页面或切换读取模式不会删除缓存/);
-    assert.equal(s.win.document.querySelector('.index-progress').hasAttribute("value"), false);
+    assert.equal(s.win.document.querySelector('input[name="history-mode"][value="default"]').checked, true);
+    assert.match(s.win.document.querySelector('.index-settings').textContent, /不写入磁盘/);
+    assert.equal(s.win.document.querySelector('.index-progress'), null);
     s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...snapshot, conversationTitle: "重命名后的标题", conversationIndex: { ...snapshot.conversationIndex, phase: "complete", total: 123 } } });
     assert.equal(s.win.document.querySelector('.index-current-title').textContent, "重命名后的标题");
-    assert.match(s.win.document.querySelector('.index-current-status').textContent, /已读取全部/);
-    s.win.document.querySelector('input[name="chatgpt-history-mode"][value="default"]').click();
-    assert.ok(s.commands.some((command) => command.patch?.chatgptHistoryMode === "default"));
-  } finally { s.dom.window.close(); }
-});
-
-test("Preferences clear cache uses the background cache operation and announces its result", async () => {
-  const s = await boot("sidepanel", { openChapters: false });
-  try {
-    const original = s.win.chrome.runtime.sendMessage;
-    s.win.chrome.runtime.sendMessage = async (message) => {
-      if (message.type === "POLARIS_CONVERSATION_CACHE") { s.commands.push(message); return { ok: true }; }
-      return original(message);
-    };
-    s.win.document.querySelector('.window-settings-button').click();
-    s.win.document.querySelector('[data-settings-destination="preferences"]').click();
-    const button = s.win.document.querySelector('[data-settings-focus="clear-conversation-cache"]');
-    button.click();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    assert.equal(s.commands.filter((command) => command.type === "POLARIS_CONVERSATION_CACHE" && command.operation === "clear").length, 1);
-    assert.match(s.win.document.querySelector('.index-cache-status').textContent, /已清除/);
-    assert.equal(button.disabled, false);
+    assert.match(s.win.document.querySelector('.index-current-status').textContent, /已索引 123 条已加载消息/);
+    s.win.document.querySelector('input[name="history-mode"][value="loaded"]').click();
+    const consent = s.win.document.querySelector("[data-backfill-consent]");
+    assert.equal(consent.hidden, false, "automatic backfill needs an explicit decision first");
+    assert.match(consent.textContent, /不调用网站接口/);
+    assert.match(consent.textContent, /分享页不补齐/);
+    assert.equal(s.commands.some((command) => command.patch?.historyMode === "loaded"), false);
+    consent.querySelector("button").click();
+    assert.ok(s.commands.some((command) => command.patch?.historyMode === "loaded" && command.patch.backfillConsent === "granted"));
   } finally { s.dom.window.close(); }
 });
 
@@ -435,7 +448,7 @@ test("indexed TOC and full-text results stay in TOC when native location is unav
       if (message.command === "jump-to-marker") { s.commands.push(message); return { ok: false, reason: "not-mounted" }; }
       return original(message);
     };
-    const snapshot = { ...s.snapshot, config: { chatgptHistoryMode: "complete" },
+    const snapshot = { ...s.snapshot, config: { historyMode: "loaded" },
       markerItems: Array.from({ length: 20000 }, (_, i) => ({ key: `index:${i}`, markerKey: `index:${i}`, type: "ai", title: `标题 ${i}` })),
       conversationIndex: { generation: "run", revision: 1, phase: "complete", count: 10000, total: 10000 } };
     s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot });
@@ -445,7 +458,7 @@ test("indexed TOC and full-text results stay in TOC when native location is unav
     assert.equal(s.commands.filter((command) => command.command === "request-chapters").length, 0);
     assert.equal(s.win.document.querySelector(".window-search select"), null);
     const search = s.win.document.querySelector('.window-search input');
-    assert.equal(search.placeholder, "搜索全部消息");
+    assert.equal(search.placeholder, "搜索已加载消息");
     search.value = "正文"; search.dispatchEvent(new s.win.Event("input"));
     await new Promise((resolve) => setTimeout(resolve, 450));
     s.win.document.querySelector('.index-search-result').click();
@@ -454,6 +467,98 @@ test("indexed TOC and full-text results stay in TOC when native location is unav
     assert.equal(s.win.document.querySelector('.window-search input').value, "正文");
     assert.equal(s.commands.filter((command) => command.command === "request-chapters").length, 0);
     assert.ok(s.commands.some((command) => command.expectedRouteKey === snapshot.routeKey && command.generation === "run"));
+  } finally { s.dom.window.close(); }
+});
+
+test("unmounted search results offer retained reading and return to the same TOC search and position", async () => {
+  for (const locale of ["zh", "en"]) {
+    const s = await boot("sidepanel", { locale, openChapters: false });
+    try {
+      const doc = s.win.document;
+      const original = s.win.chrome.runtime.sendMessage;
+      s.win.chrome.runtime.sendMessage = async message => {
+        if (message.command === "search-conversation") return { generation: "run", items: [{ key: "index:answer", markerKey: "index:answer", type: "result", role: "assistant", title: "保留正文", parts: [{ text: "保留正文", match: true }] }], total: 1 };
+        if (message.command === "jump-to-marker") return { ok: false, reason: "not-mounted" };
+        if (message.command === "read-retained-message") {
+          s.commands.push(message);
+          return { ok: true, generation: "run", chapter: { markerKey: "index:answer", parentKey: "", title: "保留正文", contents: [{ type: "block", text: "原文卸载后仍能阅读", ast: { type: "paragraph", children: [{ type: "text", value: "原文卸载后仍能阅读" }] } }] } };
+        }
+        return original(message);
+      };
+      s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...s.snapshot, config: { historyMode: "loaded" },
+        conversationIndex: { source: "dom", generation: "run", revision: 1, phase: "complete", count: 2 } } });
+      const input = doc.querySelector(".window-search input");
+      input.value = "正文"; input.dispatchEvent(new s.win.Event("input"));
+      await new Promise(resolve => setTimeout(resolve, 200));
+      s.win.scrollTo({ top: 140 });
+      doc.querySelector(".index-search-result").click();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      assert.equal(doc.querySelector(".window-body").dataset.activeTab, "navigation");
+      doc.querySelector(".index-notice-read").click();
+      await new Promise(resolve => setTimeout(resolve, 30));
+      assert.equal(doc.querySelector(".window-body").dataset.activeTab, "chapters");
+      assert.match(doc.querySelector(".chapter-tree-reader").textContent, /原文卸载后仍能阅读/);
+      assert.equal(s.commands.findLast(message => message.command === "read-retained-message").expectedRouteKey, s.snapshot.routeKey);
+      doc.querySelector(".retained-reading-back").click();
+      assert.equal(doc.querySelector(".window-body").dataset.activeTab, "navigation");
+      assert.equal(doc.querySelector(".window-search input").value, "正文");
+      assert.equal(s.win.scrollY, 140);
+    } finally { s.dom.window.close(); }
+  }
+});
+
+test("retained reading requests cannot reopen a dismissed notice or a different conversation", async () => {
+  for (const cancel of ["dismiss", "route"]) {
+    const s = await boot("sidepanel", { openChapters: false });
+    try {
+      const doc = s.win.document; let finish;
+      const original = s.win.chrome.runtime.sendMessage;
+      s.win.chrome.runtime.sendMessage = message => {
+        if (message.command === "jump-to-marker") return Promise.resolve({ ok: false, reason: "not-mounted" });
+        if (message.command === "read-retained-message") return new Promise(resolve => { finish = resolve; });
+        return original(message);
+      };
+      const snapshot = { ...s.snapshot, config: { historyMode: "loaded" }, conversationIndex: { generation: "one", phase: "complete", count: 2 } };
+      s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot });
+      await new Promise(resolve => setTimeout(resolve, 20));
+      doc.querySelector(".maker-card").click(); await new Promise(resolve => setTimeout(resolve, 0));
+      doc.querySelector(".index-notice-read").click();
+      if (cancel === "dismiss") doc.querySelector(".index-notice-actions button:last-child").click();
+      else s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...snapshot, routeKey: "https://chatgpt.com/c/two", conversationIndex: { ...snapshot.conversationIndex, generation: "two" } } });
+      finish({ ok: true, generation: "one", chapter: { markerKey: "index:old", title: "Old", parentKey: "", contents: [] } });
+      await new Promise(resolve => setTimeout(resolve, 0));
+      assert.equal(doc.querySelector(".window-body").dataset.activeTab, "navigation");
+      assert.equal(doc.querySelector(".retained-reading"), null);
+    } finally { s.dom.window.close(); }
+  }
+});
+
+test("settings only retry failed reads and require explicit scoped confirmation before rebuilding", async () => {
+  const s = await boot("sidepanel", { openChapters: false });
+  try {
+    const doc = s.win.document;
+    const snapshot = { ...s.snapshot, config: { historyMode: "loaded" },
+      conversationIndex: { generation: "reset-one", phase: "complete", count: 21 } };
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot });
+    doc.querySelector(".window-settings-button").click();
+    doc.querySelector('[data-settings-destination="preferences"]').click();
+    assert.equal(doc.querySelector("[data-index-retry]").hidden, true);
+    doc.querySelector("[data-index-rebuild]").click();
+    assert.equal(doc.querySelector("[data-index-reset-confirm]").hidden, false);
+    assert.equal(s.commands.some(message => message.command === "rebuild-conversation-index"), false);
+    doc.querySelector("[data-index-reset-cancel]").click();
+    assert.equal(doc.querySelector("[data-index-reset-confirm]").hidden, true);
+    doc.querySelector("[data-index-rebuild]").click();
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...snapshot, conversationIndex: { ...snapshot.conversationIndex, generation: "reset-two" } } });
+    assert.equal(doc.querySelector("[data-index-reset-confirm]").hidden, true, "a different generation dismisses stale reset confirmation");
+    doc.querySelector("[data-index-rebuild]").click();
+    doc.querySelector("[data-index-reset-apply]").click();
+    const command = s.commands.findLast(message => message.command === "rebuild-conversation-index");
+    assert.equal(command.expectedTabId, 7); assert.equal(command.expectedRouteKey, snapshot.routeKey); assert.equal(command.generation, "reset-two");
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.match(doc.querySelector("[data-index-reset-status]").textContent, /已.*重建/);
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...snapshot, conversationIndex: { ...snapshot.conversationIndex, phase: "partial" } } });
+    assert.equal(doc.querySelector("[data-index-retry]").hidden, false);
   } finally { s.dom.window.close(); }
 });
 
@@ -762,7 +867,7 @@ test("ChatGPT pick-a-chat guidance lives in the sidepanel in both languages and 
     const s = await boot("sidepanel", { locale, openChapters: false, deliverChapters: false });
     const doc = s.win.document;
     const home = { ...s.snapshot, routeKey: "https://chatgpt.com/", hasConversation: false, markerItems: [],
-      config: { chatgptHistoryMode: "complete" }, conversationAwaiting: true };
+      config: { historyMode: "loaded" }, conversationAwaiting: true };
     try {
       s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: home });
       const guide = doc.querySelector(".window-body .conversation-awaiting");
@@ -778,7 +883,7 @@ test("ChatGPT pick-a-chat guidance lives in the sidepanel in both languages and 
         s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...home, routeKey, conversationAwaiting: false } });
         assert.equal(doc.querySelector(".conversation-awaiting"), null, routeKey);
       }
-      s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...home, conversationAwaiting: false, config: { chatgptHistoryMode: "default" } } });
+      s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...home, conversationAwaiting: false, config: { historyMode: "default" } } });
       assert.equal(doc.querySelector(".conversation-awaiting"), null, "Follow ChatGPT mode keeps its existing empty state");
       s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: home });
       assert.ok(doc.querySelector(".conversation-awaiting"));
@@ -793,63 +898,184 @@ test("ChatGPT pick-a-chat guidance lives in the sidepanel in both languages and 
   }
 });
 
-test("full-conversation status stays above the skeleton in both tabs and disappears when disabled or ready", async () => {
-  for (const locale of ["zh", "en"]) for (const platform of ["chatgpt", "gemini"]) {
+test("opening the sidepanel after indexing shows completed feedback without inventing a loading phase", async () => {
+  const s = await boot("sidepanel", { openChapters: false, deliverChapters: false });
+  try {
+    const doc = s.win.document;
+    const empty = { ...s.snapshot, config: { historyMode: "loaded" }, conversationLoading: false,
+      conversationIndex: { source: "dom", generation: "empty-shell", phase: "complete", count: 0 } };
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: empty });
+    assert.equal(doc.querySelector(".conversation-read-status"), null);
+    const ready = { ...empty, conversationIndex: { source: "dom", generation: "ready-before-panel-opened", phase: "complete", count: 7 } };
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: ready });
+    const card = doc.querySelector(".conversation-read-status");
+    assert.ok(card, "a panel opened after the initial snapshot must still acknowledge the loaded index");
+    assert.equal(card.querySelector(".read").dataset.state, "done");
+    assert.equal(card.querySelector(".prepare").dataset.state, "done");
+    assert.equal(doc.querySelector(".conversation-skeleton"), null);
+    assert.ok(doc.querySelector(".index-list-status"));
+    await new Promise(resolve => setTimeout(resolve, 850));
+    assert.equal(doc.querySelector(".conversation-read-status"), null);
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...ready, conversationIndex: { ...ready.conversationIndex, revision: 2, count: 8 } } });
+    assert.equal(doc.querySelector(".conversation-read-status"), null, "incremental snapshots must not restart initial feedback");
+  } finally { s.dom.window.close(); }
+});
+
+test("long mode can be re-enabled after changing to Follow the page in the same Preferences panel", async () => {
+  const s = await boot("sidepanel", { openChapters: false, deliverChapters: false });
+  try {
+    const doc = s.win.document;
+    const complete = { ...s.snapshot, config: { historyMode: "loaded" }, conversationIndex: { generation: "retained", phase: "complete", count: 7 } };
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: complete });
+    doc.querySelector(".window-settings-button").click();
+    doc.querySelector('[data-settings-destination="preferences"]').click();
+    doc.querySelector('input[value="default"]').click();
+    assert.equal(doc.querySelector(".window-body").dataset.activeTab, "settings");
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...complete, config: { historyMode: "default" }, conversationIndex: { ...complete.conversationIndex, generation: "mounted" } } });
+    doc.querySelector('input[value="loaded"]').click();
+    doc.querySelector("[data-backfill-consent] button").click();
+    assert.equal(doc.querySelector(".window-body").dataset.activeTab, "navigation");
+  } finally { s.dom.window.close(); }
+});
+
+test("enabling long mode leaves Preferences and keeps an honest completion card for fast reads", async () => {
+  for (const locale of ["zh", "en"]) {
     const s = await boot("sidepanel", { locale, openChapters: false, deliverChapters: false });
     try {
       const doc = s.win.document;
-      const snapshot = { ...s.snapshot, platform, config: { chatgptHistoryMode: "complete" }, conversationLoading: true,
-        conversationIndex: { generation: "read-one", title: "A long conversation title / 一个较长的会话标题", count: 0, phase: "loading", native: { phase: "loading" } } };
+      doc.querySelector(".window-settings-button").click();
+      doc.querySelector('[data-settings-destination="preferences"]').click();
+      doc.querySelector('input[value="loaded"]').click();
+      const [, decline] = doc.querySelectorAll("[data-backfill-consent] button");
+      decline.click();
+      assert.ok(s.commands.some(message => message.patch?.backfillConsent === "declined"));
+      assert.equal(doc.querySelector(".window-body").dataset.activeTab, "navigation");
+      assert.ok(s.commands.some(message => message.command === "update-config" && message.patch.historyMode === "loaded"));
+      const loading = { ...s.snapshot, config: { historyMode: "loaded" }, conversationLoading: true,
+        conversationIndex: { source: "dom", generation: "fast-read", phase: "loading", count: 0, progress: { count: 0, total: 7 } } };
+      s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: loading });
+      assert.ok(doc.querySelector(".conversation-read-status"));
+      const complete = { ...loading, conversationLoading: false, conversationIndex: { ...loading.conversationIndex, phase: "complete", count: 7, progress: undefined } };
+      s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: complete });
+      const card = doc.querySelector(".conversation-read-status");
+      assert.ok(card, "a quick completed read must still leave visible feedback");
+      assert.equal(card.querySelector(".conversation-read-heading").textContent, locale === "zh" ? "已加载对话整理完成" : "Loaded messages are ready");
+      assert.equal(card.querySelector(".read").dataset.state, "done");
+      assert.equal(card.querySelector(".prepare").dataset.state, "done");
+      assert.equal(doc.querySelector(".conversation-skeleton"), null, "completed indexing must release the real list immediately");
+      assert.ok(doc.querySelector(".index-list-status"));
+      await new Promise(resolve => setTimeout(resolve, 850));
+      assert.equal(doc.querySelector(".conversation-read-status"), null);
+      s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: complete });
+      assert.equal(doc.querySelector(".conversation-read-status"), null, "later snapshots must not restart completion feedback");
+    } finally { s.dom.window.close(); }
+  }
+});
+
+test("long-conversation progress covers the Maker list in both tabs until loaded messages are ready", async () => {
+  for (const locale of ["zh", "en"]) {
+    const s = await boot("sidepanel", { locale, openChapters: false, deliverChapters: false });
+    try {
+      const doc = s.win.document;
+      const snapshot = { ...s.snapshot, config: { historyMode: "loaded" }, conversationLoading: true,
+        conversationIndex: { source: "dom", generation: "read-one", title: "A long conversation / 一个长对话",
+          count: 0, phase: "loading", progress: { count: 0, total: 40 } } };
       const publish = (extra = {}) => s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...snapshot, ...extra } });
       publish();
       const card = doc.querySelector(".conversation-read-status");
       assert.ok(card);
       assert.equal(doc.querySelector(".window-body").firstElementChild, card);
       assert.ok(card.nextElementSibling.querySelector(".conversation-skeleton"));
-      assert.equal(doc.querySelector(".conversation-skeleton-status").hidden, true, "do not repeat the reading announcement");
-      assert.equal(card.querySelector(".conversation-read-count").textContent, "", "unknown counts stay blank");
-      assert.equal(card.querySelector(".conversation-read-actions").hidden, true);
-      publish({ conversationIndex: { ...snapshot.conversationIndex, count: 21 } });
-      assert.equal(doc.querySelector(".conversation-read-status"), card, "progress updates preserve the status node");
-      assert.equal(card.querySelector(".conversation-read-count").textContent, "21");
+      assert.equal(doc.querySelector(".conversation-skeleton-status").hidden, true);
+      assert.equal(card.querySelector(".conversation-read-heading").textContent,
+        locale === "zh" ? "正在整理已加载对话" : "Preparing loaded messages");
+      assert.equal(card.querySelector(".conversation-read-count").textContent, "0 / 40");
+      publish({ conversationIndex: { ...snapshot.conversationIndex, progress: { count: 21, total: 40 } } });
+      assert.equal(doc.querySelector(".conversation-read-status"), card);
+      assert.equal(card.querySelector(".conversation-read-count").textContent, "21 / 40");
+      assert.equal(card.querySelector(".read").dataset.state, "active");
+      assert.equal(card.querySelector(".prepare").dataset.state, "pending");
+      s.send({ type: "POLARIS_WINDOW_CHAPTERS", tabId: 7, routeKey: snapshot.routeKey, treeChapters: [], chapters: [] });
       [...doc.querySelectorAll(".window-tab")].find(button => button.textContent === (locale === "zh" ? "大纲" : "Outline")).click();
+      assert.equal(doc.querySelector(".window-body").dataset.activeTab, "chapters");
       assert.equal(doc.querySelector(".window-body").firstElementChild, card);
-      assert.ok(doc.querySelector(".conversation-skeleton"), "Outline also waits for native preparation");
-      publish({ conversationIndex: { ...snapshot.conversationIndex, count: 21, phase: "complete", native: { phase: "preparing" } } });
-      assert.equal(card.querySelector(".read").dataset.state, "done");
-      assert.equal(card.querySelector(".prepare").dataset.state, "active");
-      publish({ config: { chatgptHistoryMode: "default" } });
-      assert.equal(doc.querySelector(".conversation-read-status"), null, "disabled mode suppresses even a stale progress snapshot");
+      publish({ config: { historyMode: "default" } });
+      assert.equal(doc.querySelector(".conversation-read-status"), null);
       assert.equal(doc.querySelector(".conversation-skeleton-status").hidden, false);
-      publish({ conversationLoading: false, conversationIndex: { ...snapshot.conversationIndex, count: 21, phase: "complete", native: { phase: "ready" } } });
+      publish({ conversationLoading: false, conversationIndex: { ...snapshot.conversationIndex, count: 40, phase: "complete" } });
       assert.equal(doc.querySelector(".conversation-read-status"), null);
       assert.equal(doc.querySelector(".conversation-skeleton"), null);
-      publish({ hasConversation: false, conversationAwaiting: true, conversationLoading: false, conversationIndex: null });
+      publish({ hasConversation: false, conversationAwaiting: true, conversationIndex: null });
       assert.equal(doc.querySelector(".conversation-read-status"), null);
     } finally { s.dom.window.close(); }
   }
 });
 
-test("sidepanel reading recovery targets its conversation and preferences opens the reading setting", async () => {
+test("completion feedback is cancelled when the source changes or long mode is disabled", async () => {
+  const s = await boot("sidepanel", { openChapters: false, deliverChapters: false });
+  try {
+    const doc = s.win.document;
+    const loading = { ...s.snapshot, config: { historyMode: "loaded" }, conversationLoading: true,
+      conversationIndex: { source: "dom", generation: "first", phase: "loading", count: 0, progress: { count: 0, total: 7 } } };
+    const publish = snapshot => s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot });
+    publish(loading);
+    publish({ ...loading, conversationLoading: false, conversationIndex: { generation: "first", phase: "complete", count: 7 } });
+    assert.ok(doc.querySelector(".conversation-read-status"));
+    const next = { ...loading, routeKey: "https://chatgpt.com/c/another", conversationIndex: { ...loading.conversationIndex, generation: "second" } };
+    publish(next);
+    await new Promise(resolve => setTimeout(resolve, 850));
+    assert.equal(doc.querySelector(".conversation-read-status .read").dataset.state, "active", "the previous completion timer must not remove a new read's cover");
+    publish({ ...next, conversationLoading: false, conversationIndex: { generation: "second", phase: "complete", count: 0 } });
+    assert.equal(doc.querySelector(".conversation-read-status"), null, "an empty index must not claim messages are ready");
+    publish(next);
+    publish({ ...next, config: { historyMode: "default" } });
+    assert.equal(doc.querySelector(".conversation-read-status"), null);
+  } finally { s.dom.window.close(); }
+});
+
+test("empty reading failures offer a scoped retry and preferences while retained partial content stays readable", async () => {
+  const s = await boot("sidepanel", { openChapters: false });
+  try {
+    const doc = s.win.document;
+    const snapshot = { ...s.snapshot, config: { historyMode: "loaded" }, conversationStalled: true,
+      conversationIndex: { source: "dom", generation: "failed-read", count: 0, phase: "error" } };
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot });
+    const card = doc.querySelector(".conversation-read-status");
+    assert.ok(card);
+    assert.equal(card.querySelector(".read").dataset.state, "error");
+    assert.equal(card.querySelector(".conversation-read-actions").hidden, false);
+    card.querySelector(".conversation-read-actions button").click();
+    const retry = s.commands.findLast(message => message.command === "retry-conversation-index");
+    assert.equal(retry.expectedTabId, 7);
+    assert.equal(retry.expectedRouteKey, snapshot.routeKey);
+    assert.equal(retry.generation, "failed-read");
+    card.querySelector(".conversation-read-preferences").click();
+    assert.ok(doc.querySelector(".index-mode-cards"));
+    assert.equal(doc.querySelector(".conversation-read-status"), null);
+    doc.querySelector(".window-settings-back").click();
+    doc.querySelector(".window-settings-back").click();
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...snapshot, conversationStalled: false,
+      conversationIndex: { ...snapshot.conversationIndex, phase: "partial", count: 21 } } });
+    assert.equal(doc.querySelector(".conversation-read-status"), null);
+    assert.equal(doc.querySelector(".conversation-skeleton"), null);
+    assert.ok(doc.querySelector(".maker-list"));
+  } finally { s.dom.window.close(); }
+});
+
+test("settings Read again button retries a partial conversation read", async () => {
   const s = await boot("sidepanel", { openChapters: false });
   try {
     const doc = s.win.document;
     s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...s.snapshot,
-      config: { chatgptHistoryMode: "complete" }, conversationLoading: true,
+      conversationLoading: true,
       conversationIndex: { generation: "failed-read", count: 21, phase: "partial", native: { phase: "error" } } } });
-    const card = doc.querySelector(".conversation-read-status");
-    assert.equal(card.querySelector(".read").dataset.state, "error");
-    assert.equal(card.querySelector(".conversation-read-actions").hidden, false);
-    const buttons = card.querySelectorAll(".conversation-read-actions button");
-    buttons[0].click(); buttons[1].click();
-    for (const command of ["retry-conversation-index", "read-loaded-conversation"]) {
-      const sent = s.commands.findLast(message => message.command === command);
-      assert.equal(sent.expectedTabId, 7); assert.equal(sent.expectedRouteKey, s.snapshot.routeKey);
-      assert.equal(sent.generation, "failed-read");
-    }
-    card.querySelector(".conversation-read-preferences").click();
-    assert.ok(doc.querySelector(".index-mode-cards"));
-    assert.equal(doc.querySelector(".conversation-read-status"), null);
+    doc.querySelector(".window-settings-button").click();
+    doc.querySelector('[data-settings-destination="preferences"]').click();
+    const retry = doc.querySelector('[data-index-retry]');
+    assert.ok(retry);
+    assert.equal(retry.hidden, false);
+    retry.click();
+    assert.ok(s.commands.some(message => message.command === "retry-conversation-index"));
   } finally { s.dom.window.close(); }
 });
 
@@ -971,7 +1197,7 @@ test("maker search keeps the full list and locates the exact result without togg
     cards[2].getBoundingClientRect = () => ({ top: 800 });
     const originalRect = s.win.HTMLElement.prototype.getBoundingClientRect;
     s.win.HTMLElement.prototype.getBoundingClientRect = function () {
-      return this.matches(".window-header") ? { bottom: 160 } : originalRect.call(this);
+      return this.matches(".window-search-bar") ? { bottom: 160 } : originalRect.call(this);
     };
     const commandCount = s.commands.length;
     results[1].click();
@@ -1059,121 +1285,74 @@ test("first launch shows onboarding instead of the release notice and help reope
   } finally { s.dom.window.close(); }
 });
 
-test("indexed Makers wait for the loading cover and appear when it finishes", async () => {
+test("indexed Makers render during loading and long mode scrolls the sidebar to its earliest content once", async () => {
   const s = await boot("sidepanel", { openChapters: false });
   try {
-    const snapshot = { ...s.snapshot, config: { chatgptHistoryMode: "complete" }, conversationLoading: true,
-      conversationIndex: { generation: "run", revision: 1, phase: "loading", count: 40, total: null } };
+    s.win.scrollTo({ top: 900 });
+    const commands = s.commands.length;
+    const snapshot = { ...s.snapshot, config: { historyMode: "loaded" }, conversationLoading: true,
+      markerItems: [], conversationIndex: { generation: "run", revision: 1, phase: "loading", count: 0, total: null } };
     s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot });
     assert.ok(s.win.document.querySelector(".conversation-skeleton.is-reading"));
     assert.equal(s.win.document.querySelector(".index-list-status"), null);
-    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...snapshot, conversationLoading: false,
-      conversationIndex: { ...snapshot.conversationIndex, phase: "complete", total: 40 } } });
+    const firstBatch = { ...snapshot, markerItems: [
+      { key: "index:first", markerKey: "index:first", type: "user", title: "Earliest loaded message" }
+    ], conversationIndex: { ...snapshot.conversationIndex, revision: 2, count: 1, progress: { count: 1, total: 40 } } };
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: firstBatch });
+    assert.equal(s.win.scrollY, 0, "the first readable batch starts at the top of Polaris");
     assert.equal(s.win.document.querySelector(".conversation-skeleton"), null);
-    assert.match(s.win.document.querySelector(".index-list-status").textContent, /已读取全部/);
+    assert.ok(s.win.document.querySelector(".conversation-read-status"));
+    assert.match(s.win.document.querySelector(".maker-list").textContent, /Earliest loaded message/);
+    assert.match(s.win.document.querySelector(".index-list-status").textContent, /已索引 1 条已加载消息/);
+    s.win.scrollTo({ top: 300 });
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...firstBatch,
+      markerItems: [...firstBatch.markerItems, { key: "index:next", markerKey: "index:next", type: "user", title: "Next loaded message" }],
+      conversationIndex: { ...firstBatch.conversationIndex, revision: 3, count: 2, progress: { count: 2, total: 40 } } } });
+    assert.equal(s.win.scrollY, 300, "subsequent batches preserve the user's reading position");
+    assert.match(s.win.document.querySelector(".maker-list").textContent, /Next loaded message/);
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...firstBatch, conversationLoading: false,
+      conversationIndex: { ...snapshot.conversationIndex, phase: "complete", count: 40, total: null } } });
+    assert.equal(s.win.document.querySelector(".conversation-skeleton"), null);
+    assert.equal(s.win.scrollY, 300);
+    assert.equal(s.commands.length, commands, "rendering and scrolling the sidebar must not send website navigation commands");
   } finally { s.dom.window.close(); }
 });
 
-test("a chat that could not be read asks for a page refresh in the sidepanel", async () => {
+test("default mode preserves sidebar scroll and long-mode alignment waits for the Maker tab", async () => {
   const s = await boot("sidepanel", { openChapters: false });
   try {
-    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...s.snapshot, config: { chatgptHistoryMode: "complete" }, conversationStalled: true,
+    const doc = s.win.document;
+    const snapshot = { ...s.snapshot, config: { historyMode: "default" },
+      conversationIndex: { generation: "default", phase: "complete", count: 1 } };
+    s.win.scrollTo({ top: 650 });
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot });
+    assert.equal(s.win.scrollY, 650, "default mode must not align the list automatically");
+    s.send({ type: "POLARIS_WINDOW_CHAPTERS", tabId: 7, routeKey: snapshot.routeKey, generation: "default", treeChapters: s.chapters });
+    [...doc.querySelectorAll(".window-tab")].find(button => button.textContent === "大纲").click();
+    s.win.scrollTo({ top: 450 });
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...snapshot, config: { historyMode: "loaded" },
+      conversationIndex: { generation: "loaded", phase: "complete", count: 1 } } });
+    assert.equal(doc.querySelector(".window-body").dataset.activeTab, "chapters");
+    assert.equal(s.win.scrollY, 450, "Maker alignment must not scroll the Outline");
+    [...doc.querySelectorAll(".window-tab")].find(button => button.textContent === "目录").click();
+    assert.equal(s.win.scrollY, 0);
+    s.win.scrollTo({ top: 200 });
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...snapshot, config: { historyMode: "loaded" },
+      conversationIndex: { generation: "loaded", phase: "complete", count: 2, revision: 2 } } });
+    assert.equal(s.win.scrollY, 200);
+  } finally { s.dom.window.close(); }
+});
+
+test("a chat that could not be read shows a plain failure message", async () => {
+  const s = await boot("sidepanel", { openChapters: false });
+  try {
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...s.snapshot, conversationStalled: true,
       conversationIndex: { generation: "run", revision: 1, phase: "error", error: "unsupported-format", count: 0, total: null } } });
     const skeleton = s.win.document.querySelector(".conversation-skeleton");
     assert.equal(skeleton.classList.contains("is-reading"), false);
     assert.match(skeleton.querySelector(".conversation-skeleton-status").textContent, /请刷新页面/);
-  } finally { s.dom.window.close(); }
-});
-
-test("waiting or elapsed stall flags do not offer refresh until an actual read failure arrives", async () => {
-  const s = await boot("sidepanel", { openChapters: false });
-  try {
-    const snapshot = { ...s.snapshot, config: { chatgptHistoryMode: "complete" }, conversationLoading: true, conversationStalled: true,
-      conversationIndex: { generation: "run", phase: "loading", count: 0, native: { phase: "preparing" } } };
-    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot });
-    assert.ok(s.win.document.querySelector(".conversation-skeleton.is-reading"));
-    assert.match(s.win.document.querySelector(".conversation-skeleton-status").textContent, /正在读取/);
     assert.equal(s.win.document.querySelector(".conversation-read-reload"), null);
     assert.equal(s.win.document.querySelector(".conversation-read-default"), null);
-    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...snapshot, conversationLoading: false, conversationStalled: false,
-      conversationIndex: { ...snapshot.conversationIndex, phase: "error", error: "http-503" } } });
-    assert.ok(s.win.document.querySelector(".conversation-read-reload"));
-    assert.match(s.win.document.querySelector(".conversation-skeleton-status").textContent, /请刷新页面/);
-  } finally { s.dom.window.close(); }
-});
-
-test("the full-read failure action reloads only its source conversation and prevents duplicate clicks", async () => {
-  for (const locale of ["zh", "en"]) for (const theme of ["light", "dark"]) {
-    const s = await boot("sidepanel", { locale, openChapters: false });
-    try {
-      s.win.matchMedia = () => ({ matches: theme === "dark" });
-      const snapshot = { ...s.snapshot, config: { chatgptHistoryMode: "complete" }, conversationStalled: true,
-        conversationIndex: { generation: "run", phase: "error", error: "network-error", count: 0 } };
-      s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot });
-      const action = s.win.document.querySelector(".conversation-read-reload");
-      assert.ok(action, `${locale}/${theme}: the failure has an action`);
-      assert.equal(action.textContent, locale === "zh" ? "刷新页面" : "Refresh page");
-      assert.equal(s.win.document.documentElement.dataset.theme, theme);
-      action.click(); action.click();
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      const commands = s.commands.filter((command) => command.command === "reload-conversation");
-      assert.equal(commands.length, 1);
-      assert.equal(commands[0].expectedTabId, 7);
-      assert.equal(commands[0].expectedRouteKey, snapshot.routeKey);
-      assert.equal(action.disabled, true);
-      s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...snapshot, conversationStalled: false, conversationLoading: true,
-        conversationIndex: { ...snapshot.conversationIndex, phase: "loading", error: "" } } });
-      assert.equal(s.win.document.querySelector(".conversation-read-reload"), null, "normal reading needs no refresh action");
-      s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...snapshot, config: { chatgptHistoryMode: "default" } } });
-      assert.equal(s.win.document.querySelector(".conversation-read-reload"), null, "turning complete mode off removes the action");
-    } finally { s.dom.window.close(); }
-  }
-});
-
-test("using the default list after a read failure turns off full reading and restores DOM Makers", async () => {
-  for (const locale of ["zh", "en"]) for (const platform of ["chatgpt", "gemini"]) {
-    const s = await boot("sidepanel", { locale, openChapters: false });
-    try {
-      const snapshot = { ...s.snapshot, platform,
-        routeKey: platform === "gemini" ? "https://gemini.google.com/app/one" : s.snapshot.routeKey,
-        config: { chatgptHistoryMode: "complete" }, conversationStalled: true,
-        conversationIndex: { generation: "run", phase: "error", error: "network-error", count: 0 } };
-      s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot });
-      const action = s.win.document.querySelector(".conversation-read-default");
-      assert.ok(action, `${locale}/${platform}: the failure has a fallback`);
-      assert.equal(action.textContent, locale === "zh" ? "使用默认列表" : "Use default list");
-      assert.equal(action.previousElementSibling, s.win.document.querySelector(".conversation-read-reload"));
-      s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot });
-      assert.equal(s.win.document.querySelectorAll(".conversation-read-default").length, 1);
-      action.click();
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      const commands = s.commands.filter((command) => command.command === "update-config");
-      assert.equal(commands.length, 1);
-      assert.deepEqual(commands[0].patch, { chatgptHistoryMode: "default" });
-      assert.equal(s.commands.some((command) => command.command === "reload-conversation"), false);
-      s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...snapshot,
-        config: { chatgptHistoryMode: "default" }, conversationStalled: false, conversationIndex: null } });
-      assert.equal(s.win.document.querySelector(".conversation-read-fallback-actions"), null);
-      assert.equal(s.win.document.querySelector(".conversation-skeleton"), null);
-      assert.match(s.win.document.querySelector(".maker-list").textContent, /second/);
-    } finally { s.dom.window.close(); }
-  }
-});
-
-test("a rejected refresh is retryable without changing the full-read preference", async () => {
-  const s = await boot("sidepanel", { openChapters: false });
-  try {
-    const original = s.win.chrome.runtime.sendMessage;
-    s.win.chrome.runtime.sendMessage = async (message) => message.command === "reload-conversation" ? { ok: false } : original(message);
-    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...s.snapshot, config: { chatgptHistoryMode: "complete" }, conversationStalled: true,
-      conversationIndex: { generation: "run", phase: "error", error: "network-error", count: 0 } } });
-    const action = s.win.document.querySelector(".conversation-read-reload");
-    assert.ok(action);
-    action.click();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    assert.equal(action.disabled, false);
-    assert.match(s.win.document.querySelector(".conversation-skeleton-status").textContent, /刷新失败/);
-    assert.equal(s.commands.some((command) => command.command === "update-config"), false);
   } finally { s.dom.window.close(); }
 });
 
@@ -1301,4 +1480,57 @@ test("非支持页面隐藏平台占位按钮，回到 AI 网站主页或会话�
       }
     } finally { s.dom.window.close(); }
   }
+});
+
+test("masked backfill shows its progress, gates exports, and offers a scoped continue after pausing", async () => {
+  for (const locale of ["zh", "en"]) {
+    const s = await boot("sidepanel", { locale, openChapters: false, deliverChapters: false });
+    try {
+      const doc = s.win.document;
+      const base = { ...s.snapshot, config: { historyMode: "loaded" }, conversationLoading: false,
+        conversationIndex: { source: "dom", generation: "backfill", phase: "complete", count: 12, backfill: { phase: "running", steps: 3 } } };
+      s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: base });
+      let card = doc.querySelector(".conversation-read-status");
+      assert.ok(card);
+      assert.equal(card.querySelector(".conversation-read-heading").textContent, locale === "zh" ? "正在补齐更早消息" : "Loading earlier messages");
+      assert.equal(card.querySelector(".read").dataset.state, "active");
+      assert.equal(card.querySelector(".conversation-read-actions").hidden, true);
+      for (const phase of ["stopped", "timeout"]) {
+        s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...base, conversationIndex: { ...base.conversationIndex, backfill: { phase, steps: 5 } } } });
+        card = doc.querySelector(".conversation-read-status");
+        assert.ok(card, phase);
+        assert.equal(card.querySelector(".conversation-read-heading").textContent, locale === "zh" ? "已暂停补齐更早消息" : "Paused loading earlier messages");
+        const resume = [...card.querySelectorAll(".conversation-read-actions button")].find(button => !button.hidden);
+        assert.equal(resume.textContent, locale === "zh" ? "继续补齐" : "Continue loading");
+        resume.click();
+        const command = s.commands.findLast(message => message.command === "resume-conversation-backfill");
+        assert.equal(command.expectedTabId, 7);
+        assert.equal(command.generation, "backfill");
+      }
+      s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...base, conversationIndex: { ...base.conversationIndex, backfill: { phase: "done", steps: 9 } } } });
+      assert.equal(doc.querySelector(".conversation-read-status .conversation-read-heading").textContent,
+        locale === "zh" ? "已加载对话整理完成" : "Loaded messages are ready");
+      await new Promise(resolve => setTimeout(resolve, 850));
+      assert.equal(doc.querySelector(".conversation-read-status"), null);
+    } finally { s.dom.window.close(); }
+  }
+});
+
+test("automatic backfill can be turned on or off later from long conversation settings", async () => {
+  const s = await boot("sidepanel", { openChapters: false });
+  try {
+    const doc = s.win.document;
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...s.snapshot, config: { historyMode: "default" } } });
+    doc.querySelector(".window-settings-button").click();
+    doc.querySelector('[data-settings-destination="preferences"]').click();
+    const toggle = doc.querySelector("[data-backfill-toggle]");
+    assert.equal(toggle.hidden, true, "the switch belongs to long conversation mode");
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...s.snapshot, config: { historyMode: "loaded", backfillConsent: "declined" } } });
+    assert.equal(toggle.hidden, false);
+    assert.equal(toggle.querySelector("input").checked, false);
+    toggle.querySelector("input").click();
+    assert.equal(s.commands.findLast(message => message.command === "update-config").patch.backfillConsent, "granted");
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...s.snapshot, config: { historyMode: "loaded", backfillConsent: "granted" } } });
+    assert.equal(toggle.querySelector("input").checked, true);
+  } finally { s.dom.window.close(); }
 });

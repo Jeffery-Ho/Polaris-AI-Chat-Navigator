@@ -3,13 +3,12 @@ import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { buildConversationExport, collectDOMConversation } from '../src/conversation-export.js';
 import { createConversationIndex } from '../src/conversation-index.js';
+import { parseChapterMarkdown } from '../src/chapter-markdown.js';
 
-const message = (id, role, text) => ({ id, author: { role }, content: { content_type: 'text', parts: [text] } });
+const message = (id, role, text) => ({ id, role, blocks: parseChapterMarkdown(text) || [{ type: "paragraph", children: [{ type: "text", value: text }] }] });
 test('full indexed export includes unrecognized body and user messages in source order', async () => {
   const index = createConversationIndex();
-  await index.ingest({ title: '长会话', page_info: { has_previous_page: false, has_next_page: false }, messages: [message('u','user','完整问题'), message('a','assistant','纯正文'), message('u2','user','第二个问题'), message('a2','assistant','## 章节\n\n```js\nconst x = 1;\n```')] });
-  assert.equal(index.exportConversation(), null);
-  index.finish();
+  await index.upsertMessages([message('u','user','完整问题'), message('a','assistant','纯正文'), message('u2','user','第二个问题'), message('a2','assistant','## 章节\n\n```js\nconst x = 1;\n```')]);
   const conversation = index.exportConversation();
   assert.deepEqual(conversation.messages.map(item => item.role), ['user','assistant','user','assistant']);
   const dom = new JSDOM();

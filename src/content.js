@@ -1,10 +1,8 @@
 import { billingAllowsIndex, billingAllowsPlatform } from "./billing-access.js";
 import { createContentLifecycle } from "./content-lifecycle.js";
-import { createGeminiIndexController } from "./gemini-index-controller.js";
-import { createChatGptIndexController } from "./chatgpt-index-controller.js";
 import { createDOMIndexController } from "./dom-index-controller.js";
+import { normalizeHistoryMode } from "./history-mode.js";
 import { createDOMConversationSource } from "./dom-conversation-source.js";
-import { createConversationCacheClient } from "./conversation-cache.js";
 import { conversationReadingState } from "./conversation-reading-state.js";
 import { createLocateFlash } from "./locate-flash.js";
 import { chapterTreeText } from "./sidepanel-chapter-state.js";
@@ -89,6 +87,7 @@ import {
 } from "./hashed-markdown.js";
 import {
   CHATGPT_LEGACY_ASSISTANT_SELECTOR,
+  CHATGPT_ASSISTANT_TURN_SELECTOR,
   CHATGPT_USER_SELECTOR,
   CHATGPT_PROSE_SELECTOR,
   chatGptAssistantImageNodes,
@@ -378,7 +377,9 @@ export function initializeContent() {
   const DEFAULT_CONFIG = Object.freeze({
     controlPosition: null,
     isControlMinimized: false,
-    chatgptHistoryMode: "default",
+    historyMode: "default",
+    // "" until the user decides; only "granted" enables automatic backfill.
+    backfillConsent: "",
     maxVisible: QUEUE_MAX_VISIBLE,
     maxVisibleUserGroups: 20,
     foldThreshold: 20,
@@ -523,8 +524,6 @@ export function initializeContent() {
       }
     });
   };
-  let dismissedReadingGeneration = null;
-  const usesAPIConversationIndex = isChatGPTPage() || isGeminiPage();
   const readDOMMessages = createDOMConversationSource({ window, platform: currentPlatformKey(), readContainers() {
     if (state.awaitingRouteDom || !isSupportedRoute()) return {};
     if (isDeepSeekPage()) return getDeepSeekConversation();
@@ -534,30 +533,32 @@ export function initializeContent() {
     collectQianwenVideoListHeadings(new Set(), extraHeadings);
     return { assistantContainers: getAssistantContainers(), userContainers: getUserContainers(), extraHeadings };
   } });
-  const conversationIndex = (isGeminiPage() ? createGeminiIndexController : isChatGPTPage() ? createChatGptIndexController : createDOMIndexController)({
+  const conversationIndex = createDOMIndexController({
     window,
     platform: currentPlatformKey(),
     readMessages: readDOMMessages,
     imagePlaceholder: locale === "zh" ? "[图片]" : "[Image]",
-    cache: createConversationCacheClient(chrome.runtime),
-    onDiagnostics(timings) { recordDiagnosticEvent("conversation_read", timings); },
-    bridgeUrl: chrome.runtime.getURL(isGeminiPage() ? "src/gemini-index-bridge.js" : "src/chatgpt-index-bridge.js"),
+    // Shared conversations belong to someone else; never backfill them.
+    canBackfill: () => !/(?:^|\/)share\//.test(window.location.pathname),
+    backfillLabels: locale === "zh"
+      ? { running: (count) => `Polaris 正在补齐更早消息… 已读取 ${count} 条`, stop: "停止" }
+      : { running: (count) => `Polaris is loading earlier messages… ${count} read`, stop: "Stop" },
     onChange() {
       syncConversationReading();
       chapterContentRevision += 1;
-      publishWindowSnapshot();
+      const progress = conversationIndex.snapshot()?.progress;
+      // Preserve the initial state even when a small batch completes before the
+      // coalesced snapshot timer runs. Subsequent progress remains batched.
+      publishWindowSnapshot({ immediate: progress?.count === 0 && progress.total > 0 });
     }
   });
   let billingView = null;
   function configureConversationIndex() {
-    const readFull = billingAllowsIndex(billingView) && state.config.chatgptHistoryMode === "complete";
+    const retainLoaded = billingAllowsIndex(billingView) && state.config.historyMode === "loaded";
     conversationIndex.configure(isTopLevelFrame() && billingAllowsPlatform(billingView, currentPlatformKey())
-      && (usesAPIConversationIndex ? readFull : currentPlatformKey() !== "default"), { readFull });
+      && currentPlatformKey() !== "default", { retainLoaded, backfill: retainLoaded && state.config.backfillConsent === "granted" });
   }
-  const conversationReading = () => {
-    const snapshot = conversationIndex.snapshot();
-    return snapshot?.generation !== dismissedReadingGeneration && conversationReadingState(snapshot).loading;
-  };
+  const conversationReading = () => conversationReadingState(conversationIndex.snapshot()).loading;
   function syncConversationReading() {
     // Keep incomplete index results gated while the sidepanel reports progress.
     document.getElementById(ROOT_ID)?.toggleAttribute("data-conversation-loading", conversationReading());
@@ -1913,7 +1914,8 @@ export function initializeContent() {
     result.enabledUnorderedListByPlatform = normalizeUnorderedListByPlatform(config);
     result.controlPosition = normalizeControlPosition(config && config.controlPosition);
     result.isControlMinimized = Boolean(config && config.isControlMinimized);
-    result.chatgptHistoryMode = config?.chatgptHistoryMode === "complete" ? "complete" : "default";
+    result.historyMode = normalizeHistoryMode(config?.historyMode ?? config?.chatgptHistoryMode);
+    result.backfillConsent = ["granted", "declined"].includes(config?.backfillConsent) ? config.backfillConsent : "";
     if ((Number(config && config.configVersion) || 1) < 2) {
       result.enabledLevelsByPlatform.xiaohongshu = normalizeEnabledLevels(
         [...result.enabledLevelsByPlatform.xiaohongshu, 4],
@@ -1978,7 +1980,8 @@ export function initializeContent() {
       && first.controlPosition?.top === second.controlPosition?.top
       && first.controlPosition?.right === second.controlPosition?.right
       && first.isControlMinimized === second.isControlMinimized
-      && first.chatgptHistoryMode === second.chatgptHistoryMode;
+      && first.historyMode === second.historyMode
+      && first.backfillConsent === second.backfillConsent;
   }
 
   function hasSyncStorage() {
@@ -2089,7 +2092,10 @@ export function initializeContent() {
         }
 
         if (Object.prototype.hasOwnProperty.call(result, CONFIG_STORAGE_KEY)) {
-          resolve(normalizeConfig(result[CONFIG_STORAGE_KEY]));
+          const stored = result[CONFIG_STORAGE_KEY];
+          const config = normalizeConfig(stored);
+          if (stored?.historyMode === "complete" || Object.hasOwn(stored || {}, "chatgptHistoryMode")) void writeSyncConfig(config);
+          resolve(config);
           return;
         }
 
@@ -3488,6 +3494,7 @@ export function initializeContent() {
 
     if (isChatGPTPage()) {
       return [
+        CHATGPT_ASSISTANT_TURN_SELECTOR,
         CHATGPT_LEGACY_ASSISTANT_SELECTOR,
         HASHED_MARKDOWN_ROOT_SELECTOR,
         CHATGPT_PROSE_SELECTOR,
@@ -3573,6 +3580,7 @@ export function initializeContent() {
     });
     const users = getChatGptUserContainers(scanContext);
     const merged = mergeChatGptAssistantNodes({
+      turns: visible[CHATGPT_ASSISTANT_TURN_SELECTOR] || [],
       legacy: visible[CHATGPT_LEGACY_ASSISTANT_SELECTOR] || [],
       hashed: visible[HASHED_MARKDOWN_ROOT_SELECTOR] || [],
       prose: visible[CHATGPT_PROSE_SELECTOR] || [],
@@ -5503,7 +5511,7 @@ export function initializeContent() {
     console.info(`${routeFallbackLogMessage(details)} level=${level}`);
   }
 
-  function publishWindowSnapshot() {
+  function publishWindowSnapshot({ immediate = false } = {}) {
     if (!isTopLevelFrame() || !isExtensionContextValid()) {
       reportNextSnapshotDelivery = false;
       return;
@@ -5511,7 +5519,7 @@ export function initializeContent() {
     const reportDelivery = reportNextSnapshotDelivery;
     reportNextSnapshotDelivery = false;
     lifecycle.clearTimeout(state.windowSnapshotTimer);
-    state.windowSnapshotTimer = lifecycle.setTimeout(() => {
+    const publish = () => {
       state.windowSnapshotTimer = 0;
       const snapshot = windowSnapshot();
       const message = {
@@ -5535,7 +5543,9 @@ export function initializeContent() {
       }).catch((error) => {
         logRouteFallbackDelivery(snapshot, null, error);
       });
-    }, 0);
+    };
+    if (immediate) publish();
+    else state.windowSnapshotTimer = lifecycle.setTimeout(publish, 0);
   }
 
   let chapterContentRevision = 0;
@@ -5607,12 +5617,11 @@ export function initializeContent() {
     if (message.expectedRouteKey && message.expectedRouteKey !== currentRouteKey()) return { ok: false, reason: "source-changed" };
     if (message.generation && message.generation !== conversationIndex.snapshot()?.generation) return { ok: false, reason: "source-changed" };
     if (!billingAllowsPlatform(billingView, currentPlatformKey())) return { ok: false, reason: "platform-required" };
-    if (!billingAllowsIndex(billingView) && (["search-conversation", "retry-conversation-index", "read-loaded-conversation"].includes(message.command)
-      || usesAPIConversationIndex && message.command === "get-index-chapter")) return { ok: false, reason: "pro-required" };
+    if (!billingAllowsIndex(billingView) && message.command === "search-conversation") return { ok: false, reason: "pro-required" };
+    if (!billingAllowsIndex(billingView) && message.command === "read-retained-message") return { ok: false, reason: "pro-required" };
     if (message.command === "search-conversation") return conversationIndex.search(String(message.query || ""), { offset: Number(message.offset) || 0 });
     if (message.command === "get-conversation-export") {
       if (conversationIndex.enabled()) {
-        if (usesAPIConversationIndex && !billingAllowsIndex(billingView)) return { ok: false, reason: "pro-required" };
         const data = conversationIndex.exportConversation();
         return data ? { ok: true, ...data, url: currentRouteKey() } : { ok: false, reason: "not-ready" };
       }
@@ -5629,13 +5638,16 @@ export function initializeContent() {
       const node = chapters.find((item) => item.markerKey === message.markerKey);
       return node ? { ok: true, contents: node.contents, revision: conversationIndex.snapshot().revision } : { ok: false };
     }
-    if (message.command === "retry-conversation-index") { conversationIndex.retry(); return { ok: true }; }
-    if (message.command === "read-loaded-conversation") {
-      const snapshot = conversationIndex.snapshot();
-      if (!conversationReadingState(snapshot).failed || !snapshot.count) return { ok: false, reason: "not-ready" };
-      dismissedReadingGeneration = snapshot.generation;
-      syncConversationReading(); publishWindowSnapshot();
+    if (message.command === "retry-conversation-index") return conversationIndex.retry().then(() => ({ ok: true }));
+    if (message.command === "resume-conversation-backfill") {
+      if (!billingAllowsIndex(billingView)) return { ok: false, reason: "pro-required" };
+      void conversationIndex.backfill({ resume: true });
       return { ok: true };
+    }
+    if (message.command === "rebuild-conversation-index") return conversationIndex.rebuild().then(() => ({ ok: conversationIndex.snapshot()?.phase === "complete" }));
+    if (message.command === "read-retained-message") {
+      const chapter = conversationIndex.retainedChapter(String(message.markerKey || ""), state.config);
+      return { ok: Boolean(chapter), chapter, generation: conversationIndex.snapshot()?.generation };
     }
     if ((message.command === "jump-to-marker" || message.command === "jump-to-chapter") && String(message.markerKey || "").startsWith("index:")) {
       const route = currentRouteKey(); const generation = conversationIndex.snapshot()?.generation;
@@ -6041,7 +6053,7 @@ export function initializeContent() {
       }
       state.awaitingRouteDom = false;
       reportNextSnapshotDelivery = true;
-      render();
+      publishWindowSnapshot();
     }, 400);
   }
 
@@ -6107,7 +6119,7 @@ export function initializeContent() {
     if (mutations.every(shouldIgnoreMutation)) {
       return;
     }
-    conversationIndex.syncMounted();
+    conversationIndex.scheduleSync(mutations);
     const hasDeepSeekMutation = isDeepSeekPage() && mutations.some(isDeepSeekConversationMutation);
     if (!hasDeepSeekMutation && !hasRelevantMarkerMutation({
       mutations,
@@ -6534,8 +6546,8 @@ export function initializeContent() {
   function handleVisibilityChange() {
     if (document.visibilityState === "hidden") {
       cancelPointerDrag("document-hidden");
-    } else if (state.config.chatgptHistoryMode === "complete" && isTopLevelFrame()) {
-      conversationIndex.configure(true);
+    } else if (isTopLevelFrame()) {
+      configureConversationIndex();
     }
   }
 

@@ -32,6 +32,57 @@ function sourceFor(platform, html = kimiFixture) {
 
 const anonymousPair = '<div class="segment-user"><p>继续</p></div><div class="segment-assistant"><div class="markdown"><h2>继续说明</h2><p>正文</p></div></div>';
 
+test("mutation reads reuse unaffected message bodies and refresh a streaming reply", () => {
+  const { dom, read } = sourceFor("grok", `<div class="chat-list">${anonymousPair}</div>`);
+  const observer = new dom.window.MutationObserver(() => {});
+  observer.observe(dom.window.document.body, { subtree: true, childList: true, characterData: true, attributes: true });
+  try {
+    const first = read();
+    dom.window.document.querySelector(".markdown p").textContent = "增量正文";
+    const next = read({ mutations: observer.takeRecords() });
+    assert.equal(next.messages[0].blocks, first.messages[0].blocks);
+    assert.equal(next.messages[0].version, first.messages[0].version);
+    assert.notEqual(next.messages[1].blocks, first.messages[1].blocks);
+    assert.equal(next.messages[1].blocks[1].children[0].value, "增量正文");
+    dom.window.document.title = "新标题";
+    const unchanged = read({ mutations: observer.takeRecords() });
+    assert.equal(unchanged.messages[1].blocks, next.messages[1].blocks);
+    const fresh = read({ force: true });
+    assert.notEqual(fresh.messages[0].blocks, first.messages[0].blocks);
+  } finally { observer.disconnect(); dom.window.close(); }
+});
+
+test("batched updates normalize one changed reply and discard pending work on disposal", async () => {
+  const html = `<div class="chat-list">${Array.from({ length: 100 }, (_, i) => `<div class="segment-assistant"><div class="markdown"><p>Reply ${i}</p></div></div>`).join("")}</div>`;
+  const { dom, read } = sourceFor("grok", html);
+  let reads = 0;
+  const readMessages = options => { reads++; return read(options); };
+  const controller = createDOMIndexController({ window: dom.window, platform: "grok", readMessages });
+  const observer = new dom.window.MutationObserver(() => {});
+  observer.observe(dom.window.document.body, { subtree: true, childList: true, characterData: true });
+  const clone = globalThis.structuredClone; let clones = 0;
+  try {
+    controller.configure(true, { retainLoaded: true }); await controller.syncMounted();
+    globalThis.structuredClone = value => { clones++; return clone(value); };
+    const before = reads;
+    const paragraphs = dom.window.document.querySelectorAll(".markdown p");
+    paragraphs[99].textContent = "Stream one";
+    controller.scheduleSync(observer.takeRecords());
+    paragraphs[99].textContent = "Stream two";
+    controller.scheduleSync(observer.takeRecords());
+    await new Promise(resolve => dom.window.setTimeout(resolve, 80));
+    assert.equal(reads - before, 1);
+    assert.equal(clones, 1, "unchanged messages must bypass normalization and cloning");
+    assert.equal((await controller.search("Stream two")).total, 1);
+    assert.equal(controller.snapshot().count, 100);
+    const beforeDispose = reads;
+    paragraphs[98].textContent = "Pending"; controller.scheduleSync(observer.takeRecords());
+    controller.dispose();
+    await new Promise(resolve => dom.window.setTimeout(resolve, 60));
+    assert.equal(reads, beforeDispose);
+  } finally { globalThis.structuredClone = clone; observer.disconnect(); controller.dispose(); dom.window.close(); }
+});
+
 test("anonymous messages remounted as the same whole list window keep their indexed identities", async () => {
   const { dom, read } = sourceFor("grok", `<div class="chat-list">${anonymousPair}</div>`);
   const index = createDOMIndexController({ window: dom.window, platform: "grok", readMessages: read });
@@ -301,3 +352,23 @@ for (const platform of ["claude", "grok", "doubao", "kimi", "qianwen", "yuanbao"
     } finally { index.dispose(); dom.window.close(); }
   });
 }
+
+test("a sized virtual-list placeholder in view reports pending history rendering", () => {
+  const { dom, read } = sourceFor("grok", `<div id="list" style="overflow-y:auto">
+    <div data-turn-id-container="a" data-is-intersecting="true">${anonymousPair}</div>
+    <div data-turn-id-container="b" data-is-intersecting="false"></div></div>`);
+  const win = dom.window; const list = win.document.querySelector("#list");
+  Object.defineProperties(list, { scrollHeight: { value: 2000 }, clientHeight: { value: 500 } });
+  let placeholder = { top: 600, bottom: 900, height: 300 };
+  win.HTMLElement.prototype.getBoundingClientRect = function () {
+    if (this === list) return { top: 0, bottom: 500, height: 500 };
+    if (this.dataset.turnIdContainer === "b") return placeholder;
+    return { top: 0, bottom: 100, height: 100 };
+  };
+  assert.equal(read().historyLoading, false, "a placeholder below the viewport is not pending");
+  placeholder = { top: 300, bottom: 600, height: 300 };
+  assert.equal(read().historyLoading, true);
+  placeholder = { top: 300, bottom: 300, height: 0 };
+  assert.equal(read().historyLoading, false, "empty structural containers are ignored");
+  dom.window.close();
+});

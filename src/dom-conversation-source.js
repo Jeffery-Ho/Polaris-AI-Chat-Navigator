@@ -17,6 +17,8 @@ export function createDOMConversationSource({ window: win, platform, readContain
   let replyOwners = new Map();
   let nativeParts = new Map();
   let previousWindow = null;
+  let parsed = new WeakMap();
+  let version = 0;
 
   function nativeSourceId(element, role) {
     for (let node = element, depth = 0; node && depth < 6; node = node.parentElement, depth++) {
@@ -101,7 +103,7 @@ export function createDOMConversationSource({ window: win, platform, readContain
     previousWindow = entries.length ? { list, scroller, position, entries } : null;
   }
 
-  return () => {
+  function read({ mutations, force = false } = {}) {
     const url = new URL(win.location.href);
     // Tracking parameters do not identify a different conversation.
     const chatQuery = ["conversationId", "chatId", "sessionId"].map((key) => url.searchParams.get(key) || "").join(":");
@@ -109,6 +111,7 @@ export function createDOMConversationSource({ window: win, platform, readContain
     if (route !== routeKey) {
       route = routeKey; sequence = 0; nodeIds = new WeakMap(); replyOwners = new Map();
       nativeParts = new Map(); previousWindow = null;
+      parsed = new WeakMap();
     }
     const { userContainers: userCandidates = [], assistantContainers: assistantCandidates = [], assistantToUser, extraHeadings = [] } = readContainers();
     const userContainers = mountedContainers(userCandidates, false);
@@ -126,16 +129,26 @@ export function createDOMConversationSource({ window: win, platform, readContain
       const role = users.has(element) ? "user" : "assistant";
       const textSelector = role === "user" && USER_BODY[platform]
         && (platform === "claude" || element.querySelector(USER_BODY[platform])) ? USER_BODY[platform] : "";
+      const headings = JSON.stringify([...semanticHeadings].filter(([node]) => element.contains(node))
+        .map(([node, heading]) => [heading.level, heading.title, node.textContent]));
+      const cached = parsed.get(element);
+      const dirty = force || !mutations || mutations.some(({ target }) => target === element
+        || element.contains(target) || target.contains?.(element));
+      const base = nativeSourceId(element, role);
+      if (!dirty && cached?.role === role && cached.textSelector === textSelector && cached.headings === headings)
+        return { ...cached, element, base };
       const headingElements = new Map();
       const blocks = domMessageBlocks(element, { baseUrl: url.href, role, textSelector,
         headingFor: (node) => semanticHeadings.get(node), onHeading: (block, node) => headingElements.set(block, node) });
-      return { element, role, blocks, headingElements, base: nativeSourceId(element, role), signature: JSON.stringify([role, blocks]) };
+      const entry = { element, role, blocks, headingElements, textSelector, headings, version: ++version, base, signature: JSON.stringify([role, blocks]) };
+      parsed.set(element, entry);
+      return entry;
     }).filter((entry) => entry.blocks.length);
     const scroller = scrollContainer(entries[0]?.element);
     assignIds(entries, scroller);
     const ids = new Map(entries.map(({ element, id }) => [element, id]));
     let currentUser = "";
-    const messages = entries.map(({ id, element, role, blocks, headingElements }) => {
+    const messages = entries.map(({ id, element, role, blocks, headingElements, version }) => {
       if (role === "user") currentUser = id;
       let observedOwner = currentUser;
       if (assistantToUser && role === "assistant") {
@@ -151,7 +164,7 @@ export function createDOMConversationSource({ window: win, platform, readContain
         const heading = headingElements.get(block);
         if (heading) targets.set(`index:${id}:${ordinal}:0`, heading);
       });
-      return { id, role, blocks, element, targets, ...(replyTo !== undefined ? { replyTo } : {}) };
+      return { id, role, blocks, element, targets, version, ...(replyTo !== undefined ? { replyTo } : {}) };
     });
     const scope = scroller?.parentElement || win.document;
     const earlierControl = [...scope.querySelectorAll('button, [role="button"]')].find((node) =>
@@ -159,7 +172,13 @@ export function createDOMConversationSource({ window: win, platform, readContain
       && !node.closest('[hidden], [aria-hidden="true"]'));
     const loadEarlier = earlierControl && !earlierControl.disabled && earlierControl.getAttribute("aria-disabled") !== "true" ? earlierControl : null;
     const loadingSelector = '[aria-busy="true"], [data-history-loading="true"]';
-    const historyLoading = Boolean(scope.matches?.(loadingSelector) || scope.querySelector(loadingSelector));
+    // A virtualized list (ChatGPT) keeps unmounted turns as sized placeholders
+    // and renders them shortly after they scroll into view.
+    const viewport = scroller && scroller !== win.document.scrollingElement && scroller !== win.document.documentElement
+      ? scroller.getBoundingClientRect() : { top: 0, bottom: win.innerHeight };
+    const pendingMount = [...(scroller || win.document).querySelectorAll('[data-turn-id-container][data-is-intersecting="false"]')]
+      .some((node) => { const rect = node.getBoundingClientRect(); return rect.height > 0 && rect.bottom > viewport.top && rect.top < viewport.bottom; });
+    const historyLoading = Boolean(scope.matches?.(loadingSelector) || scope.querySelector(loadingSelector)) || pendingMount;
     // aria-setsize/posinset are explicit source evidence; scroll position is not.
     const positions = elements.map((element) => element.closest("[aria-posinset][aria-setsize]"));
     const total = Number(positions[0]?.getAttribute("aria-setsize"));
@@ -173,5 +192,10 @@ export function createDOMConversationSource({ window: win, platform, readContain
     const title = win.document.title.replace(/\s*[-–|]\s*(?:Kimi|Grok|Claude|DeepSeek|豆包|通义千问|千问|腾讯元宝|Manus).*$/i, "").trim();
     return { routeKey, title, messages, scroller, loadEarlier, hasEarlier: Boolean(earlierControl), historyLoading,
       coverage: complete ? "complete" : "loaded", ...(complete ? { total } : {}) };
+  }
+  read.reset = () => {
+    route = ""; sequence = 0; nodeIds = new WeakMap(); replyOwners.clear(); nativeParts.clear();
+    previousWindow = null; parsed = new WeakMap();
   };
+  return read;
 }

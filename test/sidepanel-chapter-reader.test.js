@@ -4,7 +4,6 @@ import { JSDOM } from "jsdom";
 import { createSidepanelChapterReader } from "../src/sidepanel-chapter-reader.js";
 import { collectSidepanelChapters } from "../src/sidepanel-chapter-content.js";
 import { createConversationIndex } from "../src/conversation-index.js";
-import { imagePage, imagePart } from "./fixtures/chatgpt-images.js";
 const nodes = [
   { markerKey: "a", sourceKey: "a", parentKey: "", title: "甲", contents: [{ type: "block", text: "引言", html: "<p>引言</p>" }, { type: "child", key: "b" }] },
   { markerKey: "b", sourceKey: "b", parentKey: "a", title: "子章", contents: [{ type: "block", text: "正文", html: "<p>正文</p>" }] },
@@ -43,9 +42,12 @@ test("Outline keeps indexed and HTML image labels without mounting images or dow
 
 test("indexed user attachments render as source-linked Image labels in their original text order", async () => {
   const index = createConversationIndex({ imagePlaceholder: "[图片]" });
-  await index.ingest(imagePage([{ id: "user", author: { role: "user" }, content: { content_type: "multimodal_text", parts: [
-    "前文", imagePart(), "中间", imagePart("two"), "结尾"
-  ] } }]));
+  const image = (id) => ({ type: "image", src: `sediment://file_${id}`, alt: "" });
+  await index.upsertMessages([{ id: "user", role: "user", blocks: [
+    { type: "paragraph", children: [{ type: "text", value: "前文" }] }, image("one"),
+    { type: "paragraph", children: [{ type: "text", value: "中间" }] }, image("two"),
+    { type: "paragraph", children: [{ type: "text", value: "结尾" }] }
+  ] }]);
   const s = setup();
   try {
     s.update({ conversationKey: "user-images", nodes: index.getOutline().chapters, virtualized: true });

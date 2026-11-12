@@ -1,35 +1,32 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { stepStates, conversationReadingState } from "../src/conversation-reading-state.js";
+import { conversationReadingState, stepStates } from "../src/conversation-reading-state.js";
 
-test("step states map data reading and native preparation separately", () => {
-  assert.deepEqual(stepStates({ phase: "loading", native: { phase: "preparing" } }), { read: "active", prepare: "active" });
-  assert.deepEqual(stepStates({ phase: "loading", native: { phase: "ready" } }), { read: "active", prepare: "done" });
-  assert.deepEqual(stepStates({ phase: "loading", native: { phase: "loading" } }), { read: "active", prepare: "pending" });
-  assert.deepEqual(stepStates({ phase: "complete", native: { phase: "loading" } }), { read: "done", prepare: "active" });
-  assert.deepEqual(stepStates({ phase: "complete", native: { phase: "preparing" } }), { read: "done", prepare: "active" });
-  assert.deepEqual(stepStates({ phase: "complete", native: { phase: "error" } }), { read: "done", prepare: "error" });
-  assert.deepEqual(stepStates({ phase: "partial", native: { phase: "loading" } }), { read: "error", prepare: "pending" });
+test("passive DOM indexing reports a brief load, failures and retained partial content", () => {
+  assert.deepEqual(conversationReadingState(null), { loading: false, stalled: false, failed: false });
+
+  // The initial index build loads while no message has been parsed yet.
+  assert.deepEqual(conversationReadingState({ phase: "loading", count: 0 }),
+    { loading: true, stalled: false, failed: false });
+  assert.equal(conversationReadingState({ phase: "loading", count: 21 }).loading, true);
+  assert.deepEqual(stepStates({ phase: "loading" }), { read: "active", prepare: "pending" });
+  assert.deepEqual(stepStates({ phase: "complete" }), { read: "done", prepare: "done" });
   assert.deepEqual(stepStates({ phase: "error" }), { read: "error", prepare: "pending" });
-});
 
-
-test("reading state gates unfinished messages without a website card or native DOM dependency", () => {
+  // A completed index never reports loading or stalled, regardless of count.
   for (const count of [0, 21]) {
-    assert.equal(conversationReadingState({ phase: "loading", count }).loading, true);
-    assert.equal(conversationReadingState({ phase: "complete", count, native: { phase: "preparing" } }).loading, true);
-    assert.equal(conversationReadingState({ phase: "complete", count, native: { phase: "ready" } }).loading, false);
+    assert.equal(conversationReadingState({ phase: "complete", count }).loading, false);
+    assert.equal(conversationReadingState({ phase: "complete", count }).stalled, false);
+    assert.equal(conversationReadingState({ phase: "complete", count }).failed, false);
   }
-  assert.equal(conversationReadingState(null).loading, false);
-  assert.equal(conversationReadingState({ phase: "loading", refreshing: true, native: { phase: "ready" } }).loading, false);
-});
 
-test("explicit empty failures expose recovery while partial reads can be dismissed", () => {
-  for (const phase of ["error", "partial"]) {
-    assert.equal(conversationReadingState({ phase, count: 0 }).loading, false);
-    assert.equal(conversationReadingState({ phase, count: 0 }).stalled, true);
-    assert.equal(conversationReadingState({ phase, count: 21 }).loading, true);
-    assert.equal(conversationReadingState({ phase, count: 21 }).stalled, false);
-  }
-  assert.equal(conversationReadingState({ phase: "complete", count: 21, native: { phase: "error" } }).failed, true);
+  // Partial content keeps its parsed messages readable and is not a stalled empty read.
+  assert.deepEqual(conversationReadingState({ phase: "partial", count: 21 }),
+    { loading: false, stalled: false, failed: true });
+
+  // A failed empty read is stalled; a failed read with content is not.
+  assert.deepEqual(conversationReadingState({ phase: "error", count: 0 }),
+    { loading: false, stalled: true, failed: true });
+  assert.deepEqual(conversationReadingState({ phase: "error", count: 21 }),
+    { loading: false, stalled: false, failed: true });
 });

@@ -2,36 +2,35 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { createConversationIndex } from "../src/conversation-index.js";
-import { publicConversationSnapshot } from "../src/conversation-snapshot.js";
 import { appendIndexedChapterBlock } from "../src/indexed-chapter-content.js";
 import { chapterTreeText } from "../src/sidepanel-chapter-state.js";
 
 const paragraph = (value) => ({ type: "paragraph", children: [{ type: "text", value }] });
 const message = (id, text = id, role = "user", extra = {}) => ({ id, role, blocks: [paragraph(text)], ...extra });
-const order = (index) => index.exportSnapshot().records.map((record) => record.id);
+const order = (index) => index.exportConversation().messages.map((record) => record.text);
 
 test("structured windows retain known order and insert newly mounted messages between adjacent anchors", async () => {
   const index = createConversationIndex({ platform: "kimi" });
   await index.upsertMessages([message("u1", "继续"), message("a1", "首轮", "assistant"), message("u3", "继续"), message("a3", "末轮", "assistant")]);
   await index.upsertMessages([message("a1", "首轮", "assistant"), message("u2", "继续"), message("a2", "中间轮", "assistant"), message("u3", "继续")]);
-  assert.deepEqual(order(index), ["u1", "a1", "u2", "a2", "u3", "a3"]);
+  assert.deepEqual(order(index), ["继续", "首轮", "继续", "中间轮", "继续", "末轮"]);
   await index.upsertMessages([message("u1", "继续"), message("a1", "已更新首轮", "assistant")]);
-  assert.deepEqual(order(index), ["u1", "a1", "u2", "a2", "u3", "a3"]);
+  assert.deepEqual(order(index), ["继续", "已更新首轮", "继续", "中间轮", "继续", "末轮"]);
   assert.equal((await index.search("继续")).total, 3, "identical prompts are separate messages");
   assert.equal((await index.search("已更新首轮")).total, 1);
   await index.upsertMessages([message("old")], { older: true });
   await index.upsertMessages([message("new")]);
-  assert.deepEqual(order(index), ["old", "u1", "a1", "u2", "a2", "u3", "a3", "new"]);
+  assert.deepEqual(order(index), ["old", "继续", "已更新首轮", "继续", "中间轮", "继续", "末轮", "new"]);
 });
 
 test("structured updates deduplicate each window and authoritative replacement removes old branches", async () => {
   const index = createConversationIndex();
   await index.upsertMessages([message("u1", "旧内容"), message("u1", "新内容"), message("removed")]);
-  assert.deepEqual(order(index), ["u1", "removed"]);
+  assert.deepEqual(order(index), ["新内容", "removed"]);
   assert.equal(index.getOutline().items.length, 2);
   assert.equal((await index.search("新内容")).total, 1);
   await index.upsertMessages([message("u2"), message("u1", "新内容")], { replace: true, coverage: "complete" });
-  assert.deepEqual(order(index), ["u2", "u1"]);
+  assert.deepEqual(order(index), ["u2", "新内容"]);
   assert.equal((await index.search("removed")).total, 0);
 });
 
@@ -77,10 +76,6 @@ test("explicit replyTo owns headings and preambles independently of neighboring 
   assert.equal(tree.items.find((item) => item.title === "章节").groupKey, "index:u1");
   assert.equal(tree.chapters.find((node) => node.markerKey === "index:orphan").parentKey, "");
   assert.equal(tree.chapters.some((node) => node.markerKey === "index:a1"), false);
-  const restored = createConversationIndex();
-  assert.equal(restored.restoreSnapshot(index.exportSnapshot()), true);
-  assert.match(chapterTreeText(restored.getOutline().chapters, "index:u1"), /属于第一个问题的前言/);
-  assert.equal(restored.exportSnapshot().records.find((record) => record.id === "orphan").replyTo, "");
 });
 
 test("an explicit user root precedes its answer content even when mounted after the answer", async () => {
@@ -112,14 +107,8 @@ test("structured attachments and images retain names, metadata and source target
   assert.equal((await index.search("需求说明.pdf")).total, 1);
   assert.equal((await index.search("www.kimi.com/files")).total, 0, "attachment URLs are not visible search text");
   assert.equal(tree.chapters.find((node) => node.markerKey === "index:u").contents[1].ast.type, "attachment");
-  const saved = index.exportSnapshot();
-  assert.equal(saved.records[0].blocks[1].name, upload.name);
-  assert.equal(saved.records[1].replyTo, "u");
   assert.equal(Object.hasOwn(upload, "attachmentKey"), false, "caller-owned AST is not mutated");
   assert.equal(Object.hasOwn(picture, "imageKey"), false);
-  const restored = createConversationIndex();
-  assert.equal(restored.restoreSnapshot(JSON.parse(JSON.stringify(saved))), true);
-  assert.equal(restored.getOutline().items.find((item) => item.attachment).attachment.name, "分析结果.pdf");
 });
 
 test("user titles prefer pure question text regardless of preceding attachments or inline images", async () => {
@@ -201,21 +190,7 @@ test("invalid structured windows reject atomically and public attachment project
   await assert.rejects(index.upsertMessages([message("new"), message("invalid", "", "tool")]), /unsupported-format/);
   assert.deepEqual(order(index), ["u"]);
   await index.upsertMessages([message("file", "", "user", { blocks: [{ type: "attachment", name: "原文.txt", metadata: { token: "secret" } }] })]);
-  const snapshot = index.exportSnapshot();
-  assert.doesNotMatch(JSON.stringify(snapshot), /secret|metadata/);
-  const invalid = structuredClone(snapshot);
-  invalid.records[1].blocks[0].name = {};
-  assert.equal(publicConversationSnapshot(invalid), null);
-});
-
-test("API ingestion also deduplicates an overlapping message within a page", async () => {
-  const index = createConversationIndex();
-  const user = { id: "u", author: { role: "user" }, content: { content_type: "text", parts: ["问题"] } };
-  await index.ingest({ messages: [user, user], page_info: { has_previous_page: false, has_next_page: false } });
-  index.finish();
-  assert.equal(index.status().count, 1);
-  assert.equal(index.getOutline().items.length, 1);
-  assert.equal(index.exportConversation().scope, "complete");
+  assert.doesNotMatch(JSON.stringify(index.exportConversation()), /secret|metadata/);
 });
 
 test("indexed attachment renderer uses text and accepts only safe HTTP links", () => {

@@ -46,7 +46,7 @@ export function createSidepanelConversationExport({ document: doc, locale, appNa
     header.append(title, close);
     current.append(header, make("p", "conversation-export-description", scope === "complete"
       ? label("包含整个会话的用户消息与 AI 回复。", "Includes every user message and AI reply in this conversation.")
-      : label("包含当前已读取的用户消息与 AI 回复。", "Includes user messages and AI replies currently read from the page.")));
+      : label("仅包含页面已加载并保留的消息，可能缺少更早的历史。", "Includes only loaded messages retained from the page. Earlier history may be missing.")));
     const choices = make("div", "conversation-export-formats");
     choices.setAttribute("role", "group"); choices.setAttribute("aria-label", label("导出格式", "Export format"));
     let format = "md";
@@ -70,7 +70,7 @@ export function createSidepanelConversationExport({ document: doc, locale, appNa
     const handoff = make("section", "conversation-export-handoff");
     handoff.setAttribute("aria-label", label("接续对话的 Prompt", "Conversation handoff prompt"));
     const prompt = make("p", "conversation-export-prompt", label(
-      `这是我与 AI 的${scope === "complete" ? "完整对话记录" : "已读取的对话记录，可能不包含更早的消息"}。请将文件中 User（用户）的提问和 Assistant（AI 回复）的回答作为本次对话的历史上下文。先简要复述最后三轮问答，确认你已读到结尾，再从最后一条消息继续。如果不足三轮，请复述全部已有问答。`,
+      `这是我与 AI 的${scope === "complete" ? "完整对话记录" : "页面已加载的对话记录，可能不包含更早的消息"}。请将文件中 User（用户）的提问和 Assistant（AI 回复）的回答作为本次对话的历史上下文。先简要复述最后三轮问答，确认你已读到结尾，再从最后一条消息继续。如果不足三轮，请复述全部已有问答。`,
       `This file contains ${scope === "complete" ? "my complete conversation with an AI" : "the available part of my conversation with an AI; earlier messages may be missing"}. Treat the User questions and Assistant replies as the history of this conversation. First, briefly recap the last three exchanges to confirm you have read to the end, then continue from the final message. If there are fewer than three exchanges, recap all available exchanges.`
     ));
     const promptCard = make("div", "conversation-export-prompt-card");
@@ -155,7 +155,7 @@ export function createSidepanelConversationExport({ document: doc, locale, appNa
       sourceKey = key; available = enabled;
       trigger.disabled = !available || busy;
       trigger.title = !enabled ? label("会话读取完成后可导出", "Available when the conversation is ready")
-        : complete ? label("导出整个会话", "Export entire conversation") : label("导出已读取的会话", "Export the conversation read from this page");
+        : complete ? label("导出整个会话", "Export entire conversation") : label("导出已加载内容", "Export loaded messages");
     }
   };
 }

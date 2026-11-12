@@ -6,10 +6,13 @@ import { JSDOM } from "jsdom";
 import {
   collectChatGptConversation,
   CHATGPT_USER_SELECTOR,
+  CHATGPT_ASSISTANT_TURN_SELECTOR,
   chatGptAssistantImageNodes,
   isChatGptUserTurnNode,
+  mergeChatGptAssistantNodes,
   stripChatGptUserRolePrefix
 } from "../src/chatgpt-messages.js";
+import { domMessageBlocks } from "../src/dom-message-blocks.js";
 
 const contentSource = readFileSync(new URL("../src/content.js", import.meta.url), "utf8");
 
@@ -179,4 +182,28 @@ test("ChatGPT adapter recognizes a shared user turn from data-turn", () => {
   assert.deepEqual(result.userMessages.map((message) => message.text), [
     "Find the shared conversation prompt."
   ]);
+});
+
+test("shared assistant turn keeps attachments and images outside the Markdown body in scope", () => {
+  const dom = new JSDOM(`<main>
+    <article data-testid="conversation-turn-0" data-turn="user"><div>用户问题</div></article>
+    <article data-testid="conversation-turn-1" data-turn="assistant">
+      <h6 class="sr-only">ChatGPT said:</h6>
+      <div class="markdown"><h2>标题</h2><p>正文</p><img src="https://files.oaiusercontent.com/inline.png" alt="示意图"></div>
+      <div data-cds="MessageAttachmentsFile"><a data-cds="CardLink" title="报告.pdf">报告.pdf</a></div>
+      <img src="https://files.oaiusercontent.com/generated.png" alt="Generated image">
+    </article>
+  </main>`);
+  try {
+    const doc = dom.window.document;
+    const turn = doc.querySelector('[data-testid="conversation-turn-1"]');
+    const markdown = turn.querySelector(".markdown");
+    assert.ok(turn.matches(CHATGPT_ASSISTANT_TURN_SELECTOR));
+    // The turn wins over its inner Markdown body so attachments stay in scope.
+    assert.deepEqual(mergeChatGptAssistantNodes({ turns: [turn], prose: [markdown] }).map((item) => item.node), [turn]);
+    const blocks = domMessageBlocks(turn, { role: "assistant", baseUrl: "https://chatgpt.com/share/test" });
+    assert.ok(blocks.some((block) => block.type === "heading" && block.children?.[0]?.value === "标题"));
+    assert.ok(blocks.some((block) => block.type === "attachment" && block.name === "报告.pdf"));
+    assert.ok(blocks.some((block) => block.type === "image" && block.alt === "Generated image"));
+  } finally { dom.window.close(); }
 });

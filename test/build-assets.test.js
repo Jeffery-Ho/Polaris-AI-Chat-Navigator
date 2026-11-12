@@ -1,7 +1,7 @@
 import { BILLING_HOST_PERMISSION } from "../src/billing-config.js";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile, access } from "node:fs/promises";
+import { readFile, access, readdir } from "node:fs/promises";
 import { SUPPORTED_MATCHES } from "../src/supported-sites.js";
 
 const [sourceManifest, distManifest] = await Promise.all([
@@ -45,4 +45,16 @@ test("production package retains the sidepanel and stable public resources", asy
   await assert.rejects(access(new URL("../dist/polaris-home.html", import.meta.url)), { code: "ENOENT" });
   const html = await readFile(new URL("../dist/sidepanel.html", import.meta.url), "utf8");
   assert.doesNotMatch(html, /@vite\/client|localhost|127\.0\.0\.1/);
+});
+
+test("production code cannot call removed conversation APIs or reach private framework handles", async () => {
+  const root = new URL("../dist/", import.meta.url);
+  const files = await readdir(root, { recursive: true });
+  for (const file of files.filter((file) => file.endsWith(".js"))) {
+    const source = await readFile(new URL(file, root), "utf8");
+    assert.doesNotMatch(source, /\/backend-api\/|\/api\/auth\/session|\/BardChatUi\/data\/batchexecute|__reactFiber|__webpack_require__/, file);
+  }
+  for (const file of ["chatgpt-index-bridge.js", "chatgpt-native-navigation.js", "chatgpt-shared-conversation.js", "gemini-index-bridge.js", "gemini-conversation.js"]) {
+    assert.equal(files.includes(`src/${file}`), false, `${file} must not ship`);
+  }
 });

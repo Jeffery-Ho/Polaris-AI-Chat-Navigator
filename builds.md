@@ -10,6 +10,92 @@
 - Version update type must be declared by the user before recording a build.
 - After each build is recorded, confirm the build number and version with the user.
 
+## 428
+
+- Date: 2026-11-12
+- Version: 1.5.2
+- Summary: Fix the centered platform switcher being clipped by the pinned search bar.
+- Notes: Since the main header became static, the 38px switcher, its chevron badge and shadow overhung the header and were painted under the opaque sticky search bar. The main header now stacks above the search bar until the bar is stuck, then drops back so the overhang never covers the stuck bar.
+- Validation: Syntax checks, production build and full test suite passed, including a new stacking regression test. Checked the switcher at rest and while stuck in a local preview, light and dark themes.
+
+## 427
+
+- Date: 2026-11-12
+- Version: 1.5.1
+- Summary: The pinned sidepanel search bar shows its divider and a soft shadow only while stuck.
+- Notes: At rest the brand row, search bar and tabs read as one header without an extra divider between the search bar and tabs. Once the main header has scrolled away, the sidepanel root gets `data-search-stuck`, and the search bar fades in its bottom border and a light shadow; scrolling back to the top removes them. Settings has no pinned search bar. Reduced motion keeps the existing near-instant transitions.
+- Validation: Syntax checks, production build and full test suite passed, including a new test for the stuck state. Checked in a local preview of the built sidepanel in light and dark themes.
+
+## 426
+
+- Date: 2026-11-12
+- Version: 1.5.0
+- Summary: Backfill unmounted messages in long conversation mode beneath a mask, with explicit consent and compliance guardrails.
+- Notes: Automatic backfill needs the user's explicit decision when long conversation mode is first enabled (granted, declined, or later via a settings switch); undecided or declined keeps passive retention only. Shared conversations never backfill. It renders turns the website has already delivered to the browser by scrolling only the website's own message container (older first, then newer) or pressing its own load-earlier control, while the list is transparent beneath a still Polaris cover, then restores the reader's message offset, including when a virtualized list remounted it. Each step waits for in-view virtual-list placeholders to render (up to 2 s). It runs once per index and only while the page is visible; wheel, pointer, touch or key input stops it; a 90 s active / 600-step budget pauses it with a resumable checkpoint. Exports wait for a running backfill. Reaching either end is not treated as complete history. No website API, credentials, request interception or persistence. Measured on a 358-turn ChatGPT share page: scrolling its virtualized list requested no conversation data, only images, files and the site's own telemetry.
+- Validation: Syntax checks, production build and full test suite passed. Tests cover consent states, shared-chat exclusion, an 80-turn virtualized ChatGPT fixture with delayed mounting, unmounting and many images (no duplicates after remounts, oldest and newest answers indexed, masked-only scrolling, exact restoration, zero network calls), hidden-page pause, pending-mount detection, user stop and resume, timeout, dispose and both locales. Installed-extension acceptance on the user's own ChatGPT and Gemini chats is pending.
+
+## 425
+
+- Date: 2026-11-12
+- Version: 1.4.0
+- Summary: Render readable Maker batches during initial long-conversation indexing and align the sidebar once.
+- Notes: Long conversation mode stays off by default. The initial non-empty index publishes readable batches beneath its progress card; exports remain unavailable until indexing finishes. The Maker sidebar starts at the earliest indexed content once per index generation and preserves the reader's position through subsequent batches. Default mode and Outline are not auto-scrolled. Indexing and sidebar alignment do not send website navigation commands or scroll the website conversation. Existing ready-index updates remain atomic.
+- Validation: Syntax checks, Chrome and Firefox production builds, and 718 tests passed. Controlled index batches, packaged readable partial snapshots, zero website scroll calls, one-time sidebar alignment, default-mode preservation and deferred alignment from Outline are covered. WORK was initially disabled and then enabled by the user; the last verified installed version was 1.3.2(424). Browser state fences and repeated native tool timeouts prevented confirming the 425 reload or live acceptance.
+
+## 424
+
+- Date: 2026-11-12
+- Version: 1.3.2
+- Summary: Restore initial long-conversation feedback after page refresh and late sidepanel opening.
+- Notes: An empty page shell no longer consumes the first non-empty indexing progress when website messages mount later. A sidepanel first receiving an already-completed non-empty index shows completion feedback without inventing a loading phase. Empty indexes and subsequent incremental snapshots do not show completion feedback. History loading behavior is unchanged; automatic history completion is under discussion only.
+- Validation: Syntax checks, Chrome and Firefox production builds, and 715 tests passed. Both the delayed-DOM refresh replay and late-sidepanel regression failed before the fix and passed afterward. Reloaded 1.3.2(424) in Dia WORK and returned to the reported share URL. Live card presentation remains unverified because native UI actions encountered focus changes and a noWindowsAvailable error.
+
+## 423
+
+- Date: 2026-11-12
+- Version: 1.3.1
+- Summary: Make long-conversation progress visible when enabling the mode, including small loaded batches.
+- Notes: Publish the first real indexing state immediately so snapshot coalescing cannot erase it. Enabling Long conversation mode returns from Preferences to the content at the top. Once indexing finishes, show a completed card for 800 ms while making the list available immediately. Later updates do not restart the card; changing the source, mode or settings cancels pending feedback. Keep the existing passive loaded-DOM boundary.
+- Validation: Syntax checks, Chrome and Firefox production builds, and 713 tests passed. The packaged seven-message replay now delivers loading before completion. Sidepanel tests cover both languages, completion feedback, immediate list availability, repeated mode changes and source cancellation. WORK was reloaded to 1.3.1(423) during validation; the final share-page interaction remains unverified because browser focus repeatedly changed and computer-use requests timed out. Reload the final package before host-page acceptance.
+
+## 422
+
+- Date: 2026-11-12
+- Version: 1.3.0
+- Summary: Read retained replies, process DOM updates incrementally and rebuild the current index explicitly.
+- Notes: Unmounted TOC and search targets offer Read in Outline, using only retained message content; Back to TOC restores the query and list position. Batch page mutations and reuse unchanged message ASTs and normalized index records. Keep initial progress while later updates remain non-blocking. Settings offers confirmed Clear and rebuild this index, discarding retained history before parsing mounted DOM; stale commands cannot reset another conversation. Retry reading appears for failed reads only. Keep private interfaces, request interception, automatic history loading and persistent conversation storage absent. Track subsequent search, anchor and scope work in todo.md.
+- Validation: Syntax checks, Chrome and Firefox production builds, and 709 tests passed. Local browser fixtures verified both themes, Chinese/English, 320px/400px, retained reading, scroll restoration and reset confirmation. A 500-message / 10-update simulation normalized 10 messages instead of 5,000; whole-website performance and installed-extension acceptance remain unverified.
+
+## 421
+
+- Date: 2026-11-11
+- Version: 1.2.2
+- Summary: Restore the long-conversation progress cover above the Maker list.
+- Notes: Reuse the reading card and skeleton from 1.0.1, with loaded-message processing counts, the chat title and a reading-preferences shortcut in both content tabs. An empty failed read offers a retry for the current conversation; retained partial content remains readable. Initial DOM indexing publishes actual processed-message counts. Later page updates do not show the cover again. Keep passive DOM reading and the existing history-loading boundary.
+- Validation: Syntax checks, Chrome production build and 702 tests passed. Local browser fixtures verified both themes at 320px and 400px, progress updates, scoped retries and cover removal. Installed-extension behavior remains unverified.
+
+## 420
+
+- Date: 2026-11-11
+- Version: 1.2.1
+- Summary: Remove automatic history loading and retain only messages already loaded by the page.
+- Notes: Deleted DOM history scans, pagination clicks and missing-target rehydration. Follow the page now removes unmounted messages, while Long conversation mode retains them in current-page memory for navigation, search and export. Legacy complete-reading preferences migrate without starting a task. Re-read only reparses mounted DOM. Private ChatGPT/Gemini API readers remain removed, and startup deletes the old extension-owned conversation cache without reading it. Updated settings, Pro copy, export scope, README and privacy policy to describe the loaded-message boundary.
+- Validation: Chrome and Firefox production builds; regression coverage for passive packaged content, migration, mode changes, missing originals and old-cache deletion. These checks do not establish platform approval or the cause of any account restriction.
+
+## 419
+
+- Date: 2026-11-11
+- Version: 1.2.0
+- Summary: Long-conversation reading becomes a two-mode, DOM-only setting; private website interfaces are removed.
+- Notes: Removed the ChatGPT and Gemini page bridges that called private backend APIs, read the session token, and reverse-engineered webpack/React internals. ChatGPT and Gemini now use the same DOM-based conversation index as other platforms. "Read the whole conversation" mode auto-loads the full history for the current chat by scrolling the page's own history loader, while "Follow the page" (default) reads only loaded content; both reset when switching chats. Removed the local conversation cache and its 100 MiB IndexedDB storage. Privacy policy updated to match.
+
+## 418
+
+- Date: 2026-11-10
+- Version: 1.1.0
+- Summary: The sidepanel main header scrolls away and only the search bar stays pinned while scrolling.
+- Notes: The brand row and navigation/chapters tabs now scroll up with the content instead of staying frozen. While scrolling, the search bar sticks to the top; scrolling back to the top restores the full header. Locating a Maker, jumping from a search result, and virtual TOC scrolling now measure the pinned search bar instead of the full header.
+
 ## 417
 
 - Date: 2026-11-09

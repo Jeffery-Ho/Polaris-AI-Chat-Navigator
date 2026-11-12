@@ -6,6 +6,9 @@ import {
 export const CHATGPT_LEGACY_ASSISTANT_SELECTOR = '[data-message-author-role="assistant"], [data-message-role="assistant"]';
 export const CHATGPT_LEGACY_USER_SELECTOR = '[data-message-author-role="user"], [data-message-role="user"]';
 export const CHATGPT_USER_TURN_SELECTOR = '[data-testid^="conversation-turn-"]';
+// Shared chats render the whole turn, including attachments and generated
+// images, under a data-turn marker without a legacy author wrapper.
+export const CHATGPT_ASSISTANT_TURN_SELECTOR = '[data-testid^="conversation-turn-"][data-turn="assistant"]';
 export const CHATGPT_USER_SELECTOR = `${CHATGPT_LEGACY_USER_SELECTOR}, ${CHATGPT_USER_TURN_SELECTOR}, [class~="group/user-message"]`;
 export const CHATGPT_PROSE_SELECTOR = ".markdown, .prose";
 
@@ -156,7 +159,7 @@ export function isChatGptUserTurnNode(node) {
   return hasChatGptUserHeading(node);
 }
 
-export function mergeChatGptAssistantNodes({ legacy = [], hashed = [], prose = [], users = [] } = {}) {
+export function mergeChatGptAssistantNodes({ legacy = [], hashed = [], prose = [], turns = [], users = [] } = {}) {
   const chosen = [];
   const accept = (node, kind) => {
     if (!node) {
@@ -170,6 +173,9 @@ export function mergeChatGptAssistantNodes({ legacy = [], hashed = [], prose = [
     }
     chosen.push({ node, kind, role: "assistant" });
   };
+  // A turn wraps the whole message, including attachments outside the Markdown
+  // body, so it must win over its inner prose/hashed bodies.
+  turns.forEach((node) => accept(node, "turn"));
   legacy.forEach((node) => accept(node, "legacy"));
   hashed.forEach((node) => accept(node, "hashed"));
   prose.forEach((node) => accept(node, "prose"));
