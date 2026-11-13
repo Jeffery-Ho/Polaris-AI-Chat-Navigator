@@ -10,6 +10,38 @@
 - Version update type must be declared by the user before recording a build.
 - After each build is recorded, confirm the build number and version with the user.
 
+## 432
+
+- Date: 2026-11-12
+- Version: 1.5.6
+- Summary: Rename "Follow the page" to "Standard mode" so it pairs with Long conversation mode.
+- Notes: The default reading mode in Preferences is now "Standard mode" / 「标准模式」, matching the "... mode" naming of Long conversation mode. Behavior and the stored `historyMode: "default"` value are unchanged. README and the privacy policy use the new name; past What's New entries keep the name they shipped with.
+- Validation: Syntax checks, production build and full test suite passed, including a mode-name assertion.
+
+## 431
+
+- Date: 2026-11-12
+- Version: 1.5.5
+- Summary: Stack the Preferences reading-mode cards as full-width rows.
+- Notes: Follow the page and Long conversation mode return to one card per row, so each title, the Recommended badge and the one-line description fit on single lines instead of wrapping in half-width columns. Card padding and copy are unchanged.
+- Validation: Syntax checks, production build and full test suite passed. Checked in a local preview of the built sidepanel in light and dark themes.
+
+## 430
+
+- Date: 2026-11-12
+- Version: 1.5.4
+- Summary: Mark Long conversation mode as recommended in Preferences.
+- Notes: The Long conversation mode card shows a "Recommended" / 「推荐」 pill badge after its title, styled like the existing trial badge. Selection, Pro gating and backfill consent are unchanged.
+- Validation: Syntax checks, production build and full test suite passed, including a badge assertion. Checked in a local preview of the built sidepanel in light and dark themes.
+
+## 429
+
+- Date: 2026-11-12
+- Version: 1.5.3
+- Summary: Compact the Preferences cards and remove redundant copy.
+- Notes: Long conversations drops the "Current chat" label and the footnote about backfill and storage; the chat title is one truncated line with the full title on hover. The two reading modes sit side by side as compact cards with one-line descriptions, and the automatic backfill toggle uses a one-line summary while the full disclosure stays in the first-time consent prompt. The mode legend is now visually hidden as intended (`.sr-only` was undefined). Content recognition options render as compact option cards in wrapping rows instead of boxed, row-per-option lists.
+- Validation: Syntax checks, production build and all 732 tests passed. Checked Preferences in a local preview of the built sidepanel in light and dark themes.
+
 ## 428
 
 - Date: 2026-11-12

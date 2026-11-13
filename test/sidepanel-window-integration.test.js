@@ -423,7 +423,17 @@ test("long conversation settings show the actual title and two mode cards", asyn
     assert.equal(s.win.document.querySelector('.index-current-title').textContent, "我的真实会话标题");
     assert.equal(s.win.document.querySelectorAll('.index-mode-card').length, 2);
     assert.equal(s.win.document.querySelector('input[name="history-mode"][value="default"]').checked, true);
-    assert.match(s.win.document.querySelector('.index-settings').textContent, /不写入磁盘/);
+    const settings = s.win.document.querySelector('.index-settings');
+    assert.equal(settings.querySelector('.index-current-label'), null, "no separate Current chat label");
+    assert.equal(settings.querySelector('.index-current-title').title, "我的真实会话标题", "truncated title stays readable on hover");
+    assert.ok(settings.querySelector('.index-mode-cards > legend').classList.contains('sr-only'));
+    assert.deepEqual([...settings.querySelectorAll('.index-mode-card .index-mode-copy > span')].map((node) => node.textContent),
+      ["只显示页面当前的消息", "保留已加载消息，可搜索与导出"]);
+    assert.doesNotMatch(settings.textContent, /未开启自动补齐时/);
+    assert.deepEqual([...settings.querySelectorAll('.index-mode-card strong')].map((node) => node.firstChild.textContent), ["标准模式", "长对话模式"]);
+    assert.equal(settings.querySelectorAll('.index-mode-badge').length, 1, "only one mode is recommended");
+    assert.equal(settings.querySelector('input[value="loaded"]').closest('.index-mode-card').querySelector('.index-mode-badge').textContent, "推荐");
+    assert.equal(settings.querySelector('[data-backfill-toggle] .index-mode-copy > span').textContent, "在遮罩下加载更早消息，不调用网站接口");
     assert.equal(s.win.document.querySelector('.index-progress'), null);
     s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...snapshot, conversationTitle: "重命名后的标题", conversationIndex: { ...snapshot.conversationIndex, phase: "complete", total: 123 } } });
     assert.equal(s.win.document.querySelector('.index-current-title').textContent, "重命名后的标题");
@@ -921,7 +931,7 @@ test("opening the sidepanel after indexing shows completed feedback without inve
   } finally { s.dom.window.close(); }
 });
 
-test("long mode can be re-enabled after changing to Follow the page in the same Preferences panel", async () => {
+test("long mode can be re-enabled after changing to Standard mode in the same Preferences panel", async () => {
   const s = await boot("sidepanel", { openChapters: false, deliverChapters: false });
   try {
     const doc = s.win.document;

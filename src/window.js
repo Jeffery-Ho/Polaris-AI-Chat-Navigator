@@ -1114,14 +1114,14 @@ export function initializeSidepanel() {
   function renderIndexSettings(snapshot) {
     const section = element("section", "settings-section index-settings");
     section.append(element("h2", "settings-section-title", locale === "zh" ? "长对话阅读" : "Long conversations"));
-    section.append(element("p", "index-current-label", locale === "zh" ? "当前对话" : "Current chat"));
-    section.append(element("h3", "index-current-title"));
-    const status = element("p", "index-current-status"); status.setAttribute("role", "status"); section.append(status);
+    const current = element("div", "index-current");
+    const status = element("p", "index-current-status"); status.setAttribute("role", "status");
+    current.append(element("h3", "index-current-title"), status); section.append(current);
     const cards = element("fieldset", "index-mode-cards");
     const legend = element("legend", "sr-only", locale === "zh" ? "读取方式" : "How to load messages"); cards.append(legend);
     for (const [mode, title, description] of [
-      ["default", locale === "zh" ? "跟随页面" : "Follow the page", locale === "zh" ? "目录跟随页面当前显示的消息，页面移除消息时同步移除对应内容。" : "The outline follows messages currently on the page. Messages leave the outline when the page removes them."],
-      ["loaded", locale === "zh" ? "长对话模式" : "Long conversation mode", locale === "zh" ? "保留已加载的对话内容，方便查找更早的回答，并通过大纲复制或导出，继续对话。刷新或切换会话后清空。" : "Keep loaded messages to find earlier answers and copy or export them from Outline to continue the conversation. Cleared on refresh or when you switch chats."]
+      ["default", locale === "zh" ? "标准模式" : "Standard mode", locale === "zh" ? "只显示页面当前的消息" : "Only messages on the page"],
+      ["loaded", locale === "zh" ? "长对话模式" : "Long conversation mode", locale === "zh" ? "保留已加载消息，可搜索与导出" : "Keep loaded messages to search and export"]
     ]) {
       const card = element("label", "index-mode-card");
       const input = document.createElement("input"); input.type = "radio"; input.name = "history-mode"; input.value = mode;
@@ -1140,7 +1140,9 @@ export function initializeSidepanel() {
           enableMode(mode, {});
         }
       });
-      const copy = element("span", "index-mode-copy"); copy.append(element("strong", "", title), element("span", "", description));
+      const heading = element("strong", "", title);
+      if (mode === "loaded") heading.append(" ", element("span", "index-mode-badge", locale === "zh" ? "推荐" : "Recommended"));
+      const copy = element("span", "index-mode-copy"); copy.append(heading, element("span", "", description));
       card.append(input, copy); cards.append(card);
     }
     function enableMode(mode, patch) {
@@ -1167,12 +1169,10 @@ export function initializeSidepanel() {
     const auto = document.createElement("input"); auto.type = "checkbox";
     auto.addEventListener("change", () => send({ command: "update-config", patch: { backfillConsent: auto.checked ? "granted" : "declined" } }));
     const autoCopy = element("span", "index-mode-copy");
-    autoCopy.append(element("strong", "", locale === "zh" ? "自动补齐更早消息" : "Automatically backfill earlier messages"), element("span", "", disclosure));
+    autoCopy.append(element("strong", "", locale === "zh" ? "自动补齐更早消息" : "Automatically backfill earlier messages"),
+      element("span", "", locale === "zh" ? "在遮罩下加载更早消息，不调用网站接口" : "Loads earlier messages beneath a cover, without website APIs"));
     autoLabel.append(auto, autoCopy);
     section.append(cards, consent, autoLabel);
-    section.append(element("p", "index-current-status", locale === "zh"
-      ? "未开启自动补齐时，只保留页面已加载的内容。内容不写入磁盘、不同步。"
-      : "Without automatic backfill, only messages loaded by the page are kept. Content is never written to disk or synchronized."));
     const retry = element("button", "secondary-button", locale === "zh" ? "重试读取" : "Retry reading");
     retry.type = "button"; retry.dataset.indexRetry = "true"; retry.dataset.settingsFocus = "retry-conversation-index";
     retry.addEventListener("click", () => send({ command: "retry-conversation-index", expectedTabId: state.sourceTabId,
@@ -1222,7 +1222,9 @@ export function initializeSidepanel() {
     const index = snapshot.conversationIndex;
     const section = panel.matches(".index-settings") ? panel : panel.querySelector(".index-settings");
     if (!section) return;
-    section.querySelector(".index-current-title").textContent = snapshot.conversationTitle || (locale === "zh" ? "当前对话" : "Current chat");
+    const currentTitle = section.querySelector(".index-current-title");
+    currentTitle.textContent = snapshot.conversationTitle || (locale === "zh" ? "当前对话" : "Current chat");
+    currentTitle.title = currentTitle.textContent;
     section.querySelector(".index-current-status").textContent = indexStatusText(index);
     section.querySelectorAll('input[type="radio"]').forEach((input) => {
       input.checked = input.value === (billingAllowsIndex(billing.getView()) ? normalizeHistoryMode(snapshot.config?.historyMode) : "default");

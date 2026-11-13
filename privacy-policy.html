@@ -85,7 +85,7 @@
       <p>
         Polaris: AI Chat Navigator accesses the text and document structure of AI-generated responses
         displayed on supported websites. It reads only the messages the website has already loaded
-        into the page. "Follow the page" removes messages from its index when the website unmounts them.
+        into the page. "Standard mode" removes messages from its index when the website unmounts them.
         The optional "Long conversation mode" setting retains already loaded messages in the current
         page's memory for navigation, search and export. If the user explicitly turns on automatic
         backfill, Polaris renders messages of the user's own open conversation that the website has
@@ -95,7 +95,7 @@
         pauses while the page is hidden. It does not call website APIs, read account tokens, or
         intercept or modify website requests.
         The index is cleared on conversation changes, page refresh, closure or returning to
-        "Follow the page". Hidden reasoning, tool messages, alternate branches, and downloaded attachments
+        "Standard mode". Hidden reasoning, tool messages, alternate branches, and downloaded attachments
         are not indexed.
         This access is necessary to identify headings and
         list structures, generate navigation markers, scroll to selected sections, and show
