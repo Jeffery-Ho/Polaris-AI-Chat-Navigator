@@ -3,13 +3,14 @@
 // its content mounts a little after it scrolls into view and unmounts once it
 // is far away. Like ChatGPT, each section carries a stable `data-turn-id`.
 // Answers carry many images, and some turns are image-only.
-export function virtualConversationTurns({ turns = 80, imagesPerAnswer = 3, imageOnlyEvery = 4 } = {}) {
+// With `lazyImages`, answer images mount without any source; see `lazyDelay`.
+export function virtualConversationTurns({ turns = 80, imagesPerAnswer = 3, imageOnlyEvery = 4, lazyImages = false } = {}) {
   return Array.from({ length: turns }, (_, index) => {
     const role = index % 2 ? "assistant" : "user";
     const answer = (index - 1) / 2 + 1;
     const imageOnly = role === "assistant" && answer % imageOnlyEvery === 0;
     const images = (count) => Array.from({ length: count }, (_, k) =>
-      `<img src="https://files.oaiusercontent.com/file-${index}-${k}/raw" alt="生成图片 ${answer}-${k + 1}" width="512" height="512">`).join("");
+      `<img ${lazyImages ? "data-fixture-src" : "src"}="https://files.oaiusercontent.com/file-${index}-${k}/raw" alt="生成图片 ${answer}-${k + 1}" width="512" height="512">`).join("");
     const body = role === "user"
       ? `<div data-message-author-role="user" data-message-id="m${index}"><div class="whitespace-pre-wrap">问题 ${index / 2 + 1}：请继续设计第 ${index / 2 + 1} 张日历</div></div>`
       : imageOnly
@@ -26,7 +27,9 @@ export function virtualConversationHtml() {
 
 // Installs the layout model on a JSDOM window. Returns a controller that
 // reports scroll calls and the mask state seen at each one.
-export function attachVirtualList(win, { turns, rowHeight = 150, viewport = 1000, mountDelay = 30, keepAround = 2 }) {
+// Lazy images receive `src` only after the view has rested for `lazyDelay`, like
+// an IntersectionObserver loader; a row remounted later starts without it again.
+export function attachVirtualList(win, { turns, rowHeight = 150, viewport = 1000, mountDelay = 30, keepAround = 2, lazyDelay = 400 }) {
   const doc = win.document;
   const scroller = doc.querySelector("[data-scroll-root]");
   const containers = turns.map((turn) => {
@@ -37,7 +40,7 @@ export function attachVirtualList(win, { turns, rowHeight = 150, viewport = 1000
   });
   const height = turns.length * rowHeight;
   let top = height - viewport;
-  let timer = 0;
+  let timer = 0; let lazyTimer = 0;
   const scrolls = [];
   const indexOf = (element) => {
     const container = element.closest?.("[data-turn-id-container]");
@@ -60,6 +63,12 @@ export function attachVirtualList(win, { turns, rowHeight = 150, viewport = 1000
       if (inView && !node.firstChild) { node.innerHTML = turns[index].html; node.dataset.isIntersecting = "true"; }
       else if (!near && node.firstChild) { node.replaceChildren(); node.dataset.isIntersecting = "false"; }
     });
+    win.clearTimeout(lazyTimer);
+    lazyTimer = win.setTimeout(() => {
+      const [from, to] = visibleRange();
+      containers.slice(from, to).forEach((node) => node.querySelectorAll("img[data-fixture-src]:not([src])")
+        .forEach((img) => img.setAttribute("src", img.getAttribute("data-fixture-src"))));
+    }, lazyDelay);
   }
   Object.defineProperties(scroller, {
     scrollHeight: { get: () => height }, clientHeight: { get: () => viewport },

@@ -26,6 +26,10 @@ test("路由切换立即清空旧列表，并等待宿主 DOM 变更后才扫描
   assert.doesNotMatch(contentSource, /console\.warn\("\[Polaris\] Route fallback/);
   assert.match(contentSource, /function isPolarisOwnedMutationNode/);
   assert.match(contentSource, /changedNodes\.every\(isPolarisOwnedMutationNode\)/);
+  // The backfill mask cover is Polaris-owned; inserting or removing it is not page content.
+  const owned = functionSource("isPolarisOwnedMutationNode", "shouldIgnoreMutation");
+  assert.match(owned, /hasAttribute\("data-polaris-backfill"\)/);
+  assert.match(owned, /closest\(`#\$\{ROOT_ID\}, \[data-polaris-backfill\]`\)/);
   assert.match(mutations, /state\.awaitingRouteDom = false/);
   assert.match(renderSnapshot, /if \(state\.awaitingRouteDom\)/);
   assert.match(windowBridge, /!state\.awaitingRouteDom && state\.markerSourceContainers\.length === 0/);

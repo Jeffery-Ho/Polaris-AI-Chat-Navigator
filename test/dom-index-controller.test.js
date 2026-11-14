@@ -240,6 +240,28 @@ test("user input stops backfill, restores the page and continue resumes it", asy
   } finally { s.close(); }
 });
 
+test("backfill holds the list still while in-view images await their source, within a bound, and input still stops it", async () => {
+  const s = setup();
+  try {
+    const older = s.message("old", "assistant", "更早章节"); const newer = s.message("new", "user", "当前问题");
+    s.mount([newer], { pendingMedia: true });
+    const page = lazyHistory(s, { older, newer });
+    s.controller.configure(true, { retainLoaded: true, backfill: true }); await s.controller.syncMounted();
+    await pause(600);
+    assert.equal(s.controller.snapshot().backfill.phase, "running");
+    assert.equal(page.seen.length, 0, "the list does not move while an image in view has no source yet");
+    s.win.dispatchEvent(new s.win.Event("keydown"));
+    assert.equal(await waitForBackfill(s.controller), "stopped");
+    assert.equal(s.win.document.querySelector("[data-polaris-backfill]"), null);
+    // A source that never arrives only delays the step; the list then moves on.
+    void s.controller.backfill({ resume: true });
+    await pause(2600);
+    assert.ok(page.seen.length > 0, "the wait for a missing source is bounded");
+    s.win.dispatchEvent(new s.win.Event("keydown"));
+    assert.equal(await waitForBackfill(s.controller), "stopped");
+  } finally { s.close(); }
+});
+
 test("backfill timeout keeps read messages and removes the mask", async () => {
   const s = setup();
   try {

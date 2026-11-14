@@ -10,6 +10,30 @@
 - Version update type must be declared by the user before recording a build.
 - After each build is recorded, confirm the build number and version with the user.
 
+## 435
+
+- Date: 2026-11-14
+- Version: 1.5.9
+- Summary: Backfill keeps more images and file labels from long ChatGPT conversations.
+- Notes: Virtualized rows unmount once scrolled past, so an in-view image that had no source yet was lost for good. Each backfill step now also waits, within the existing 2 s mount bound, while an in-view message image has no source at all; a source that never arrives holds a given scroll position only once. ChatGPT answers now label code interpreter `sandbox:` file links (name only, falling back to the path's filename when the link text is a sentence) and generated file cards inferred from an icon plus a filename; citation chips and code block headers are excluded. A ChatGPT user upload shown only as "Uploaded an image" without a mounted thumbnail keeps that label as an attachment. Inserting or removing the backfill cover no longer counts as a page mutation. No network requests, consent, masking, stop or budget behavior changed.
+- Validation: Syntax checks, production build and full test suite passed. New tests cover backfill on a virtualized list whose images receive their source only after the view rests (fails without the wait), the bounded wait and stop under a never-loading image, sandbox links, inferred answer file cards, false-positive guards and the upload label.
+
+## 434
+
+- Date: 2026-11-13
+- Version: 1.5.8
+- Summary: Redesign the backfill cover shown over the website's conversation.
+- Notes: The cover used a bare line of text and an outlined button styled by the page. It now renders a centered card inside a Shadow DOM, so site CSS cannot restyle it: the Polaris icon, a "Loading earlier messages" title, a separate live count, a looping skeleton of messages arriving from above, a "Scroll or click the page to stop" hint and a pill Stop button. The card follows the page background's luminance for light or dark colors and disables its motion under reduced motion. Masking, opacity restoration and stop behavior are unchanged.
+- Validation: Syntax checks, production build and full test suite passed, including new mask tests for shadow isolation, copy, live updates, stop, theme and removal. Checked on a mock chat page in light and dark themes with hostile page button styles.
+
+## 433
+
+- Date: 2026-11-13
+- Version: 1.5.7
+- Summary: Show one image Maker per ChatGPT generated image instead of one per stacked layer.
+- Notes: ChatGPT renders each generated image as three stacked <img> layers with the same source inside [data-image-gen-result]. Only the first layer is parsed as an image, so the Maker list, Outline, search records and image location ordinals no longer triple each generated image. Repeated sources elsewhere (for example the same upload twice in one message) are unchanged. The reported project chat could not be inspected without signing in, so its missing image Makers are not confirmed fixed.
+- Validation: Syntax checks, production build and 734 tests passed. A fixture captured from a live ChatGPT image generation turn covers default and long conversation modes, plus a two-image grid.
+
 ## 432
 
 - Date: 2026-11-12

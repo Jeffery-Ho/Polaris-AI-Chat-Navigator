@@ -138,7 +138,8 @@ export function createDOMConversationSource({ window: win, platform, readContain
       if (!dirty && cached?.role === role && cached.textSelector === textSelector && cached.headings === headings)
         return { ...cached, element, base };
       const headingElements = new Map();
-      const blocks = domMessageBlocks(element, { baseUrl: url.href, role, textSelector,
+      // ChatGPT answers carry generated file cards with only hashed classes.
+      const blocks = domMessageBlocks(element, { baseUrl: url.href, role, textSelector, inferAttachments: role === "user" || platform === "chatgpt",
         headingFor: (node) => semanticHeadings.get(node), onHeading: (block, node) => headingElements.set(block, node) });
       const entry = { element, role, blocks, headingElements, textSelector, headings, version: ++version, base, signature: JSON.stringify([role, blocks]) };
       parsed.set(element, entry);
@@ -179,6 +180,14 @@ export function createDOMConversationSource({ window: win, platform, readContain
     const pendingMount = [...(scroller || win.document).querySelectorAll('[data-turn-id-container][data-is-intersecting="false"]')]
       .some((node) => { const rect = node.getBoundingClientRect(); return rect.height > 0 && rect.bottom > viewport.top && rect.top < viewport.bottom; });
     const historyLoading = Boolean(scope.matches?.(loadingSelector) || scope.querySelector(loadingSelector)) || pendingMount;
+    // Rows unmount once scrolled past, so an image still waiting for its source
+    // (sites fill it in after the row mounts) must get it while in view.
+    const pendingMedia = elements.some((element) => [...element.querySelectorAll("img")].some((img) => {
+      if (img.currentSrc || ["src", "data-src", "data-original", "srcset"].some((name) => img.getAttribute(name))) return false;
+      if (img.closest('[hidden], [aria-hidden="true"]')) return false;
+      const rect = img.getBoundingClientRect();
+      return rect.height > 0 && rect.bottom > viewport.top && rect.top < viewport.bottom;
+    }));
     // aria-setsize/posinset are explicit source evidence; scroll position is not.
     const positions = elements.map((element) => element.closest("[aria-posinset][aria-setsize]"));
     const total = Number(positions[0]?.getAttribute("aria-setsize"));
@@ -190,7 +199,7 @@ export function createDOMConversationSource({ window: win, platform, readContain
       && positions.every((node) => Number(node.getAttribute("aria-setsize")) === total)
       && !earlierControl && !historyLoading;
     const title = win.document.title.replace(/\s*[-–|]\s*(?:Kimi|Grok|Claude|DeepSeek|豆包|通义千问|千问|腾讯元宝|Manus).*$/i, "").trim();
-    return { routeKey, title, messages, scroller, loadEarlier, hasEarlier: Boolean(earlierControl), historyLoading,
+    return { routeKey, title, messages, scroller, loadEarlier, hasEarlier: Boolean(earlierControl), historyLoading, pendingMedia,
       coverage: complete ? "complete" : "loaded", ...(complete ? { total } : {}) };
   }
   read.reset = () => {

@@ -571,15 +571,42 @@ test("clipboard completion from an old instance cannot add a toast to a new over
   }
 });
 
-async function bootVirtualChat(pageUrl, savedConfig) {
+async function bootVirtualChat(pageUrl, savedConfig, turnOptions = {}) {
   const s = await bootPackagedContent({ pageUrl, html: virtualConversationHtml(), savedConfig });
   s.win.structuredClone = structuredClone;
   const requests = [];
   s.win.fetch = (...args) => { requests.push(args); throw new Error("No conversation requests are allowed"); };
   s.win.XMLHttpRequest.prototype.open = (...args) => requests.push(args);
-  const list = attachVirtualList(s.win, { turns: virtualConversationTurns() });
+  const list = attachVirtualList(s.win, { turns: virtualConversationTurns(turnOptions) });
   return { ...s, list, requests };
 }
+
+async function waitForBackfill(s, rounds = 400) {
+  const latest = () => s.messages.findLast((message) => message.type === "POLARIS_CONTENT_STATE")?.snapshot;
+  for (let i = 0; i < rounds && latest()?.conversationIndex?.backfill?.phase !== "done"; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  return latest();
+}
+
+test("packaged backfill waits for in-view images that have no source yet before scrolling on", async () => {
+  const s = await bootVirtualChat("https://chatgpt.com/c/lazy-images", { historyMode: "loaded", backfillConsent: "granted" }, { lazyImages: true });
+  try {
+    await s.inject();
+    const snapshot = await waitForBackfill(s);
+    assert.equal(snapshot.conversationIndex.backfill?.phase, "done");
+    assert.equal(snapshot.conversationIndex.count, 80, "image-only turns are indexed once their images load");
+    const images = new Set(snapshot.markerItems.filter((item) => item.image).map((item) => item.title));
+    for (const title of ["生成图片 1-1", "生成图片 2-3", "生成图片 4-4", "生成图片 20-1", "生成图片 40-4"]) {
+      assert.ok(images.has(title), `${title} is indexed`);
+    }
+    assert.ok(s.list.scrolls.every((entry) => entry.masked), "the list is only ever moved beneath the mask");
+    assert.equal(s.list.scroller.style.opacity, "");
+    assert.deepEqual(s.requests, []);
+    assert.deepEqual(s.errors, []);
+  } finally { s.invalidate(); s.win.close(); }
+});
 
 test("packaged backfill renders a virtualized, image-heavy ChatGPT chat beneath a mask and restores the reader", async () => {
   const s = await bootVirtualChat("https://chatgpt.com/c/virtual-images", { historyMode: "loaded", backfillConsent: "granted" });
@@ -623,6 +650,29 @@ test("shared chats and undecided consent never backfill", async () => {
       assert.deepEqual(s.list.scrolls, [], `${url} ${config.backfillConsent || "undecided"}`);
       assert.equal(s.win.document.querySelector("[data-polaris-backfill]"), null);
       assert.ok(s.messages.findLast((message) => message.type === "POLARIS_CONTENT_STATE")?.snapshot.conversationIndex.count > 0);
+    } finally { s.invalidate(); s.win.close(); }
+  }
+});
+
+test("ChatGPT image generation answers show one image Maker per image despite stacked layers", async () => {
+  const { chatGptImageGenUserTurn, chatGptImageGenAnswerTurn } = await import("./fixtures/chatgpt-image-gen-turn.js");
+  const grid = '<section data-turn-id="grid" data-testid="conversation-turn-8" data-turn="assistant"><div data-image-gen-result=""><div>'
+    + '<img alt="Generated image: A" src="https://files.oaiusercontent.com/a/raw"><img alt="Generated image: B" src="https://files.oaiusercontent.com/b/raw">'
+    + "</div></div></section>";
+  for (const historyMode of ["default", "loaded"]) {
+    const html = `<html><body><main><div data-scroll-root style="overflow-y:auto">${chatGptImageGenUserTurn}${chatGptImageGenAnswerTurn()}${grid}</div></main></body></html>`;
+    const s = await bootPackagedContent({ pageUrl: "https://chatgpt.com/c/image-gen", html, savedConfig: { historyMode } });
+    try {
+      s.win.structuredClone = structuredClone;
+      await s.inject(); await new Promise((resolve) => setTimeout(resolve, 300));
+      const snapshot = s.messages.findLast((message) => message.type === "POLARIS_CONTENT_STATE")?.snapshot;
+      const images = snapshot.markerItems.filter((item) => item.image);
+      assert.deepEqual([...images.map((item) => item.title)], ["Generated image: 欢乐5G舞狮羊萌宠", "Generated image: A", "Generated image: B"], historyMode);
+      if (historyMode === "loaded") {
+        const files = snapshot.markerItems.flatMap((item) => item.attachments || []).map((file) => file.name);
+        assert.deepEqual([...files], ["Uploaded an image"], "an upload without a mounted thumbnail keeps its label");
+      }
+      assert.deepEqual(s.errors, []);
     } finally { s.invalidate(); s.win.close(); }
   }
 });

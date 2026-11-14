@@ -84,3 +84,45 @@ test("文件名中的大小字样保留，只有独立元数据节点被剔除",
     assert.equal(blocks[1].children[0].value, "分析文件");
   } finally { dom.window.close(); }
 });
+
+test("ChatGPT 回复里的 sandbox: 下载链接识别为附件，只保留文件名", () => {
+  const dom = new JSDOM('<article><p>结果见 <a href="sandbox:/mnt/data/report.csv">report.csv</a>。</p><p><a href="sandbox:/mnt/data/%E6%B1%87%E6%80%BB%20v2.xlsx">点击下载汇总表</a></p></article>', { url: "https://chatgpt.com/c/one" });
+  try {
+    const files = [];
+    const visit = (blocks) => blocks.forEach((block) => { if (block.type === "attachment") files.push(block); visit(block.blocks || []); });
+    visit(domMessageBlocks(dom.window.document.querySelector("article")));
+    assert.deepEqual(files, [{ type: "attachment", name: "report.csv" }, { type: "attachment", name: "汇总 v2.xlsx" }]);
+  } finally { dom.window.close(); }
+});
+
+test("开启推断时 ChatGPT 回复里的生成文件卡识别为附件", () => {
+  const dom = new JSDOM('<article><p>文件已生成：</p><div><svg></svg><div><div>summary.pdf</div><div>PDF</div></div></div></article>', { url: "https://chatgpt.com/c/one" });
+  try {
+    const blocks = domMessageBlocks(dom.window.document.querySelector("article"), { inferAttachments: true });
+    assert.deepEqual(blocks.map((block) => block.type), ["paragraph", "attachment"]);
+    assert.equal(blocks[1].name, "summary.pdf");
+  } finally { dom.window.close(); }
+});
+
+test("回复推断附件时不把引用链接、代码块头部、正文文件名当附件", () => {
+  const dom = new JSDOM('<article><p>来源 <a href="https://example.com"><img src="https://example.com/favicon.png" alt="">example.com</a></p>'
+    + '<pre><div><svg></svg><span>main.py</span><button>Copy</button></div><code>print(1)</code></pre><p>请打开 config.json 修改</p></article>', { url: "https://chatgpt.com/c/one" });
+  try {
+    const blocks = domMessageBlocks(dom.window.document.querySelector("article"), { inferAttachments: true });
+    assert.equal(blocks.some((block) => block.type === "attachment"), false);
+  } finally { dom.window.close(); }
+});
+
+test("ChatGPT 用户消息只有 Uploaded an image 文字时保留为附件标签，已有缩略图时不重复", () => {
+  const html = (extra) => `<article><div><span>Uploaded an image</span></div>${extra}<div>把腰带调整对</div></article>`;
+  const dom = new JSDOM(html(""), { url: "https://chatgpt.com/c/one" });
+  const withImage = new JSDOM(html('<img src="https://files.oaiusercontent.com/a/raw" alt="Uploaded image">'), { url: "https://chatgpt.com/c/one" });
+  try {
+    const blocks = domMessageBlocks(dom.window.document.querySelector("article"), { role: "user" });
+    assert.deepEqual(blocks.map((block) => block.type), ["attachment", "paragraph"]);
+    assert.equal(blocks[0].name, "Uploaded an image");
+    const imageBlocks = domMessageBlocks(withImage.window.document.querySelector("article"), { role: "user" });
+    assert.equal(imageBlocks.some((block) => block.type === "attachment"), false);
+    assert.equal(domMessageBlocks(dom.window.document.querySelector("article")).some((block) => block.type === "attachment"), false, "回复里的同样文字不算上传");
+  } finally { dom.window.close(); withImage.window.close(); }
+});

@@ -14,7 +14,9 @@ const MOUNT_WAIT_MS = 2000;
 const TOP_QUIET_STEPS = 8;
 const CANCEL_EVENTS = ["wheel", "pointerdown", "touchstart", "keydown"];
 const DEFAULT_BACKFILL_LABELS = {
-  running: (count) => `Polaris is loading earlier messages… ${count} read`,
+  title: "Loading earlier messages",
+  running: (count) => `${count} messages read`,
+  hint: "Scroll or click the page to stop",
   stop: "Stop"
 };
 const EXCLUDED = 'button, [role="button"], [hidden], [aria-hidden="true"], script, style, .sr-only, .visually-hidden, [contenteditable="true"]';
@@ -229,7 +231,7 @@ export function createDOMIndexController({ window: win, platform, readMessages, 
     if (type === "attachment" && !message.attachmentElements) {
       const entries = [];
       domMessageBlocks(element, { baseUrl: win.location.href, role: message.role,
-        onAttachment: (value, owner) => entries.push({ element: owner, value }) });
+        inferAttachments: message.role === "user" || platform === "chatgpt", onAttachment: (value, owner) => entries.push({ element: owner, value }) });
       return entries;
     }
     const explicit = type === "image" ? message.imageElements : message.attachmentElements;
@@ -374,7 +376,8 @@ export function createDOMIndexController({ window: win, platform, readMessages, 
     const label = () => backfillLabels.running(current.status().count || 0);
     let mask = null;
     try {
-      mask = scroller ? createMask({ window: win, scroller, text: label(), stopLabel: backfillLabels.stop, onStop: userCancel }) : null;
+      mask = scroller ? createMask({ window: win, scroller, title: backfillLabels.title, text: label(), hint: backfillLabels.hint,
+        iconUrl: backfillLabels.iconUrl, stopLabel: backfillLabels.stop, onStop: userCancel }) : null;
     } catch { mask = null; }
     for (const name of CANCEL_EVENTS) win.addEventListener(name, userCancel, { capture: true, passive: true });
     operation = run; backfillState = { phase: "running", steps: 0 }; notify();
@@ -392,6 +395,8 @@ export function createDOMIndexController({ window: win, platform, readMessages, 
           await pause();
         }
         let idle = 0; let lastState = ""; let mountWait = 0; let active = 0;
+        // An image that never gets its source must not hold every step at the same place.
+        let mediaSettledAt = null;
         let last = win.performance.now();
         while (!cancelled()) {
           if (document.hidden) { await visible(); last = win.performance.now(); continue; }
@@ -402,8 +407,10 @@ export function createDOMIndexController({ window: win, platform, readMessages, 
           await capture(value);
           if (cancelled()) break;
           backfillState = { phase: "running", steps }; mask?.update(label()); notify();
-          // Let rows already in view render before moving on, within a bound.
-          if (value.historyLoading && mountWait < MOUNT_WAIT_MS) { mountWait += SETTLE_MS; await pause(); continue; }
+          // Let rows and lazy images already in view render before moving on, within a bound.
+          const waitMedia = value.pendingMedia && mediaSettledAt !== (scroller?.scrollTop || 0);
+          if ((value.historyLoading || waitMedia) && mountWait < MOUNT_WAIT_MS) { mountWait += SETTLE_MS; await pause(); continue; }
+          if (waitMedia) mediaSettledAt = scroller?.scrollTop || 0;
           mountWait = 0;
           const state = JSON.stringify([value.messages.map((message) => message.id), scroller?.scrollTop || 0, scroller?.scrollHeight || 0]);
           idle = state === lastState ? idle + 1 : 0; lastState = state;

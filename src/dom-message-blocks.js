@@ -7,6 +7,8 @@ const CONTROL_SELECTOR = 'button, [role="button"]';
 const CARD_SELECTOR = '.attachment, .file-card, .file-card-info, [data-testid="attachment"], [data-testid="file-attachment"], [data-testid="file-card"], [data-cds="MessageAttachmentsFile"]';
 const NAME_SELECTOR = '[data-file-name], [data-filename], .file-name, .filename, [data-testid="file-name"], [data-cds="MessageAttachmentsFile"] [data-cds="CardLink"][title]';
 const FILE_METADATA_SELECTOR = ".file-card-info-detail, .file-ext, .file-size";
+const SANDBOX_LINK_SELECTOR = 'a[href^="sandbox:"]';
+const UPLOAD_PLACEHOLDER = /^(?:Uploaded (?:an image|a file|\d+ (?:images|files))|已上传(?:图片|文件|\d+ ?个文件))$/i;
 const CONTAINER_TAGS = new Set(["DIV", "SECTION", "ARTICLE", "FIGURE", "FIGCAPTION", "MAIN", "HEADER", "FOOTER"]);
 const INLINE_TYPES = { STRONG: "strong", B: "strong", EM: "em", I: "em", DEL: "del", S: "del", STRIKE: "del" };
 const FILE_KIND = /^(?:Markdown|MD|PDF|DOCX?|XLSX?|PPTX?|TXT|Text|CSV|TSV|JSON|XML|HTML|ZIP|RAR|7Z|文档|文件)$/i;
@@ -77,6 +79,8 @@ function inferredFileCards(root, metadata) {
     if (looksLikeFileName(node.getAttribute("aria-label") || "")) seeds.add(node);
   }
   for (const seed of seeds) {
+    // Citation chips ("example.com") and code block headers look like filenames.
+    if (!seed || seed.closest('pre, a[href^="http"]')) continue;
     let owner = null; let name = "";
     for (let node = seed, depth = 0; node && root.contains(node) && depth < 4; node = node.parentElement, depth++) {
       if (excludedWithin(node, root)) break;
@@ -94,22 +98,40 @@ function inferredFileCards(root, metadata) {
   return [...result];
 }
 
-function domMessageAttachments(root, { attachmentSelector = "", baseUrl = root.ownerDocument.baseURI, role = "assistant" } = {}) {
+// ChatGPT's code interpreter links files as sandbox: paths; only the name is usable outside the page.
+function sandboxFileName(node) {
+  const link = node.matches(SANDBOX_LINK_SELECTOR) ? node : null;
+  if (!link) return "";
+  try {
+    const name = decodeURIComponent(link.getAttribute("href").replace(/^sandbox:/i, "").split(/[?#]/)[0].split("/").pop() || "");
+    return looksLikeFileName(name) ? name : "";
+  } catch { return ""; }
+}
+
+// A ChatGPT user upload without a mounted thumbnail is only a short status line.
+function uploadPlaceholders(root, owners) {
+  if (Array.from(root.querySelectorAll("img")).some((node) => !excludedWithin(node, root) && imageBlock(node, root.ownerDocument.baseURI))) return [];
+  return selectIncludingRoot(root, "span, div, p").filter((node) => !node.children.length
+    && UPLOAD_PLACEHOLDER.test(node.textContent.trim()) && !excludedWithin(node, root)
+    && !owners.some((owner) => owner.contains(node)));
+}
+
+function domMessageAttachments(root, { attachmentSelector = "", baseUrl = root.ownerDocument.baseURI, role = "assistant", inferAttachments = role === "user" } = {}) {
   const metadata = new Set(selectIncludingRoot(root, "*").filter((node) => !excludedWithin(node, root)
     && !node.children.length && (FILE_KIND.test(node.textContent.trim()) || FILE_SIZE.test(node.textContent.trim()))));
-  const inferred = role === "user" ? inferredFileCards(root, metadata) : [];
+  const inferred = inferAttachments ? inferredFileCards(root, metadata) : [];
   const cards = selectIncludingRoot(root, [CARD_SELECTOR, attachmentSelector].filter(Boolean).join(", "))
     .filter((node) => !excludedWithin(node, root));
   cards.push(...inferred.filter((node) => !cards.includes(node)));
   const leafCards = cards.filter((card) => !cards.some((other) => other !== card && card.contains(other)));
-  const standalone = selectIncludingRoot(root, `${NAME_SELECTOR}, a[download]`)
+  const standalone = selectIncludingRoot(root, `${NAME_SELECTOR}, a[download], ${SANDBOX_LINK_SELECTOR}`)
     .filter((node) => !excludedWithin(node, root) && !cards.some((card) => card.contains(node)));
   const owners = [...leafCards, ...standalone.filter((node) => !standalone.some((other) => other !== node && other.contains(node)))];
   owners.sort((left, right) => left === right ? 0 : left.compareDocumentPosition(right) & 4 ? -1 : 1);
   const result = new Map();
   for (const owner of owners) {
     const namedControl = owner.matches(CONTROL_SELECTOR) && looksLikeFileName(owner.getAttribute("aria-label") || "");
-    let names = namedControl || owner.matches(`${NAME_SELECTOR}, a[download]`) ? [owner] : Array.from(owner.querySelectorAll(NAME_SELECTOR));
+    let names = namedControl || owner.matches(`${NAME_SELECTOR}, a[download], ${SANDBOX_LINK_SELECTOR}`) ? [owner] : Array.from(owner.querySelectorAll(NAME_SELECTOR));
     if (!names.length) names = Array.from(owner.querySelectorAll("a[download]"));
     if (!names.length) names = [owner];
     names = names.filter((node) => !excludedWithin(node, root)
@@ -119,8 +141,11 @@ function domMessageAttachments(root, { attachmentSelector = "", baseUrl = root.o
     const mimeType = mimeNode?.getAttribute("data-mime-type") || mimeNode?.getAttribute("data-file-type") || mimeNode?.getAttribute("type")
       || owner.querySelector(".file-ext")?.textContent.trim() || "";
     const url = attachmentUrl(owner, baseUrl);
-    const attachments = names.map((node) => ({ type: "attachment", name: fileName(node, metadata),
-      ...(mimeType ? { mimeType } : {}), ...(url ? { url } : {}) })).filter((item) => item.name);
+    const attachments = names.map((node) => {
+      const label = fileName(node, metadata);
+      return { type: "attachment", name: looksLikeFileName(label) ? label : sandboxFileName(node) || label,
+        ...(mimeType ? { mimeType } : {}), ...(url ? { url } : {}) };
+    }).filter((item) => item.name);
     // A downloadable image is still an image; its wrapper must not swallow it.
     if (attachments.length === 1 && (/^image\/(?!svg)/i.test(mimeType) || /\.(?:png|jpe?g|gif|webp|avif|bmp)$/i.test(attachments[0].name))) {
       const images = Array.from(owner.querySelectorAll("img")).filter((node) => !excludedWithin(node, root))
@@ -132,10 +157,24 @@ function domMessageAttachments(root, { attachmentSelector = "", baseUrl = root.o
     }
     if (attachments.length) result.set(owner, attachments);
   }
+  if (role === "user") for (const node of uploadPlaceholders(root, owners)) {
+    result.set(node, [{ type: "attachment", name: node.textContent.trim() }]);
+  }
   return result;
 }
 
+// ChatGPT draws one generated image as several stacked <img> layers (sharp,
+// fading and blurred) with the same source inside its image generation result.
+// Only the first layer is the image; the rest are presentation.
+function isStackedImageLayer(node) {
+  const source = node.getAttribute("src") || "";
+  const result = source && node.closest("[data-image-gen-result]");
+  if (!result) return false;
+  return Array.from(result.querySelectorAll("img")).find((image) => image.getAttribute("src") === source) !== node;
+}
+
 function imageBlock(node, baseUrl) {
+  if (isStackedImageLayer(node)) return null;
   const dimension = (name) => Number(node.getAttribute(name));
   const width = dimension("width"); const height = dimension("height");
   if (width === 1 && height === 1) return null;
@@ -173,9 +212,9 @@ function trimInline(nodes) {
 }
 
 // Read semantic DOM directly: innerText cannot retain headings, lists or files.
-export function domMessageBlocks(element, { baseUrl = element.ownerDocument.baseURI, role = "assistant", attachmentSelector = "", textSelector = "", headingFor = null, onHeading = null, onAttachment = null } = {}) {
+export function domMessageBlocks(element, { baseUrl = element.ownerDocument.baseURI, role = "assistant", inferAttachments = role === "user", attachmentSelector = "", textSelector = "", headingFor = null, onHeading = null, onAttachment = null } = {}) {
   if (excludedWithin(element, element.ownerDocument.documentElement)) return [];
-  const attachments = domMessageAttachments(element, { attachmentSelector, baseUrl, role });
+  const attachments = domMessageAttachments(element, { attachmentSelector, baseUrl, role, inferAttachments });
   const textRoots = textSelector ? selectIncludingRoot(element, textSelector) : [element];
   const includesText = (node) => !(node.nodeType === 1 ? node : node.parentElement)?.closest(CONTROL_SELECTOR)
     && textRoots.some((root) => root === node || root.contains(node));

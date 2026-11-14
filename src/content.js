@@ -541,8 +541,10 @@ export function initializeContent() {
     // Shared conversations belong to someone else; never backfill them.
     canBackfill: () => !/(?:^|\/)share\//.test(window.location.pathname),
     backfillLabels: locale === "zh"
-      ? { running: (count) => `Polaris 正在补齐更早消息… 已读取 ${count} 条`, stop: "停止" }
-      : { running: (count) => `Polaris is loading earlier messages… ${count} read`, stop: "Stop" },
+      ? { title: "Polaris 正在补齐更早消息", running: (count) => `已读取 ${count} 条`, hint: "滚动或点击页面即可停止", stop: "停止",
+        iconUrl: backfillIconUrl() }
+      : { title: "Polaris is loading earlier messages", running: (count) => `${count} messages read`, hint: "Scroll or click the page to stop", stop: "Stop",
+        iconUrl: backfillIconUrl() },
     onChange() {
       syncConversationReading();
       chapterContentRevision += 1;
@@ -570,6 +572,10 @@ export function initializeContent() {
     } catch {
       return false;
     }
+  }
+
+  function backfillIconUrl() {
+    try { return chrome.runtime.getURL("icons/gpt-voyager-icon-96.png"); } catch { return ""; }
   }
 
   function cacheExtensionMetadata() {
@@ -6101,10 +6107,10 @@ export function initializeContent() {
     if (!(node instanceof Node)) {
       return false;
     }
-    if (node instanceof HTMLElement && node.id === ROOT_ID) {
+    if (node instanceof HTMLElement && (node.id === ROOT_ID || node.hasAttribute("data-polaris-backfill"))) {
       return true;
     }
-    return node.parentElement?.closest(`#${ROOT_ID}`) instanceof HTMLElement;
+    return node.parentElement?.closest(`#${ROOT_ID}, [data-polaris-backfill]`) instanceof HTMLElement;
   }
 
   function shouldIgnoreMutation(mutation) {
