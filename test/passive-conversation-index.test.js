@@ -90,18 +90,90 @@ test("switching back to follow-page releases accumulated history and switching o
   } finally { s.close(); }
 });
 
-test("a missing original is reported immediately and remains readable without loading history", async () => {
+test("a requested jump scrolls the list back to where an unmounted message last sat, without loading history", async () => {
   const s = setup();
   try {
     const old = s.message("old");
     s.mount([old]); await s.ready(true);
     s.mount([s.message("current")]); await s.controller.syncMounted();
-    // If a regression tries to scan, remount the target so this test fails fast.
-    s.scroller.scrollTo = (options) => { s.scrolls.push(options); s.mount([old]); };
+    // Like a virtualized list, the old row mounts again once its position is in view.
+    s.scroller.scrollTo = (options) => { s.scrolls.push(options); s.scroller.scrollTop = options.top; s.mount([old]); };
+    const location = await s.controller.ensureLocation("index:old:0:0", {});
+    assert.equal(location.element, old.element.querySelector("h2"));
+    assert.equal(s.scrolls[0].top, 1800 - 500 * 0.2, "the first scroll goes to the recorded position");
+    assert.deepEqual(s.loads, [], "a jump never activates the history loader");
+  } finally { s.close(); }
+});
+
+test("a missing original that cannot be brought back is reported within a bound, restores the page and stays readable", async () => {
+  const s = setup();
+  try {
+    s.mount([s.message("old")]); await s.ready(true);
+    s.mount([s.message("current")]); await s.controller.syncMounted();
+    const started = Date.now();
     assert.deepEqual(await s.controller.ensureLocation("index:old:0:0", {}), { element: null, reason: "not-mounted" });
+    assert.ok(Date.now() - started < 5000);
+    assert.ok(s.scrolls.some((entry) => entry.top < 1800), "it looked toward the older message");
+    assert.equal(s.scroller.scrollTop, 1800, "the reader's position is restored");
     assert.equal((await s.controller.search("old")).total, 1);
     assert.equal(s.controller.exportConversation().scope, "loaded");
-    assert.deepEqual(s.scrolls, []); assert.deepEqual(s.loads, []);
+    assert.deepEqual(s.loads, []);
+  } finally { s.close(); }
+});
+
+test("a jump during backfill stops the backfill, which stays resumable, and still arrives", async () => {
+  const s = setup();
+  try {
+    const old = s.message("old");
+    s.mount([old]); await s.ready(true);
+    s.mount([s.message("current")]); await s.controller.syncMounted();
+    // Only the recorded position brings the old row back; backfill steps never land on it.
+    s.scroller.scrollTo = (options) => {
+      s.scrolls.push(options); s.scroller.scrollTop = Math.max(0, Math.min(2500, options.top));
+      if (s.scroller.scrollTop === 1700) s.mount([old]);
+    };
+    s.controller.configure(true, { retainLoaded: true, backfill: true });
+    for (let i = 0; i < 50 && s.controller.snapshot()?.backfill?.phase !== "running"; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(s.controller.snapshot().backfill.phase, "running");
+    const location = await s.controller.ensureLocation("index:old:0:0", {});
+    assert.equal(location.element, old.element.querySelector("h2"));
+    assert.equal(s.controller.snapshot().backfill.phase, "stopped");
+    assert.equal(s.win.document.querySelector("[data-polaris-backfill]"), null);
+  } finally { s.close(); }
+});
+
+test("with backfill consent a jump may press the site's own load earlier control to reach its target", async () => {
+  const s = setup();
+  try {
+    const old = s.message("old"); const current = s.message("current");
+    s.mount([old]); await s.ready(true);
+    s.mount([current]); await s.controller.syncMounted();
+    s.scroller.scrollTo = (options) => { s.scrolls.push(options); s.scroller.scrollTop = Math.max(0, Math.min(2500, options.top)); };
+    // Backfill only runs while the page is visible.
+    Object.defineProperty(s.win.document, "hidden", { value: false });
+    let armed = false;
+    s.win.document.querySelector("button").addEventListener("click", () => { if (armed) s.mount([old, current]); });
+    s.controller.configure(true, { retainLoaded: true, backfill: true });
+    for (let i = 0; i < 200 && s.controller.snapshot()?.backfill?.phase !== "done"; i++) await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(s.controller.snapshot().backfill.phase, "done");
+    armed = true; const clicks = s.loads.length;
+    const location = await s.controller.ensureLocation("index:old:0:0", {});
+    assert.equal(location.element, old.element.querySelector("h2"));
+    assert.ok(s.loads.length > clicks, "the site's own control brought the message back");
+  } finally { s.close(); }
+});
+
+test("user input stops a requested jump where the user left the page", async () => {
+  const s = setup();
+  try {
+    s.mount([s.message("old")]); await s.ready(true);
+    s.mount([s.message("current")]); await s.controller.syncMounted();
+    const pending = s.controller.ensureLocation("index:old:0:0", {});
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    s.win.dispatchEvent(new s.win.Event("wheel"));
+    const position = s.scroller.scrollTop;
+    assert.equal((await pending).reason, "not-mounted");
+    assert.equal(s.scroller.scrollTop, position, "the page is left where the user took over");
   } finally { s.close(); }
 });
 

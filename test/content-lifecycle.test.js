@@ -226,9 +226,18 @@ for (const historyMode of ["default", "loaded", "complete", "legacy-key"]) {
       const exported = await command({ command: "get-conversation-export" });
       assert.equal(exported.scope, "loaded");
       assert.equal(exported.messages.length, historyMode === "default" ? 1 : 2);
+      // A jump the user asks for may scroll the visible list toward its target,
+      // and only with backfill consent press the site's load earlier control
+      // once; the page returns when the target no longer exists on the site.
+      const beforeJump = scrolls.length; const loadsBeforeJump = loads.length;
       const target = await command({ command: "jump-to-marker", markerKey: oldKey });
       assert.equal(target.ok, false);
       assert.equal(target.reason, historyMode === "default" ? "target-missing" : "not-mounted");
+      const jumpScrolls = scrolls.splice(beforeJump); masked.splice(beforeJump);
+      const jumpLoads = loads.splice(loadsBeforeJump);
+      if (historyMode === "default") assert.deepEqual(jumpScrolls, []);
+      assert.ok(jumpLoads.length <= (historyMode === "loaded" ? 1 : 0), `${jumpLoads.length} load earlier presses`);
+      assert.equal(main.scrollTop, 1800);
       const retained = await command({ command: "read-retained-message", markerKey: oldKey });
       assert.equal(retained.ok, historyMode !== "default");
       if (retained.ok) assert.ok(retained.chapter.contents.some(part => part.text === "Original heading"));
@@ -589,6 +598,31 @@ async function waitForBackfill(s, rounds = 400) {
   await new Promise((resolve) => setTimeout(resolve, 200));
   return latest();
 }
+
+test("after backfill, jumping to an unmounted ChatGPT answer scrolls the list to it and locates it", async () => {
+  const s = await bootVirtualChat("https://chatgpt.com/c/jump-back", { historyMode: "loaded", backfillConsent: "granted" });
+  try {
+    // jsdom has no scrollIntoView; the final jump itself uses the scroller.
+    s.win.HTMLElement.prototype.scrollIntoView = () => {};
+    await s.inject();
+    const snapshot = await waitForBackfill(s);
+    assert.equal(snapshot.conversationIndex.backfill?.phase, "done");
+    const command = (values) => new Promise((resolve) => {
+      for (const listener of s.runtime.listeners) listener({ type: "POLARIS_WINDOW_COMMAND", expectResult: true, ...values }, {}, resolve);
+    });
+    for (const title of ["第 1 章 方案", "生成图片 2-2"]) {
+      const markerKey = snapshot.markerItems.find((item) => item.title === title).markerKey;
+      assert.ok(s.list.top() > 1000, "the reader starts at the newest turns");
+      const result = await command({ command: "jump-to-marker", markerKey });
+      assert.deepEqual({ ...result }, { ok: true, reason: "" }, title);
+      assert.ok(s.list.top() < 1000, `${title} is near the top of the conversation`);
+      s.list.scroller.scrollTo({ top: 99999 });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+    assert.deepEqual(s.requests, []);
+    assert.deepEqual(s.errors, []);
+  } finally { s.invalidate(); s.win.close(); }
+});
 
 test("packaged backfill waits for in-view images that have no source yet before scrolling on", async () => {
   const s = await bootVirtualChat("https://chatgpt.com/c/lazy-images", { historyMode: "loaded", backfillConsent: "granted" }, { lazyImages: true });

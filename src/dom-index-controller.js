@@ -13,6 +13,8 @@ const MOUNT_WAIT_MS = 2000;
 // this run. A quiet page is never evidence of complete history.
 const TOP_QUIET_STEPS = 8;
 const CANCEL_EVENTS = ["wheel", "pointerdown", "touchstart", "keydown"];
+// Outer bound for a requested jump; it normally ends once it stops getting closer.
+const SEEK_TIMEOUT_MS = 20000;
 const DEFAULT_BACKFILL_LABELS = {
   title: "Loading earlier messages",
   running: (count) => `${count} messages read`,
@@ -52,6 +54,8 @@ export function createDOMIndexController({ window: win, platform, readMessages, 
   const versions = new Map();
   const seen = new Set();
   const mounts = new Map();
+  // Where each message last sat in its scroller's content, for requested jumps.
+  const positions = new Map();
   const document = win.document;
   const pageRoute = () => `${win.location.origin}${win.location.pathname}${win.location.search}`;
   const routeFor = (value) => value.routeKey || pageRoute();
@@ -70,18 +74,27 @@ export function createDOMIndexController({ window: win, platform, readMessages, 
     ingestion.abort(); ingestion = new AbortController();
     index?.dispose(); index = null;
     queue = Promise.resolve(); signature = ""; route = ""; generation = "";
-    source = { messages: [] }; seen.clear(); mounts.clear();
+    source = { messages: [] }; seen.clear(); mounts.clear(); positions.clear();
     cachedOutline = null; cachedOutlineKey = "";
     readingProgress = null;
   }
 
+  function contentOffset(scroller) {
+    const viewport = scroller === document.scrollingElement || scroller === document.documentElement || scroller === document.body;
+    return scroller.scrollTop - (viewport ? 0 : scroller.getBoundingClientRect().top);
+  }
+
   function mounted(value) {
     source = value; mounts.clear();
+    const scroller = value.scroller?.isConnected ? value.scroller : null;
+    const base = scroller ? contentOffset(scroller) : NaN;
     for (const message of value.messages) {
       if (!message.id || !message.element?.isConnected) continue;
       const matches = mounts.get(message.id) || [];
       if (!matches.some((entry) => entry.element === message.element)) matches.push(message);
       mounts.set(message.id, matches);
+      const top = base + message.element.getBoundingClientRect().top;
+      if (Number.isFinite(top)) positions.set(message.id, top);
     }
   }
 
@@ -381,7 +394,7 @@ export function createDOMIndexController({ window: win, platform, readMessages, 
     } catch { mask = null; }
     for (const name of CANCEL_EVENTS) win.addEventListener(name, userCancel, { capture: true, passive: true });
     operation = run; backfillState = { phase: "running", steps: 0 }; notify();
-    return (async () => {
+    const done = (async () => {
       let phase = "done";
       let direction = checkpoint?.direction || "older";
       try {
@@ -447,12 +460,71 @@ export function createDOMIndexController({ window: win, platform, readMessages, 
       }
       return backfillState;
     })();
+    run.done = done;
+    return done;
   }
 
-  // Location reads the mounted page only. Navigation never scrolls or activates
-  // the website's history loader; older messages arrive through masked backfill.
-  function ensureLocation(key, config) {
-    return Promise.resolve(resolveLocation(key, config));
+  // Every retained Maker should be reachable. A jump the user asked for scrolls
+  // the website's list back to a message the list unmounted: first to where it
+  // last sat, then toward it by conversation order while it keeps getting
+  // closer. Only with backfill consent may it press the site's own "load
+  // earlier" control. It never calls a website API, stops on user input and
+  // restores the page when the message no longer exists on the site.
+  async function ensureLocation(key, config) {
+    let location = resolveLocation(key, config);
+    if (location.reason !== "not-mounted") return location;
+    // The user's jump takes over from a running backfill, which stays resumable.
+    if (operation) {
+      const running = operation; running.cancel("user-cancelled");
+      await running.done?.catch(() => {});
+      location = resolveLocation(key, config);
+      if (location.reason !== "not-mounted") return location;
+    }
+    const target = outline(config).targets.get(key);
+    const scroller = source.scroller;
+    if (!target || !scroller?.isConnected) return location;
+    const rank = new Map();
+    for (const value of outline(config).targets.values()) if (!rank.has(value.messageId)) rank.set(value.messageId, rank.size);
+    const goal = rank.get(target.messageId);
+    const current = index; const session = generation; const start = scroller.scrollTop;
+    let stopped = false; const stop = () => { stopped = true; };
+    for (const name of CANCEL_EVENTS) win.addEventListener(name, stop, true);
+    const scrollTo = (top) => {
+      const before = scroller.scrollTop;
+      scroller.scrollTo({ top, behavior: "instant" });
+      return scroller.scrollTop !== before;
+    };
+    try {
+      const deadline = win.performance.now() + SEEK_TIMEOUT_MS;
+      const recorded = positions.get(target.messageId);
+      if (Number.isFinite(recorded)) scrollTo(recorded - (scroller.clientHeight || 0) * 0.2);
+      let mountWait = 0; let best = Infinity; let stall = 0; let pressed = false;
+      while (!stopped && current === index && session === generation && win.performance.now() < deadline) {
+        await new Promise((resolve) => win.setTimeout(resolve, SETTLE_MS));
+        if (stopped || current !== index || session !== generation) break;
+        location = resolveLocation(key, config);
+        if (location.reason !== "not-mounted") return location;
+        if (source.historyLoading && mountWait < MOUNT_WAIT_MS) { mountWait += SETTLE_MS; continue; }
+        mountWait = 0;
+        const ranks = source.messages.map((message) => rank.get(message.id)).filter(Number.isInteger);
+        if (!ranks.length) break;
+        const older = Math.min(...ranks) > goal;
+        if (!older && Math.max(...ranks) > goal) break;
+        const distance = older ? Math.min(...ranks) - goal : goal - Math.max(...ranks);
+        if (distance < best) { best = distance; stall = 0; pressed = false; } else if (++stall >= TOP_QUIET_STEPS) break;
+        const step = Math.max(100, (scroller.clientHeight || 500) * 0.8);
+        if (scrollTo(scroller.scrollTop + (older ? -step : step))) continue;
+        // One press per stretch without progress; then give the site time to answer.
+        if (pressed) continue;
+        const loader = source.loadEarlier;
+        if (!(older && backfillWanted && canBackfill() && loader?.isConnected && !loader.disabled)) break;
+        loader.click(); pressed = true;
+      }
+      if (!stopped && scroller.isConnected) scrollTo(start);
+      return location;
+    } finally {
+      for (const name of CANCEL_EVENTS) win.removeEventListener(name, stop, true);
+    }
   }
 
   return {

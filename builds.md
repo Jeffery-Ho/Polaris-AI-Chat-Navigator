@@ -10,6 +10,14 @@
 - Version update type must be declared by the user before recording a build.
 - After each build is recorded, confirm the build number and version with the user.
 
+## 436
+
+- Date: 2026-11-15
+- Version: 1.5.10
+- Summary: Jump to retained Makers whose original the website's list has unmounted.
+- Notes: Location used to read the mounted page only, so a retained Maker in a virtualized ChatGPT list reported "The original is not on the page", contradicting a Maker list that should always be navigable. The index now records where each message last sat in its scroller. A jump the user asks for scrolls the website's list to that position, waits for the row to render within the existing mount bound, then steps toward the target by conversation order for as long as it keeps getting closer (8 steps without progress end it; 20 s outer bound). A jump during backfill stops the backfill, which can be continued, and then proceeds. With backfill consent the jump may press the site's own "load earlier" control when the target is older than anything the list can scroll to, once per stretch without progress. It never calls a website API, stops on wheel, pointer, touch or key input, and restores the reader's position only when the message no longer exists on the site, in which case Read in Outline is still offered.
+- Validation: Syntax checks, production build and full test suite passed. New tests cover the jump to a recorded position, a jump during backfill, a jump through the site's load earlier control with consent (fails without it), the bounded search with restore, user input stopping the search, and a packaged backfilled 80-turn virtualized chat jumping to its first answer and an image Maker (fails without the search).
+
 ## 435
 
 - Date: 2026-11-14
