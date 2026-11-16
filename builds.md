@@ -10,6 +10,14 @@
 - Version update type must be declared by the user before recording a build.
 - After each build is recorded, confirm the build number and version with the user.
 
+## 438
+
+- Date: 2026-11-17
+- Version: 1.5.12
+- Summary: Republish the production license checkout under a new version number.
+- Notes: Firefox Add-ons rejected the 1.5.11 upload with "Version 1.5.11 already exists": an earlier 1.5.11 Firefox package built from another branch had already been submitted there, and AMO never reuses a version number. Code is identical to 1.5.11(437); all browsers move to 1.5.12 to keep store versions aligned.
+- Validation: Syntax checks, production build and full test suite passed; Chrome, Edge and Firefox packages reference only the production license service.
+
 ## 437
 
 - Date: 2026-11-17
