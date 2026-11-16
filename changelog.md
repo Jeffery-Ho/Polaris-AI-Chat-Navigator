@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-17
+
+- Pro 购买改为使用正式许可证服务 `polaris-license-production`，不再连接测试 Worker；Checkout 只接受 Stripe 正式会话（`cs_live_`）。之前上架的包只能走测试支付。
+- 价格、试用和授权行为不变。从旧版升级的安装保留安装 ID 和已选平台，清除测试服务的试用、测试授权和未完成的测试订单，并在正式服务重新登记（获得新的 7 天试用）；否则其购买和兑换会因正式服务不认识该安装而失败。
+- 版本：`1.5.11(437)`。
+
 ## 2026-11-16
 
 - 发布工作流在生成稳定包后，同时运行 WXT 打包（`pnpm zip`、`pnpm zip:edge`、`pnpm zip:firefox`），把 Chrome、Edge、Firefox 商店包和 Firefox 源码包一并上传到同一版本的 Release。官网下载的 `Polaris-AI.zip` 不变。

@@ -47,6 +47,16 @@ test("production package retains the sidepanel and stable public resources", asy
   assert.doesNotMatch(html, /@vite\/client|localhost|127\.0\.0\.1/);
 });
 
+test("production package reaches only the production license service", async () => {
+  assert.equal(distManifest.host_permissions.at(-1), "https://polaris-license-production.hexianji.workers.dev/*");
+  const root = new URL("../dist/", import.meta.url);
+  const files = await readdir(root, { recursive: true });
+  for (const file of files.filter((file) => /\.(js|json|html)$/.test(file))) {
+    const source = await readFile(new URL(file, root), "utf8");
+    assert.doesNotMatch(source, /polaris-license-test|sk_test_|pk_test_|rk_test_/, file);
+  }
+});
+
 test("production code cannot call removed conversation APIs or reach private framework handles", async () => {
   const root = new URL("../dist/", import.meta.url);
   const files = await readdir(root, { recursive: true });

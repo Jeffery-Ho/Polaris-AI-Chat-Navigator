@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createBillingService } from '../src/billing-service.js';
 
-function fixture() {
+function fixture({ checkoutUrl = 'https://checkout.stripe.com/c/pay/cs_test_fixture', stripeMode = 'test' } = {}) {
  const local = {}; const requests = []; let paid = false; let valid = true; let offline = false; let checkoutCount = 0; let now = 1000000000;
  const storage = { async get(key) { return {[key]: structuredClone(local[key])}; }, async set(value) { Object.assign(local,structuredClone(value)); } };
  const fetch = async (url,options={}) => {
@@ -10,7 +10,7 @@ function fixture() {
   const path=new URL(url).pathname; const data=options.body?JSON.parse(options.body):{};requests.push({path,data,headers:options.headers});
   if(path==='/api/trial/start')return Response.json({serverTime:now,trialEndsAt:now+604800000,offerEndsAt:now+604800000});
   if(path==='/api/plans')return Response.json({serverTime:now,trialEndsAt:1000000000+604800000,offerEndsAt:1000000000+604800000,plans:[{id:'pro',amount:now<1000000000+604800000?1290:1999,originalAmount:1999,currency:'usd'}]});
-  if(path==='/api/checkout/session'){checkoutCount++;return Response.json({purchaseId:'purchase-1',claimToken:'secret-claim',checkoutUrl:'https://checkout.stripe.com/c/pay/cs_test_fixture'})}
+  if(path==='/api/checkout/session'){checkoutCount++;return Response.json({purchaseId:'purchase-1',claimToken:'secret-claim',checkoutUrl})}
   if(path.endsWith('/status'))return Response.json({status:paid?'paid':'pending',activationReady:paid});
   if(path==='/api/licenses/claim'||path==='/api/licenses/redeem')return Response.json({activationToken:'device-secret',entitlement:{plan:'pro',status:'active',expiresAt:null},offlineUntil:now+86400000});
   if(path==='/api/licenses/validate')return Response.json({valid,entitlement:{plan:'pro',status:valid?'active':'revoked',expiresAt:null},offlineUntil:now+86400000});
@@ -18,7 +18,7 @@ function fixture() {
   if(path==='/api/licenses/recover')return Response.json({message:'generic'});
   return Response.json({error:'unexpected'},{status:404});
  };
- const service=createBillingService({storage,fetch,now:()=>now});
+ const service=createBillingService({storage,fetch,now:()=>now,stripeMode});
  return {service,storage,local,requests,setPaid(){paid=true},revoke(){valid=false},setOffline(){offline=true},advance(ms){now+=ms},checkouts:()=>checkoutCount};
 }
 
@@ -76,6 +76,26 @@ test('checkout crossing the offer deadline requires confirmation of the refreshe
  assert.equal(f.checkouts(),0);
  assert.equal((await f.service.getView()).price.amount,1999);
  await f.service.checkout();assert.equal(f.checkouts(),1);
+});
+
+test('state from another license service registers again with the current one and keeps local choices',async()=>{
+ const f=fixture();
+ f.local['polaris-billing-v1']={installationId:'old-id',installationToken:'old-token',firstOpenedAt:1,platforms:['kimi','gemini'],recentPlatforms:['kimi'],trialEndsAt:1,offerEndsAt:1,activationToken:'test-device',entitlement:{plan:'pro',status:'active'},offlineUntil:9e15,purchase:{purchaseId:'p',claimToken:'c',status:'pending'}};
+ const view=await f.service.getView();
+ assert.deepEqual(f.requests.find(r=>r.path==='/api/trial/start').data,{installationId:'old-id',installationToken:'old-token'});
+ assert.equal(f.requests.some(r=>r.path==='/api/licenses/validate'),false);
+ assert.equal(view.tier,'trial');assert.equal(view.hasPurchase,false);assert.deepEqual(view.platforms,['kimi','gemini']);
+ assert.equal(f.local['polaris-billing-v1'].apiOrigin,'https://polaris-license-production.hexianji.workers.dev/*');
+ const again=fixture();again.local['polaris-billing-v1']=structuredClone(f.local['polaris-billing-v1']);
+ await again.service.getView();assert.equal(again.requests.some(r=>r.path==='/api/trial/start'),false);
+});
+
+test('live checkout accepts only a secure cs_live_ session',async()=>{
+ const rejected=fixture({stripeMode:'live'});
+ await rejected.service.getView();
+ await assert.rejects(rejected.service.checkout(),/invalid_live_checkout/);
+ const accepted=fixture({checkoutUrl:'https://checkout.stripe.com/c/pay/cs_live_fixture',stripeMode:'live'});
+ assert.equal((await accepted.service.checkout()).checkoutUrl.includes('cs_live_'),true);
 });
 
 test('platforms chosen during trial apply at expiry without deleting local data or extending the trial',async()=>{

@@ -1,3 +1,4 @@
+import { BILLING_HOST_PERMISSION } from "../src/billing-config.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
@@ -159,7 +160,7 @@ async function runAction({ storedWindow, getError = null, updateError = null, sy
 
 test("非 Pro 用户无法开启「保留已加载内容」模式", async () => {
   const calls = await runAction({ storedWindow: null });
-  calls.local["polaris-billing-v1"] = { trialEndsAt: 1, platforms: [], recentPlatforms: [] };
+  calls.local["polaris-billing-v1"] = { trialEndsAt: 1, platforms: [], recentPlatforms: [], apiOrigin: BILLING_HOST_PERMISSION };
   const response = await calls.command({ type: "POLARIS_WINDOW_COMMAND", command: "update-config", patch: { historyMode: "loaded" }, expectResult: true });
   assert.equal(response.reason, "pro-required");
 });

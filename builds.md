@@ -10,6 +10,14 @@
 - Version update type must be declared by the user before recording a build.
 - After each build is recorded, confirm the build number and version with the user.
 
+## 437
+
+- Date: 2026-11-17
+- Version: 1.5.11
+- Summary: Send Pro purchases to the production license service instead of the test Worker.
+- Notes: Store packages through 1.5.10 called `polaris-license-test.hexianji.workers.dev` and accepted only Stripe test Checkout sessions (`cs_test_`), so Pro could not be bought for real. The billing API and host permission now point at `polaris-license-production.hexianji.workers.dev` (health reports `env: production`, `billingReady: true`), and Checkout accepts only secure `cs_live_` sessions. Request URLs must stay on the configured origin. Routes, prices and license behavior are unchanged; the extension-side change is ported from the 1.0.1 live checkout branch. Billing state now records which license service it belongs to. An installation upgraded from a test-Worker build keeps its installation ID and platform choices but drops the test trial, test license and pending test purchase, then registers with the production service (a new seven-day trial); without this, its production plan, checkout and redeem requests would fail with `invalid_installation`.
+- Validation: Syntax checks, production build and 754 tests passed. New tests cover migrating test-Worker billing state (fails without the reset), the production billing config, host permission validation, live-only Checkout, and a package scan that fails if the test Worker or Stripe test keys ship in `dist/`.
+
 ## 436
 
 - Date: 2026-11-15
