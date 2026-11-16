@@ -60,6 +60,22 @@ jobs:
           unzip -Z1 "release/${archive}" | grep -qx 'manifest.json'
           unzip -Z1 "$stable_archive" | grep -qx 'manifest.json'
 
+      # Store packages from `wxt zip`; dist/ was already archived above, so the rebuild cannot change it.
+      - name: Package WXT store archives
+        env:
+          VERSION: ${{ steps.metadata.outputs.version }}
+        run: |
+          pnpm zip
+          pnpm zip:edge
+          pnpm zip:firefox
+          for target in chrome edge firefox sources; do
+            wxt_archive=".output/polaris-ai-chat-navigator-${VERSION}-${target}.zip"
+            unzip -t "$wxt_archive" >/dev/null
+            if [[ "$target" != "sources" ]]; then
+              unzip -Z1 "$wxt_archive" | grep -qx 'manifest.json'
+            fi
+          done
+
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -163,6 +179,12 @@ jobs:
           fi
 
           gh release upload "$TAG" "$archive" "$stable_archive" --clobber --repo "$GITHUB_REPOSITORY"
+          gh release upload "$TAG" \
+            ".output/polaris-ai-chat-navigator-${VERSION}-chrome.zip" \
+            ".output/polaris-ai-chat-navigator-${VERSION}-edge.zip" \
+            ".output/polaris-ai-chat-navigator-${VERSION}-firefox.zip" \
+            ".output/polaris-ai-chat-navigator-${VERSION}-sources.zip" \
+            --clobber --repo "$GITHUB_REPOSITORY"
           download_release_assets
 
           gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"

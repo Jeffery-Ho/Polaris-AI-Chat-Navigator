@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-16
+
+- 发布工作流在生成稳定包后，同时运行 WXT 打包（`pnpm zip`、`pnpm zip:edge`、`pnpm zip:firefox`），把 Chrome、Edge、Firefox 商店包和 Firefox 源码包一并上传到同一版本的 Release。官网下载的 `Polaris-AI.zip` 不变。
+
 ## 2026-11-15
 
 - 长对话中已整理但已被网页列表卸载的 Maker 现在可以直接跳转：先滚动到该消息上次所在位置，等它渲染后再定位，必要时按对话顺序继续朝目标滚动，只要还在接近目标就不放弃。

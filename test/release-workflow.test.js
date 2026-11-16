@@ -50,3 +50,20 @@ test("发布工作流为最新版本提供经过校验的稳定 ZIP 资产", () 
   assert.ok(latestCalls[0] < publishIndex);
   assert.ok(latestCalls.at(-1) > publishIndex);
 });
+
+test("发布工作流在稳定包之后生成并上传 WXT 商店包", () => {
+  const stableIndex = workflow.indexOf("name: Package release assets");
+  const wxtIndex = workflow.indexOf("name: Package WXT store archives");
+  assert.ok(stableIndex >= 0 && wxtIndex > stableIndex);
+  for (const command of ["pnpm zip", "pnpm zip:edge", "pnpm zip:firefox"]) {
+    assert.match(workflow, new RegExp(`^\\s+${command}$`, "m"));
+  }
+  assert.match(workflow, /for target in chrome edge firefox sources; do/);
+
+  const uploadIndex = workflow.lastIndexOf("gh release upload");
+  const publishIndex = workflow.indexOf('gh release edit "$TAG" --draft=false');
+  for (const target of ["chrome", "edge", "firefox", "sources"]) {
+    assert.ok(workflow.includes(`".output/polaris-ai-chat-navigator-\${VERSION}-${target}.zip"`, uploadIndex));
+  }
+  assert.ok(uploadIndex < publishIndex);
+});
