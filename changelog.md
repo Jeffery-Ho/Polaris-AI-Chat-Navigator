@@ -3,6 +3,7 @@
 ## 2026-11-16
 
 - 发布工作流在生成稳定包后，同时运行 WXT 打包（`pnpm zip`、`pnpm zip:edge`、`pnpm zip:firefox`），把 Chrome、Edge、Firefox 商店包和 Firefox 源码包一并上传到同一版本的 Release。官网下载的 `Polaris-AI.zip` 不变。
+- WXT 打包产物改为输出到项目根目录的 `Release/wxt/`，不再藏在 `.output/` 里。
 
 ## 2026-11-15
 

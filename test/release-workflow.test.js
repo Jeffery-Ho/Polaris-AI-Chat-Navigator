@@ -63,7 +63,7 @@ test("发布工作流在稳定包之后生成并上传 WXT 商店包", () => {
   const uploadIndex = workflow.lastIndexOf("gh release upload");
   const publishIndex = workflow.indexOf('gh release edit "$TAG" --draft=false');
   for (const target of ["chrome", "edge", "firefox", "sources"]) {
-    assert.ok(workflow.includes(`".output/polaris-ai-chat-navigator-\${VERSION}-${target}.zip"`, uploadIndex));
+    assert.ok(workflow.includes(`"Release/wxt/polaris-ai-chat-navigator-\${VERSION}-${target}.zip"`, uploadIndex));
   }
   assert.ok(uploadIndex < publishIndex);
 });

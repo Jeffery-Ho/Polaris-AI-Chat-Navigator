@@ -21,6 +21,13 @@ test("only the Chrome build is written to dist/", () => {
   assert.equal(resolveOutDir("chrome", "serve"), path.join(".output", "chrome-mv3"));
 });
 
+test("wxt zip writes store packages to Release/wxt/", () => {
+  const outBaseDir = path.join(root, ".output");
+  for (const template of [config.zip.artifactTemplate, config.zip.sourcesTemplate]) {
+    assert.equal(path.relative(root, path.dirname(path.resolve(outBaseDir, template))), path.join("Release", "wxt"));
+  }
+});
+
 test("Chromium manifests keep the Side Panel permission and Chrome minimum", () => {
   for (const browser of ["chrome", "edge"]) {
     const manifest = config.manifest({ browser });

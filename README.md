@@ -141,7 +141,7 @@ Visit the [Polaris support page](https://jeffery-ho.github.io/polaris-landing/en
 
 ## Release
 
-Do not commit `dist/` or load `dist.zip` as the extension. The release workflow builds from source and creates a versioned ZIP plus the stable `Polaris-AI.zip` alias from that fresh `dist/` directory (`cd dist && zip`). It validates both remote assets while the Release is still Draft, publishes only after that check, and then verifies the public Latest download URL. The same Release also carries the WXT store packages from `pnpm zip`, `pnpm zip:edge` and `pnpm zip:firefox` (Chrome, Edge, Firefox and the Firefox sources archive) for the same version. The same check fails if a root `manifest.json` reappears or if `dist/manifest.json` points at a file that is not in `dist/`. Git hooks do not run in CI.
+Do not commit `dist/` or load `dist.zip` as the extension. The release workflow builds from source and creates a versioned ZIP plus the stable `Polaris-AI.zip` alias from that fresh `dist/` directory (`cd dist && zip`). It validates both remote assets while the Release is still Draft, publishes only after that check, and then verifies the public Latest download URL. The same Release also carries the WXT store packages from `pnpm zip`, `pnpm zip:edge` and `pnpm zip:firefox` (Chrome, Edge, Firefox and the Firefox sources archive) for the same version. Locally, these commands write the packages to `Release/wxt/`. The same check fails if a root `manifest.json` reappears or if `dist/manifest.json` points at a file that is not in `dist/`. Git hooks do not run in CI.
 
 ## Version
 

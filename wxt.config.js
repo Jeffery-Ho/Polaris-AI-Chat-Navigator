@@ -1,3 +1,4 @@
+import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { defineConfig } from "wxt";
 import tailwindcss from "@tailwindcss/vite";
@@ -35,14 +36,18 @@ function browserManifest(browser) {
   };
 }
 
+// `wxt zip` writes store packages here instead of the hidden .output/ folder.
+export const WXT_PACKAGE_DIR = "Release/wxt";
+
 export default defineConfig({
   imports: false,
   vite: () => ({ plugins: [tailwindcss()] }),
   manifestVersion: 3,
   manifest: ({ browser }) => browserManifest(browser),
   zip: {
-    artifactTemplate: "{{name}}-{{version}}-{{browser}}.zip",
-    sourcesTemplate: "{{name}}-{{version}}-sources.zip",
+    // WXT resolves these templates against .output/, so step back to the project root.
+    artifactTemplate: `../${WXT_PACKAGE_DIR}/{{name}}-{{version}}-{{browser}}.zip`,
+    sourcesTemplate: `../${WXT_PACKAGE_DIR}/{{name}}-{{version}}-sources.zip`,
     // AMO reviewers rebuild from these files with `pnpm install && pnpm build:firefox`.
     includeSources: [
       "entrypoints/**", "public/**", "src/**", "scripts/**",
@@ -54,6 +59,9 @@ export default defineConfig({
     ignored: [/(?:^|[/\\])(?:dist|Release)(?:[/\\]|$)/]
   },
   hooks: {
+    "zip:extension:start"(wxt) {
+      mkdirSync(resolve(wxt.config.root, WXT_PACKAGE_DIR), { recursive: true });
+    },
     "config:resolved"(wxt) {
       // Only the Chrome package lives in dist/; other browsers keep .output/<browser>-mv3/.
       if (wxt.config.command !== "serve" && wxt.config.browser === "chrome") wxt.config.outDir = resolve(wxt.config.root, "dist");

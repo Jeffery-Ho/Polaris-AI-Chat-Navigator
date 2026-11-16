@@ -69,7 +69,7 @@ jobs:
           pnpm zip:edge
           pnpm zip:firefox
           for target in chrome edge firefox sources; do
-            wxt_archive=".output/polaris-ai-chat-navigator-${VERSION}-${target}.zip"
+            wxt_archive="Release/wxt/polaris-ai-chat-navigator-${VERSION}-${target}.zip"
             unzip -t "$wxt_archive" >/dev/null
             if [[ "$target" != "sources" ]]; then
               unzip -Z1 "$wxt_archive" | grep -qx 'manifest.json'
@@ -180,10 +180,10 @@ jobs:
 
           gh release upload "$TAG" "$archive" "$stable_archive" --clobber --repo "$GITHUB_REPOSITORY"
           gh release upload "$TAG" \
-            ".output/polaris-ai-chat-navigator-${VERSION}-chrome.zip" \
-            ".output/polaris-ai-chat-navigator-${VERSION}-edge.zip" \
-            ".output/polaris-ai-chat-navigator-${VERSION}-firefox.zip" \
-            ".output/polaris-ai-chat-navigator-${VERSION}-sources.zip" \
+            "Release/wxt/polaris-ai-chat-navigator-${VERSION}-chrome.zip" \
+            "Release/wxt/polaris-ai-chat-navigator-${VERSION}-edge.zip" \
+            "Release/wxt/polaris-ai-chat-navigator-${VERSION}-firefox.zip" \
+            "Release/wxt/polaris-ai-chat-navigator-${VERSION}-sources.zip" \
             --clobber --repo "$GITHUB_REPOSITORY"
           download_release_assets
 
