@@ -482,7 +482,7 @@ export function createDOMIndexController({ window: win, platform, readMessages, 
     }
     const target = outline(config).targets.get(key);
     const scroller = source.scroller;
-    if (!target || !scroller?.isConnected) return location;
+    if (!target || !scroller?.isConnected) return { ...location, stage: target ? "no-scroller" : "no-target" };
     const rank = new Map();
     for (const value of outline(config).targets.values()) if (!rank.has(value.messageId)) rank.set(value.messageId, rank.size);
     const goal = rank.get(target.messageId);
@@ -498,7 +498,7 @@ export function createDOMIndexController({ window: win, platform, readMessages, 
       const deadline = win.performance.now() + SEEK_TIMEOUT_MS;
       const recorded = positions.get(target.messageId);
       if (Number.isFinite(recorded)) scrollTo(recorded - (scroller.clientHeight || 0) * 0.2);
-      let mountWait = 0; let best = Infinity; let stall = 0; let pressed = false;
+      let mountWait = 0; let best = Infinity; let stall = 0; let pressed = false; let stage = "timeout";
       while (!stopped && current === index && session === generation && win.performance.now() < deadline) {
         await new Promise((resolve) => win.setTimeout(resolve, SETTLE_MS));
         if (stopped || current !== index || session !== generation) break;
@@ -507,21 +507,24 @@ export function createDOMIndexController({ window: win, platform, readMessages, 
         if (source.historyLoading && mountWait < MOUNT_WAIT_MS) { mountWait += SETTLE_MS; continue; }
         mountWait = 0;
         const ranks = source.messages.map((message) => rank.get(message.id)).filter(Number.isInteger);
-        if (!ranks.length) break;
+        if (!ranks.length) { stage = "no-ranked-messages"; break; }
         const older = Math.min(...ranks) > goal;
-        if (!older && Math.max(...ranks) > goal) break;
+        // The target's neighbours are mounted but it is not: its identity did not survive.
+        if (!older && Math.max(...ranks) > goal) { stage = "passed-target"; break; }
         const distance = older ? Math.min(...ranks) - goal : goal - Math.max(...ranks);
-        if (distance < best) { best = distance; stall = 0; pressed = false; } else if (++stall >= TOP_QUIET_STEPS) break;
+        if (distance < best) { best = distance; stall = 0; pressed = false; } else if (++stall >= TOP_QUIET_STEPS) { stage = "no-progress"; break; }
         const step = Math.max(100, (scroller.clientHeight || 500) * 0.8);
         if (scrollTo(scroller.scrollTop + (older ? -step : step))) continue;
         // One press per stretch without progress; then give the site time to answer.
         if (pressed) continue;
         const loader = source.loadEarlier;
-        if (!(older && backfillWanted && canBackfill() && loader?.isConnected && !loader.disabled)) break;
+        if (!(older && backfillWanted && canBackfill() && loader?.isConnected && !loader.disabled)) { stage = older ? "list-start" : "list-end"; break; }
         loader.click(); pressed = true;
       }
+      if (stopped) stage = "user-cancelled";
+      else if (current !== index || session !== generation) stage = "source-changed";
       if (!stopped && scroller.isConnected) scrollTo(start);
-      return location;
+      return { ...location, stage };
     } finally {
       for (const name of CANCEL_EVENTS) win.removeEventListener(name, stop, true);
     }

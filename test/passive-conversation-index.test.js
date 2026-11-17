@@ -111,7 +111,7 @@ test("a missing original that cannot be brought back is reported within a bound,
     s.mount([s.message("old")]); await s.ready(true);
     s.mount([s.message("current")]); await s.controller.syncMounted();
     const started = Date.now();
-    assert.deepEqual(await s.controller.ensureLocation("index:old:0:0", {}), { element: null, reason: "not-mounted" });
+    assert.deepEqual(await s.controller.ensureLocation("index:old:0:0", {}), { element: null, reason: "not-mounted", stage: "no-progress" });
     assert.ok(Date.now() - started < 5000);
     assert.ok(s.scrolls.some((entry) => entry.top < 1800), "it looked toward the older message");
     assert.equal(s.scroller.scrollTop, 1800, "the reader's position is restored");
@@ -172,7 +172,9 @@ test("user input stops a requested jump where the user left the page", async () 
     await new Promise((resolve) => setTimeout(resolve, 20));
     s.win.dispatchEvent(new s.win.Event("wheel"));
     const position = s.scroller.scrollTop;
-    assert.equal((await pending).reason, "not-mounted");
+    const result = await pending;
+    assert.equal(result.reason, "not-mounted");
+    assert.equal(result.stage, "user-cancelled");
     assert.equal(s.scroller.scrollTop, position, "the page is left where the user took over");
   } finally { s.close(); }
 });

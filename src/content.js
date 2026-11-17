@@ -4725,7 +4725,9 @@ export function initializeContent() {
     if (!didJump) {
       return false;
     }
-    window.history.replaceState(null, "", `#${encodeURIComponent(element.id)}`);
+    const { pathname, search } = window.location;
+    // Pages such as Gemini declare <base href="/">; a bare "#id" would resolve against it and change the route.
+    window.history.replaceState(window.history.state, "", `${pathname}${search}#${encodeURIComponent(element.id)}`);
     flashLocated(element, () => currentElementForHeading(heading));
     return true;
   }
@@ -5658,9 +5660,9 @@ export function initializeContent() {
     if ((message.command === "jump-to-marker" || message.command === "jump-to-chapter") && String(message.markerKey || "").startsWith("index:")) {
       const route = currentRouteKey(); const generation = conversationIndex.snapshot()?.generation;
       // Sidepanel jumps land instantly, then highlight the target at once.
-      return conversationIndex.ensureLocation(message.markerKey, state.config, { instant: true }).then(({ element, reason, fallback }) => {
+      return conversationIndex.ensureLocation(message.markerKey, state.config, { instant: true }).then(({ element, reason, fallback, stage }) => {
         if (route !== currentRouteKey() || generation !== conversationIndex.snapshot()?.generation) return { ok: false, reason: "source-changed" };
-        if (!element) { recordDiagnosticEvent("locate_request", { kind: "index", outcome: "not-found", reason }); return { ok: false, reason }; }
+        if (!element) { recordDiagnosticEvent("locate_request", { kind: "index", outcome: "not-found", reason, stage }); return { ok: false, reason }; }
         const moved = jumpToMarker({ element }, "instant");
         recordDiagnosticEvent("locate_request", { kind: "index", outcome: moved ? "moved" : "scroll-failed", reason: fallback ? "message-fallback" : "" });
         if (moved) {

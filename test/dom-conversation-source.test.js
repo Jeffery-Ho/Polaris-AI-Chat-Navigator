@@ -372,3 +372,46 @@ test("a sized virtual-list placeholder in view reports pending history rendering
   assert.equal(read().historyLoading, false, "empty structural containers are ignored");
   dom.window.close();
 });
+
+test("a deeply nested ChatGPT card keeps its turn identity after the list remounts it", () => {
+  const card = (depth) => depth ? `<div class="layer-${depth}">${card(depth - 1)}</div>` : '<img src="https://images.test/product.png" alt="Product">';
+  const turn = `<section data-turn-id="turn-shop" data-testid="conversation-turn-2" data-turn="assistant">${card(8)}</section>`;
+  const dom = new JSDOM(`<main><div data-turn-id-container="t1">${turn}</div></main>`, { url: "https://chatgpt.com/c/shop" });
+  const doc = dom.window.document;
+  const read = createDOMConversationSource({ window: dom.window, platform: "chatgpt", readContainers: () => ({
+    userContainers: [], assistantContainers: [...doc.querySelectorAll("section img")]
+  }) });
+  try {
+    const first = read().messages[0].id;
+    const row = doc.querySelector("[data-turn-id-container]");
+    row.replaceChildren();
+    assert.equal(read().messages.length, 0);
+    row.innerHTML = turn;
+    assert.equal(read().messages[0].id, first);
+    assert.match(first, /turn-shop/);
+  } finally { dom.window.close(); }
+});
+
+test("ChatGPT turns keyed only by data-turn-key keep user and answer identities after the list removes and re-adds them", () => {
+  const nest = (depth, inner) => depth ? `<div>${nest(depth - 1, inner)}</div>` : inner;
+  const turn = `<div data-turn-key="cf764aab-user"><div data-content-search-turn-key="fallback-turn-1">
+    <div data-chatgpt-search-unit-key="fallback-turn-1:0:user" data-chatgpt-search-message-ids="cf764aab-user">${nest(2, '<div class="group/user-message"><p>硬件产品</p></div>')}</div>
+    ${nest(5, `<div data-chatgpt-search-unit-key="fallback-turn-1:2:assistant" data-chatgpt-search-message-ids="76e7732f-a">${nest(3, '<div class="MarkdownRoot-x"><h2>二、高端硬件</h2><p>正文</p></div>')}</div>`)}
+  </div></div>`;
+  const dom = new JSDOM(`<main><div data-rail-chat-transcript>${turn}</div></main>`, { url: "https://chatgpt.com/c/turn-key" });
+  const doc = dom.window.document;
+  const read = createDOMConversationSource({ window: dom.window, platform: "chatgpt", readContainers: () => ({
+    userContainers: [...doc.querySelectorAll('[class~="group/user-message"]')], assistantContainers: [...doc.querySelectorAll(".MarkdownRoot-x")]
+  }) });
+  try {
+    const first = read().messages.map(({ id, role }) => [role, id]);
+    assert.equal(first.length, 2);
+    assert.notEqual(first[0][1], first[1][1]);
+    const list = doc.querySelector("[data-rail-chat-transcript]");
+    list.replaceChildren();
+    assert.equal(read().messages.length, 0);
+    list.innerHTML = turn;
+    assert.deepEqual(read().messages.map(({ id, role }) => [role, id]), first);
+    assert.ok(first.every(([, id]) => id.includes("cf764aab-user")));
+  } finally { dom.window.close(); }
+});

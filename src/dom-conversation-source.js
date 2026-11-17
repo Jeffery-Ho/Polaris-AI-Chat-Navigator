@@ -1,6 +1,9 @@
 import { domMessageBlocks } from "./dom-message-blocks.js";
 
 const SOURCE_ATTRIBUTES = ["data-message-id", "data-msg-id", "data-event-id", "data-archer-id", "data-conversation-turn-id", "data-virtual-list-item-key", "data-turn-id", "data-index"];
+// ChatGPT (2026-11) virtualizes turns without placeholders and keys them only by
+// data-turn-key / data-chatgpt-search-message-ids, several levels above the body.
+const DEEP_SOURCE_ATTRIBUTES = ["data-message-id", "data-turn-id", "data-turn-key", "data-chatgpt-search-message-ids"];
 const USER_BODY = {
   claude: '[data-testid="user-message"]',
   deepseek: ".ds-collapsible-text",
@@ -30,6 +33,14 @@ export function createDOMConversationSource({ window: win, platform, readContain
       }
       if (node.id && !/^(?:gpt-paragraph|polaris)/.test(node.id)
         && (node === element || /(?:message|turn|chat-item)/i.test(node.id))) return `${platform}:${role}:id:${node.id}`;
+    }
+    // Cards (e.g. ChatGPT product carousels) can sit deeper than the walk above;
+    // a per-message ID keeps them identifiable after the list remounts them.
+    for (const attribute of DEEP_SOURCE_ATTRIBUTES) {
+      const owner = element.closest(`[${attribute}]`);
+      if (owner && owner.querySelectorAll('[data-message-author-role], .segment, .ds-message').length <= 1) {
+        return `${platform}:${role}:${attribute}:${owner.getAttribute(attribute)}`;
+      }
     }
     return "";
   }

@@ -476,6 +476,23 @@ test("a long reply is tinted below the fixed header and inside the actual conver
   } finally { s.invalidate(); s.dom.window.close(); }
 });
 
+test("jumping to a Maker keeps the conversation path when the page declares a base href", async () => {
+  const s = await bootPackagedContent({
+    pageUrl: "https://chatgpt.com/c/base-href-test?model=x",
+    html: '<html><head><base href="/"></head><body><main><div data-message-author-role="user">Test prompt</div><div data-message-author-role="assistant"><div class="markdown"><h2>Test heading</h2><p>Test body</p></div></div></main></body></html>'
+  });
+  try {
+    s.win.HTMLElement.prototype.scrollIntoView = () => {};
+    await s.inject();
+    s.win.document.querySelector('#gpt-paragraph-nav .gpt-paragraph-nav__list [data-marker-item-type="ai"]').click();
+    const { pathname, search, hash } = s.win.location;
+    assert.equal(pathname, "/c/base-href-test");
+    assert.equal(search, "?model=x");
+    assert.match(hash, /^#.+/);
+    assert.deepEqual(s.errors, []);
+  } finally { s.invalidate(); s.dom.window.close(); }
+});
+
 test("production WXT entrypoint reloads with one UI and one set of Chrome listeners", async () => {
   const s = await bootPackagedContent();
   try {

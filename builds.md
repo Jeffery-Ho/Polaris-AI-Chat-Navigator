@@ -10,6 +10,38 @@
 - Version update type must be declared by the user before recording a build.
 - After each build is recorded, confirm the build number and version with the user.
 
+## 442
+
+- Date: 2026-11-17
+- Version: 1.5.16
+- Summary: Identify current ChatGPT turns by `data-turn-key` so jumps to unmounted retained Makers reach them.
+- Notes: Inspecting the reported conversation on chatgpt.com showed that ChatGPT no longer renders `data-message-id`, `data-turn-id` or placeholder rows: off-screen turns are removed from the DOM and re-added within 50 ms of scrolling into view. Turns carry only `data-turn-key` and `data-chatgpt-search-message-ids`, three to nine levels above the `MarkdownRoot-*` answer and user bubble, so every message got a temporary DOM ID that changed on remount and the jump stopped at `list-start` with the target in view. Identity now also falls back to the nearest `data-turn-key`, then `data-chatgpt-search-message-ids`; the role prefix keeps a turn's prompt and answer apart. The 2 s list-edge wait added in 1.5.15(441) rested on a wrong diagnosis and is removed.
+- Validation: Added a regression test modeled on the observed DOM (prompt and answer keep their IDs after the turn is removed and re-added; fails without the fix); syntax checks, production build and full test suite passed. Remount timing observed on the live conversation; the packaged extension was not run on it.
+
+## 441
+
+- Date: 2026-11-17
+- Version: 1.5.15
+- Summary: Wait at the list edge for a virtualized ChatGPT turn that renders shortly after it scrolls into view.
+- Notes: A diagnostic log from a two-turn ChatGPT chat with very long answers showed every failed jump ending at `stage: list-start`, with the older turn mounting about 500 ms later. ChatGPT mounts only one of those turns at a time, and the jump gave up 150 ms after reaching the top. At the list's start or end the jump now waits up to 2 s for the row to render before giving up; that wait does not count as a stalled step.
+- Validation: Added a regression test (the older row renders 500 ms after the top is reached); syntax checks, production build and full test suite passed. Not yet re-checked on the reporting ChatGPT conversation.
+
+## 440
+
+- Date: 2026-11-17
+- Version: 1.5.14
+- Summary: Keep deeply nested ChatGPT cards identifiable so jumps to their unmounted Makers can bring them back.
+- Notes: Message identity came from a native ID found within six ancestors. Product cards and similar blocks in ChatGPT sit deeper, so they received a temporary DOM ID that changed every time the virtualized list remounted them; a jump to such a retained Maker never recognized the remounted message and fell back to the "original is not on the page" notice. Identity now falls back to the nearest `data-message-id` or `data-turn-id` ancestor that holds a single message. Failed jumps also record which step stopped the search (`stage`) in the diagnostic log.
+- Validation: Added a regression test (an 8-level-deep card keeps its ID after remount) and stage assertions for failed and cancelled jumps; syntax checks, production build and full test suite passed. Not reproduced on a live ChatGPT conversation.
+
+## 439
+
+- Date: 2026-11-17
+- Version: 1.5.13
+- Summary: Keep the conversation route when jumping to a Maker on pages that declare a base href.
+- Notes: Gemini declares `<base href="/">`, so the bare `#id` passed to `history.replaceState` resolved to `https://gemini.google.com/#id`; the path changed from `/app/<id>` to `/` and Gemini unmounted the conversation right after a Maker click. The hash is now written onto the current path and query, and the existing `history.state` is preserved.
+- Validation: Added a regression test (page with `<base href="/">` keeps path and query after a Maker click); syntax checks, production build and full test suite passed. Not manually verified on a live Gemini page.
+
 ## 438
 
 - Date: 2026-11-17
