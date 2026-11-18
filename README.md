@@ -127,7 +127,7 @@ Search and exports explicitly describe their loaded-message scope. Polaris never
 
 Conversation indexing stays in the current page's memory; it is neither written to disk nor synchronized or uploaded. The removed IndexedDB conversation cache is deleted from the extension's own origin on startup, without reading its contents or touching website storage. ChatGPT and Gemini private API bridges, account-session access and internal-framework adapters have been removed. These changes describe Polaris's implementation; they do not constitute platform approval or establish the reason for any account restriction.
 
-License installation and activation credentials remain separate in `chrome.storage.local` and are never synchronized. Diagnostic export is user-initiated: a bounded, redacted current-tab log is downloaded locally; an email draft opens only when requested, without automatic upload or attachment. The support page loads optional Google Analytics and Aliyun SLS only after explicit consent and does not receive AI conversation content or extension settings. See the [Privacy Policy](https://jeffery-ho.github.io/Polaris-AI-Chat-Navigator/privacy-policy.html) for details.
+License installation and activation credentials remain separate in `chrome.storage.local` and are never synchronized. Diagnostic export is user-initiated: a bounded, redacted current-tab log is downloaded locally; an email draft opens only when requested, without automatic upload or attachment. The support page loads optional Google Analytics and Aliyun SLS only after explicit consent and does not receive AI conversation content or extension settings. See the [Privacy Policy](https://polaris-ai.work/privacy.html) for details.
 
 ## Pro test integration
 

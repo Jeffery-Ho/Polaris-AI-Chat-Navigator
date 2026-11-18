@@ -19,7 +19,7 @@ import { createSidepanelPlatformMenu } from "./sidepanel-platform-menu.js";
 import { createVirtualList } from "./virtual-list.js";
 import { createSidepanelConversationStatus } from "./sidepanel-conversation-status.js";
 
-const RELEASE_NOTES_URL = "https://polaris-ai.work/v2/release-notes/";
+const RELEASE_NOTES_URL = "https://polaris-ai.work/release-notes/";
 
 export function initializeSidepanel() {
   const SYSTEM_THEME_QUERY = "(prefers-color-scheme: dark)";
@@ -1424,7 +1424,7 @@ export function initializeSidepanel() {
         row.addEventListener("click", () => openSettingsPage(page));
         menu.appendChild(row);
       }
-      menu.appendChild(settingsExternalLink(t("settings.privacy"), "https://jeffery-ho.github.io/Polaris-AI-Chat-Navigator/privacy-policy.html", "privacy", createSettingsMenuIcon("privacy")));
+      menu.appendChild(settingsExternalLink(t("settings.privacy"), "https://polaris-ai.work/privacy.html", "privacy", createSettingsMenuIcon("privacy")));
       panel.appendChild(menu);
     } else if (state.settingsPage === "help") renderSettingsHelp(panel);
     else if (state.settingsPage === "feedback") renderSettingsFeedback(panel);

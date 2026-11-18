@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-18
+
+- 修复侧边栏“查看全部更新”打开 404 页面：改为官网 `https://polaris-ai.work/release-notes/`。设置中的隐私政策原先打开 GitHub Pages 上已过期的旧版，现改为官网 `https://polaris-ai.work/privacy.html`。设置页顶部和更新说明里的赞赏/支持按钮原先跳到 GitHub Pages 上的旧官网，现改为 `https://polaris-ai.work/entry/extension/`（保留来源统计）。
+- 版本：`1.5.17(443)`。
+
 ## 2026-11-17
 
 - 修复新版 ChatGPT 中跳转到已卸载 Maker 时仍提示“原文不在页面上”：新版 ChatGPT 不再提供 `data-message-id`，只在轮次上标记 `data-turn-key`，扩展因此认不出重新渲染的消息。现在会按 `data-turn-key`（其次 `data-chatgpt-search-message-ids`）识别消息。撤销 1.5.15 中基于错误判断加入的列表边缘 2 秒等待。

@@ -298,7 +298,7 @@ export function initializeContent() {
   const DEFAULT_HEADER_HEIGHT = 64;
   const CONFIG_STORAGE_KEY = "gpt-paragraph-nav-config";
   const RATING_DISMISSAL_STORAGE_KEY = "polaris-rating-dismissed-until";
-  const SUPPORT_URL = "https://jeffery-ho.github.io/polaris-landing/entry/extension/";
+  const SUPPORT_URL = "https://polaris-ai.work/entry/extension/";
   const X_PROFILE_URL = "https://x.com/JefferyHo_";
   const RATING_DISMISSAL_DURATION_MS = 24 * 60 * 60 * 1000;
   const CONFIG_SCHEMA_VERSION = 9;

@@ -10,6 +10,13 @@
 - Version update type must be declared by the user before recording a build.
 - After each build is recorded, confirm the build number and version with the user.
 
+## 443
+- Date: 2026-11-18
+- Version: 1.5.17
+- Summary: Point the sidepanel release notes link, the Settings privacy policy link and both support links at the live website pages.
+- Notes: "See all release notes" opened `https://polaris-ai.work/v2/release-notes/`, which returns 404; it now opens `https://polaris-ai.work/release-notes/`. Settings → Privacy Policy and the README opened an outdated GitHub Pages copy (effective October 30, 2026) that differs from the website policy (updated November 12, 2026); both now open `https://polaris-ai.work/privacy.html`. The Settings header support link and the release notice support button opened `https://jeffery-ho.github.io/polaris-landing/entry/extension/`, which redirects to the outdated GitHub Pages landing; both now open `https://polaris-ai.work/entry/extension/`, which keeps the same `polaris_extension` attribution and redirects to the website.
+- Validation: Updated the sidepanel integration and support link assertions and added a release notice support link assertion; syntax checks, production build and full test suite passed. Both target URLs returned HTTP 200 on 2026-11-18.
+
 ## 442
 
 - Date: 2026-11-17

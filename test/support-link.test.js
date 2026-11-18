@@ -8,7 +8,7 @@ const settingsStyles = await readFile(new URL("../src/settings-panel.css", impor
 
 test("设置面板 Header 提供赞赏入口", () => {
   assert.match(contentSource, /supportLabel: t\("support\.aria"\)/);
-  assert.match(contentSource, /const SUPPORT_URL = "https:\/\/jeffery-ho\.github\.io\/polaris-landing\/entry\/extension\/"/);
+  assert.match(contentSource, /const SUPPORT_URL = "https:\/\/polaris-ai\.work\/entry\/extension\/"/);
   assert.match(contentSource, /supportUrl: SUPPORT_URL/);
   assert.doesNotMatch(contentSource, /getSupportLink\(/);
   assert.doesNotMatch(contentSource, /SUPPORT_LINK_CLASS/);

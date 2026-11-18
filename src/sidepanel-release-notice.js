@@ -81,7 +81,7 @@ export function createSidepanelReleaseNotice({ document, chrome, locale, t, auto
     currentDialog.append(content, element("p", "release-notice-feedback", t("releaseNotice.feedback")));
     const actions = element("div", "release-notice-actions");
     for (const [label, href] of [
-      [t("support.aria"), "https://jeffery-ho.github.io/polaris-landing/entry/extension/"],
+      [t("support.aria"), "https://polaris-ai.work/entry/extension/"],
       [t("releaseNotice.emailAction"), "mailto:jefferyho.build@gmail.com"],
       [t("releaseNotice.issueAction"), "https://github.com/Jeffery-Ho/Polaris-AI-Chat-Navigator/issues"]
     ]) {
@@ -89,7 +89,7 @@ export function createSidepanelReleaseNotice({ document, chrome, locale, t, auto
       link.href = href;
       link.target = "_blank";
       link.rel = "noreferrer";
-      if (href.includes("/polaris-landing/")) {
+      if (href.includes("/entry/extension/")) {
         link.classList.add("release-notice-support");
         link.setAttribute("aria-label", label);
         link.title = label;

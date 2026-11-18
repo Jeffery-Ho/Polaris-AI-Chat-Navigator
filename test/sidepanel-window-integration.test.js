@@ -795,7 +795,7 @@ test("manual update page survives conversation snapshots without opening the aut
     assert.ok(page.querySelectorAll(".settings-update-note").length > 1);
     const allUpdates = page.querySelector(".settings-updates-all");
     assert.equal(allUpdates.textContent, "查看全部更新");
-    assert.equal(allUpdates.href, "https://polaris-ai.work/v2/release-notes/");
+    assert.equal(allUpdates.href, "https://polaris-ai.work/release-notes/");
     assert.equal(allUpdates.target, "_blank");
     assert.equal(s.win.document.querySelector("dialog[open]"), null);
     s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...s.snapshot, revision: 2 } });
@@ -850,7 +850,7 @@ test("English about and feedback show packaged platform icons, the actual versio
     assert.deepEqual([...s.win.document.querySelectorAll(".settings-menu-row")].map((row) => row.textContent),
       ["Preferences", "Help and diagnostics", "Feedback", "What's New", "About", "Privacy Policy"]);
     const privacy = s.win.document.querySelector('.settings-home-menu [data-settings-focus="privacy"]');
-    assert.equal(privacy.href, "https://jeffery-ho.github.io/Polaris-AI-Chat-Navigator/privacy-policy.html");
+    assert.equal(privacy.href, "https://polaris-ai.work/privacy.html");
     assert.equal(privacy.target, "_blank");
     s.win.document.querySelector('[data-settings-destination="about"]').click();
     assert.equal(s.win.document.querySelector(".settings-app-icon").width, 40);

@@ -56,6 +56,7 @@ test("首次打开侧栏可在没有网页快照时展示内置说明，关闭�
     assert.ok(dialog);
     assert.match(dialog.textContent, /0\.68/);
     assert.doesNotMatch(dialog.textContent, /更新说明暂不可用/);
+    assert.equal(dialog.querySelector(".release-notice-support").href, "https://polaris-ai.work/entry/extension/");
     assert.equal(s.writes.length, 0);
     dialog.querySelector(".release-notice-acknowledge").click();
     await Promise.resolve();
