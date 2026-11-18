@@ -22,7 +22,7 @@
     "billing:deploy": "wrangler deploy --config workers/license-test/wrangler.jsonc",
     "license:check": "node --test workers/license-production/test/*.test.js",
     "license:deploy": "wrangler deploy --config workers/license-production/wrangler.jsonc",
-    "license:grant": "NODE_USE_ENV_PROXY=1 node workers/license-production/grant-license.mjs"
+    "license:grant": "node workers/license-production/grant-license.mjs"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
