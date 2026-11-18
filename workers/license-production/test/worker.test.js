@@ -174,14 +174,14 @@ test("a test Checkout session is rejected and localhost cannot call or receive t
   } finally { env.DB.close(); }
 });
 
-test("anonymous website checkout is the regular price and cannot claim the trial promo", async (t) => {
+test("anonymous website checkout uses the USD 12.90 launch price", async (t) => {
   const env = environment();
   let calls = 0;
   let checkoutBody;
   t.mock.method(globalThis, "fetch", async (input, options) => {
     calls += 1;
     const url = new URL(input);
-    if (url.pathname === "/v1/prices/price_live_default") return Response.json({ id: "price_live_default", livemode: true, active: true, currency: "usd", unit_amount: 1999, type: "one_time" });
+    if (url.pathname === "/v1/prices/price_live_promo") return Response.json({ id: "price_live_promo", livemode: true, active: true, currency: "usd", unit_amount: 1290, type: "one_time" });
     if (url.pathname === "/v1/checkout/sessions") {
       checkoutBody = new URLSearchParams(options.body);
       return Response.json({ id: "cs_live_web", livemode: true, url: "https://checkout.stripe.com/c/pay/cs_live_web" });
@@ -191,12 +191,12 @@ test("anonymous website checkout is the regular price and cannot claim the trial
   const site = { Origin: "https://polaris-ai.work" };
   try {
     const catalog = await request(env, "/api/catalog");
-    assert.equal(catalog.data.plans[0].amount, 1999);
+    assert.equal(catalog.data.plans[0].amount, 1290);
     assert.equal(catalog.data.plans[0].originalAmount, 1999);
-    const promo = await request(env, "/api/checkout/web-session", { planId: "pro", expectedAmount: 1290 }, site);
+    const promo = await request(env, "/api/checkout/web-session", { planId: "pro", expectedAmount: 1999 }, site);
     assert.equal(promo.status, 409);
     assert.equal(promo.data.error, "price_changed");
-    assert.equal(promo.data.amount, 1999);
+    assert.equal(promo.data.amount, 1290);
     assert.equal(calls, 0);
     const redirected = await request(env, "/api/checkout/web-session", { planId: "pro", returnUrl: "https://attacker.invalid/checkout-return" }, site);
     assert.equal(redirected.status, 400);
@@ -205,11 +205,11 @@ test("anonymous website checkout is the regular price and cannot claim the trial
     assert.equal(calls, 0);
     assert.equal((await request(env, "/api/checkout/web-session", { planId: "pro" })).status, 403);
     assert.equal((await request(env, "/api/checkout/web-session", { planId: "pro" }, { Origin: "https://attacker.invalid" })).status, 403);
-    const checkout = await request(env, "/api/checkout/web-session", { planId: "pro", expectedAmount: 1999 }, site);
+    const checkout = await request(env, "/api/checkout/web-session", { planId: "pro", expectedAmount: 1290 }, site);
     assert.equal(checkout.status, 200);
-    assert.equal(checkout.data.amount, 1999);
+    assert.equal(checkout.data.amount, 1290);
     assert.equal(checkout.data.checkoutUrl, "https://checkout.stripe.com/c/pay/cs_live_web");
-    assert.equal(checkoutBody.get("line_items[0][price]"), "price_live_default");
+    assert.equal(checkoutBody.get("line_items[0][price]"), "price_live_promo");
     assert.equal(checkoutBody.get("success_url"), `https://polaris-ai.work/v2/checkout-return/?result=success&purchase=${checkout.data.purchaseId}`);
     assert.equal(checkoutBody.get("cancel_url"), `https://polaris-ai.work/v2/checkout-return/?result=cancel&purchase=${checkout.data.purchaseId}`);
     assert.equal((await request(env, "/api/web-purchases/claim", { purchaseId: checkout.data.purchaseId, claimToken: "wrong-token" }, site)).status, 401);
@@ -258,4 +258,36 @@ test("production migration does not create the test worker's legacy tables", asy
   assert.equal(/\bCREATE TABLE[^\n]+orders\b/i.test(sql), false);
   assert.equal(sql.includes("polaris-license-test"), false);
   assert.match(sql, /polaris_billing_purchase_intents/);
+});
+
+test("operator grant issues one license per email and delivers it", async () => {
+  const env = environment({ ADMIN_TOKEN: "admin-token-only-used-by-tests-0123456789" });
+  const mails = [];
+  env.EMAIL = { async send(message) { mails.push(message); } };
+  const auth = { Authorization: `Bearer ${env.ADMIN_TOKEN}` };
+  try {
+    assert.equal((await request(env, "/api/admin/grant-license", { email: "beta@example.com" })).status, 401);
+    assert.equal((await request(env, "/api/admin/grant-license", { email: "beta@example.com" }, { Authorization: "Bearer wrong" })).status, 401);
+    assert.equal((await request({ ...env, ADMIN_TOKEN: undefined }, "/api/admin/grant-license", { email: "beta@example.com" }, auth)).status, 401);
+    assert.equal((await request(env, "/api/admin/grant-license", { email: "nope" }, auth)).status, 400);
+
+    const first = await request(env, "/api/admin/grant-license", { email: " Beta@Example.com " }, auth);
+    assert.equal(first.status, 200);
+    assert.equal(first.data.existing, false);
+    assert.equal(first.data.delivery, "sent");
+    assert.equal(mails.length, 1);
+    assert.equal(mails[0].to, "beta@example.com");
+    const key = mails[0].text.match(/POL-[0-9a-f]{64}/)[0];
+
+    const again = await request(env, "/api/admin/grant-license", { email: "beta@example.com" }, auth);
+    assert.equal(again.data.existing, true);
+    assert.equal(again.data.licenseId, first.data.licenseId);
+    assert.equal(mails.length, 1, "resend is throttled to once an hour");
+    assert.equal((await env.DB.prepare("SELECT count(*) AS count FROM polaris_billing_licenses").first()).count, 1);
+
+    await request(env, "/api/trial/start", install);
+    const redeemed = await request(env, "/api/licenses/redeem", { licenseKey: key, installationId: install.installationId });
+    assert.equal(redeemed.status, 200);
+    assert.equal(redeemed.data.entitlement.status, "active");
+  } finally { env.DB.close(); }
 });

@@ -19,7 +19,10 @@
     "test": "node --test",
     "billing:dev": "wrangler dev --config workers/license-test/wrangler.jsonc --port 4318 --compatibility-date 2026-05-15",
     "billing:check": "node --test workers/license-test/test/*.test.js",
-    "billing:deploy": "wrangler deploy --config workers/license-test/wrangler.jsonc"
+    "billing:deploy": "wrangler deploy --config workers/license-test/wrangler.jsonc",
+    "license:check": "node --test workers/license-production/test/*.test.js",
+    "license:deploy": "wrangler deploy --config workers/license-production/wrangler.jsonc",
+    "license:grant": "NODE_USE_ENV_PROXY=1 node workers/license-production/grant-license.mjs"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",

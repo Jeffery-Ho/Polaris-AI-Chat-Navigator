@@ -169,14 +169,45 @@ async function webhook(env, req) {
   return json({ received: true });
 }
 
+// Operator-issued license (beta payers, support). Requires the ADMIN_TOKEN Worker secret.
+// One license per email: a repeat call re-queues delivery of the same key (throttled to once an hour).
+async function grantLicense(env, req) {
+  if (!env.ADMIN_TOKEN || env.ADMIN_TOKEN.length < 32 || !equal(bearer(req), env.ADMIN_TOKEN)) throw new ApiError(401, "unauthorized");
+  const data = await body(req);
+  const email = text(data.email, 320).toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new ApiError(400, "invalid_email");
+  const emailHash = await hash(env.LICENSE_HASH_SECRET, `email:${email}`);
+  const purchaseId = `grant-${emailHash.slice(0, 32)}`;
+  const now = Date.now();
+  let license = await one(env, "SELECT * FROM polaris_billing_licenses WHERE purchase_id=?", purchaseId);
+  const existing = Boolean(license);
+  if (!license) {
+    const key = `POL-${randomToken()}`;
+    const id = crypto.randomUUID();
+    await env.DB.batch([
+      stmt(env, "INSERT INTO polaris_billing_purchase_intents(id,installation_hash,claim_hash,claim_expires_at,amount,status,created_at) VALUES(?,?,?,0,0,'paid',?) ON CONFLICT(id) DO NOTHING", purchaseId, await webPurchaseHash(env, purchaseId), await hash(env.LICENSE_HASH_SECRET, `claim:${randomToken()}`), now),
+      stmt(env, "INSERT INTO polaris_billing_licenses(id,purchase_id,key_hash,delivery_cipher,email_hash,created_at) VALUES(?,?,?,?,?,?) ON CONFLICT(purchase_id) DO NOTHING", id, purchaseId, await hash(env.LICENSE_HASH_SECRET, `license:${key}`), await seal(env.LICENSE_DELIVERY_ENCRYPTION_KEY, { email, key }), emailHash, now),
+      stmt(env, "INSERT INTO polaris_billing_email_deliveries(id,license_id,next_attempt_at,created_at) SELECT ?,id,?,? FROM polaris_billing_licenses WHERE id=?", crypto.randomUUID(), now, now, id)
+    ]);
+    license = await one(env, "SELECT * FROM polaris_billing_licenses WHERE purchase_id=?", purchaseId);
+  } else if (license.status === "active") {
+    await stmt(env, "INSERT INTO polaris_billing_email_deliveries(id,license_id,next_attempt_at,created_at) SELECT ?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM polaris_billing_email_deliveries WHERE license_id=? AND created_at>?)", crypto.randomUUID(), license.id, now, now, license.id, now - 3600000).run();
+  }
+  if (license.status !== "active") throw new ApiError(409, "license_not_active");
+  await deliverPending(env);
+  const delivery = await one(env, "SELECT status FROM polaris_billing_email_deliveries WHERE license_id=? ORDER BY created_at DESC LIMIT 1", license.id);
+  return json({ licenseId: license.id, existing, delivery: delivery?.status || "none" });
+}
+
 async function route(req, env) {
   const url = new URL(req.url);
   const path = url.pathname;
   if (path === "/health" && req.method === "GET") return json({ ok: true, env: "production", version: VERSION, billingReady: billingReady(env) });
-  const routes = new Set(["/api/trial/start", "/api/plans", "/api/catalog", "/api/checkout/session", "/api/checkout/web-session", "/api/web-purchases/claim", "/api/stripe/webhook", "/api/licenses/claim", "/api/licenses/redeem", "/api/licenses/validate", "/api/licenses/recover", "/api/licenses/deactivate"]);
+  const routes = new Set(["/api/trial/start", "/api/plans", "/api/catalog", "/api/checkout/session", "/api/checkout/web-session", "/api/web-purchases/claim", "/api/stripe/webhook", "/api/licenses/claim", "/api/licenses/redeem", "/api/licenses/validate", "/api/licenses/recover", "/api/licenses/deactivate", "/api/admin/grant-license"]);
   if (!routes.has(path) && !/^\/api\/purchases\/[^/]+\/status$/.test(path)) throw new ApiError(404, "not_found");
   configured(env);
   if (path === "/api/stripe/webhook" && req.method === "POST") return webhook(env, req);
+  if (path === "/api/admin/grant-license" && req.method === "POST") return grantLicense(env, req);
   await rateLimit(env, req, path.replace(/^\/api\/purchases\/[^/]+\/status$/, "/api/purchases/:id/status"));
   if (path === "/api/trial/start" && req.method === "POST") {
     const data = await body(req);
@@ -194,8 +225,7 @@ async function route(req, env) {
     return json({ serverTime: Date.now(), trialEndsAt: row.trial_ends_at, offerEndsAt: row.trial_ends_at, plans: [{ id: PLAN, currency: "usd", amount: row.trial_ends_at > Date.now() ? PROMO_AMOUNT : REGULAR_AMOUNT, originalAmount: REGULAR_AMOUNT, billing: "one_time", maxActivations: null }] });
   }
   if (path === "/api/catalog" && req.method === "GET") {
-    // A website buyer has no installation trial. The public price is the regular lifetime price.
-    return json({ serverTime: Date.now(), plans: [{ id: PLAN, currency: "usd", amount: REGULAR_AMOUNT, originalAmount: REGULAR_AMOUNT, billing: "one_time", maxActivations: null }] });
+    return json({ serverTime: Date.now(), plans: [{ id: PLAN, currency: "usd", amount: PROMO_AMOUNT, originalAmount: REGULAR_AMOUNT, billing: "one_time", maxActivations: null }] });
   }
   if (path === "/api/checkout/session" && req.method === "POST") {
     const data = await body(req);
@@ -241,14 +271,14 @@ async function route(req, env) {
     if (data.priceId !== undefined || data.amount !== undefined || data.returnUrl !== undefined || data.successUrl !== undefined || data.cancelUrl !== undefined || data.trial !== undefined) {
       throw new ApiError(400, "invalid_request");
     }
-    let amount = REGULAR_AMOUNT;
-    let priceId = env.STRIPE_PRICE_PRO_DEFAULT;
+    let amount = PROMO_AMOUNT;
+    let priceId = env.STRIPE_PRICE_PRO_PROMO;
     if (data.installationId !== undefined || data.discount === true) {
       if (typeof data.installationId !== "string") throw new ApiError(401, "invalid_installation");
       const row = await installation(env, data.installationId, req.headers.get("X-Installation-Token"));
-      if (row.trial_ends_at > Date.now()) {
-        amount = PROMO_AMOUNT;
-        priceId = env.STRIPE_PRICE_PRO_PROMO;
+      if (row.trial_ends_at <= Date.now()) {
+        amount = REGULAR_AMOUNT;
+        priceId = env.STRIPE_PRICE_PRO_DEFAULT;
       }
     }
     if (!liveStripeConfigured(env)) throw new ApiError(503, "live_stripe_not_configured");

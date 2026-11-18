@@ -3,3 +3,4 @@
 !.dev.vars.example
 .wrangler/
 node_modules/
+.admin-token

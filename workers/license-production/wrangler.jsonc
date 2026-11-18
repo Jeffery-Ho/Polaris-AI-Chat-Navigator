@@ -9,7 +9,9 @@
     "ENVIRONMENT": "production",
     "PUBLIC_APP_URL": "https://polaris-ai.work",
     "ALLOWED_ORIGINS": "https://polaris-ai.work",
-    "EMAIL_FROM_ADDRESS": "licenses@polaris-ai.work"
+    "EMAIL_FROM_ADDRESS": "licenses@polaris-ai.work",
+    "STRIPE_PRICE_PRO_PROMO": "price_1UZldUJPPURWPaDL7SepNKwh",
+    "STRIPE_PRICE_PRO_DEFAULT": "price_1UZldaJPPURWPaDLqPAKA1eM"
   },
   "d1_databases": [
     {
