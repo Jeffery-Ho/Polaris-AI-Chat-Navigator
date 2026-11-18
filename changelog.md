@@ -2,6 +2,9 @@
 
 ## 2026-11-18
 
+- 修复商店只识别出英文：扩展包补上 `_locales/en` 与 `_locales/zh_CN` 语言文件，并设置默认语言为英文，名称、简介和工具栏按钮提示改为按浏览器语言显示。中文简介采用 `seo.md` 中的简短说明。导出文件中的应用名改为从语言文件读取，避免显示占位符。
+- 版本：`1.5.18(444)`。
+
 - 修复侧边栏“查看全部更新”打开 404 页面：改为官网 `https://polaris-ai.work/release-notes/`。设置中的隐私政策原先打开 GitHub Pages 上已过期的旧版，现改为官网 `https://polaris-ai.work/privacy.html`。设置页顶部和更新说明里的赞赏/支持按钮原先跳到 GitHub Pages 上的旧官网，现改为 `https://polaris-ai.work/entry/extension/`（保留来源统计）。
 - 版本：`1.5.17(443)`。
 

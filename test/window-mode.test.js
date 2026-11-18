@@ -16,7 +16,7 @@ const [buildManifest, background, content, windowSource, sidePanelHtml, windowCs
 
 test("manifest.build.json 声明 Polaris 窗口和系统 side panel 入口", () => {
   assert.deepEqual(buildManifest.permissions, ["storage", "tabs", "sidePanel", "scripting"]);
-  assert.equal(buildManifest.action.default_title, "Open Polaris");
+  assert.equal(buildManifest.action.default_title, "__MSG_actionTitle__");
 });
 
 test("侧栏跟随最近的普通标签页", () => {

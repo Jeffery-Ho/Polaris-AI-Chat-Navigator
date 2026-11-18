@@ -1,10 +1,11 @@
 {
   "manifest_version": 3,
   "minimum_chrome_version": "114",
-  "name": "Polaris: AI Chat Navigator",
-  "version": "1.5.17",
-  "version_name": "1.5.17(443)",
-  "description": "Navigate long AI chats with a Table of Contents and Outline. Find sections, jump to the source, and read with less scrolling.",
+  "default_locale": "en",
+  "name": "__MSG_extName__",
+  "version": "1.5.18",
+  "version_name": "1.5.18(444)",
+  "description": "__MSG_extDescription__",
   "icons": {
     "16": "icons/gpt-voyager-icon-16.png",
     "32": "icons/gpt-voyager-icon-32.png",
@@ -18,7 +19,7 @@
     "scripting"
   ],
   "action": {
-    "default_title": "Open Polaris"
+    "default_title": "__MSG_actionTitle__"
   },
   "web_accessible_resources": [
     {

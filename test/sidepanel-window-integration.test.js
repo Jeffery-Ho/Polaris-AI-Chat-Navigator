@@ -35,7 +35,7 @@ async function boot(windowType = "sidepanel", { locale = "zh", transitionApi = f
     transitions.push(transition);
     return transition;
   };
-  win.chrome = { ...win.chrome, runtime: { getURL: (path) => `https://extension.test/${path}`, onMessage: { addListener(listener) { listeners.push(listener); } }, sendMessage: async (message) => { commands.push(JSON.parse(JSON.stringify(message))); return { ok: true }; }, getManifest: () => ({ version: "0.66.0" }) } };
+  win.chrome = { ...win.chrome, runtime: { getURL: (path) => `https://extension.test/${path}`, onMessage: { addListener(listener) { listeners.push(listener); } }, sendMessage: async (message) => { commands.push(JSON.parse(JSON.stringify(message))); return { ok: true }; }, getManifest: () => ({ version: "0.66.0" }) }, i18n: { getMessage: (key) => (key === "extName" ? "Polaris: AI Chat Navigator" : "") } };
   let source = await readFile(new URL("../src/window.js", import.meta.url), "utf8");
   for (const match of source.matchAll(/import\s+\{([^}]+)\}\s+from\s+"([^"]+)";/g)) {
     const exports = await import(new URL(`../src/${match[2].replace(/^\.\//, "")}`, import.meta.url));

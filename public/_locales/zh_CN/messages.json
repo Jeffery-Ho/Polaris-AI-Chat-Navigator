@@ -1,0 +1,11 @@
+{
+  "extName": {
+    "message": "Polaris: AI Chat Navigator"
+  },
+  "extDescription": {
+    "message": "为长 AI 对话生成按提问分组的目录，定位回答章节、展开阅读，并复制或导出已加载的对话内容。"
+  },
+  "actionTitle": {
+    "message": "打开 Polaris"
+  }
+}

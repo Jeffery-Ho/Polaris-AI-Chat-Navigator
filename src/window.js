@@ -132,7 +132,7 @@ export function initializeSidepanel() {
       }
     }
   });
-  const conversationExport = createSidepanelConversationExport({ document, locale, appName: chrome.runtime.getManifest().name,
+  const conversationExport = createSidepanelConversationExport({ document, locale, appName: chrome.i18n.getMessage("extName"),
     async onRead() {
       const routeKey = state.routeKey; const tabId = state.sourceTabId;
       const generation = state.snapshot?.conversationIndex?.generation;

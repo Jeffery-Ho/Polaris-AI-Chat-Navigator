@@ -1,0 +1,11 @@
+{
+  "extName": {
+    "message": "Polaris: AI Chat Navigator"
+  },
+  "extDescription": {
+    "message": "Navigate long AI chats with a Table of Contents and Outline. Find sections, jump to the source, and read with less scrolling."
+  },
+  "actionTitle": {
+    "message": "Open Polaris"
+  }
+}

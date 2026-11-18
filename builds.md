@@ -10,6 +10,13 @@
 - Version update type must be declared by the user before recording a build.
 - After each build is recorded, confirm the build number and version with the user.
 
+## 444
+- Date: 2026-11-18
+- Version: 1.5.18
+- Summary: Declare English and Simplified Chinese through `_locales` so stores detect both languages.
+- Notes: The manifest had no `default_locale` and no `_locales/` folder, with name, description and action title hardcoded in English, so the stores listed English only; the sidepanel's runtime zh/en switching in `src/i18n.js` is invisible to them. `public/_locales/en` and `public/_locales/zh_CN` now hold `extName`, `extDescription` and `actionTitle`; `manifest.build.json` sets `default_locale: "en"` and references them with `__MSG_*__`. The name stays `Polaris: AI Chat Navigator` in both locales; the Chinese description is the short description drafted in `seo.md`. Conversation exports read the app name from `chrome.i18n.getMessage("extName")`, because Chrome's `runtime.getManifest()` returns the unsubstituted `__MSG_extName__`.
+- Validation: Added `test/manifest-locales.test.js` (locale keys match, referenced keys exist, length limits, packaged manifest keeps the placeholders, export app name source) and updated the action title assertion and sidepanel `chrome.i18n` mock; syntax checks, production build and full test suite passed. Store language detection appears only after a new package is uploaded and approved.
+
 ## 443
 - Date: 2026-11-18
 - Version: 1.5.17
