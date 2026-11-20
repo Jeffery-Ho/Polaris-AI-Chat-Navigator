@@ -2,6 +2,7 @@ import { randomToken, hash, equal, seal, unseal, verifyWebhook } from "./crypto.
 import { ApiError, liveStripeConfigured, stripe } from "./stripe.js";
 
 const DAY = 86400000;
+const ACTIVATION_LIMIT = 3;
 const PLAN = "pro";
 const VERSION = "1.0.0";
 const RETURN_ORIGIN = "https://polaris-ai.work";
@@ -109,13 +110,55 @@ async function rateLimit(env, req, path) {
   if (row.count > 30) throw new ApiError(429, "rate_limited");
 }
 
-async function issueActivation(env, license, install) {
+const limitHit = (error) => String(error?.message || error).includes("activation_limit_reached");
+
+function clientInfo(value) {
+  const clean = (item) => typeof item === "string" && /^[\p{L}\p{N} ._-]{1,32}$/u.test(item.trim()) ? item.trim() : null;
+  return { browser: clean(value?.browser), os: clean(value?.os) };
+}
+
+async function activationList(env, licenseId) {
+  const rows = await stmt(env, "SELECT id,browser,os,created_at,last_validated_at FROM polaris_billing_activations WHERE license_id=? AND status='active' ORDER BY created_at", licenseId).all();
+  return rows.results.map((row) => ({ id: row.id, browser: row.browser || null, os: row.os || null, activatedAt: row.created_at, lastSeenAt: row.last_validated_at || null }));
+}
+
+async function limitReached(env, licenseId) {
+  return json({ error: "activation_limit_reached", limit: ACTIVATION_LIMIT, activations: await activationList(env, licenseId) }, 409);
+}
+
+async function issueActivation(env, license, install, client = {}) {
   const now = Date.now();
-  await stmt(env, "INSERT INTO polaris_billing_activations(id,license_id,installation_hash,created_at) VALUES(?,?,?,?) ON CONFLICT(license_id,installation_hash) DO NOTHING", crypto.randomUUID(), license.id, install.id_hash, now).run();
-  const activation = await one(env, "SELECT * FROM polaris_billing_activations WHERE license_id=? AND installation_hash=?", license.id, install.id_hash);
+  const find = () => one(env, "SELECT * FROM polaris_billing_activations WHERE license_id=? AND installation_hash=?", license.id, install.id_hash);
+  let activation = await find();
+  // An installation that is already active reuses its slot, even when the license is full.
+  // New rows and reactivated rows pass the database limit triggers.
+  if (!activation) {
+    try {
+      await stmt(env, "INSERT INTO polaris_billing_activations(id,license_id,installation_hash,browser,os,created_at) VALUES(?,?,?,?,?,?)", crypto.randomUUID(), license.id, install.id_hash, client.browser || null, client.os || null, now).run();
+    } catch (error) {
+      if (limitHit(error)) return limitReached(env, license.id);
+      if (!await find()) throw error;
+    }
+    activation = await find();
+  }
   const token = await hash(env.LICENSE_HASH_SECRET, `activation:${activation.id}:${activation.generation}`);
-  await stmt(env, "UPDATE polaris_billing_activations SET credential_hash=?,status='active',last_validated_at=? WHERE id=? AND generation=?", await hash(env.LICENSE_HASH_SECRET, `credential:${token}`), now, activation.id, activation.generation).run();
-  return json({ activationToken: token, entitlement: entitlement(), validatedAt: now, offlineUntil: now + DAY });
+  let result;
+  try {
+    result = await stmt(env, "UPDATE polaris_billing_activations SET credential_hash=?,created_at=CASE WHEN status='active' THEN created_at ELSE ? END,status='active',last_validated_at=?,browser=coalesce(?,browser),os=coalesce(?,os) WHERE id=? AND generation=?",
+      await hash(env.LICENSE_HASH_SECRET, `credential:${token}`), now, now, client.browser || null, client.os || null, activation.id, activation.generation).run();
+  } catch (error) {
+    if (limitHit(error)) return limitReached(env, license.id);
+    throw error;
+  }
+  if (!result.meta.changes) throw new ApiError(409, "activation_conflict");
+  return json({ activationToken: token, activationId: activation.id, entitlement: entitlement(), validatedAt: now, offlineUntil: now + DAY, activations: await activationList(env, license.id) });
+}
+
+async function releaseActivation(env, licenseId, activationId) {
+  // The released row keeps its credential hash so its installation learns why it lost Pro.
+  // The generation bump means that credential can never be renewed.
+  const result = await stmt(env, "UPDATE polaris_billing_activations SET status='revoked',generation=generation+1 WHERE id=? AND license_id=? AND status='active'", text(activationId), licenseId).run();
+  return json({ released: result.meta.changes > 0, activations: await activationList(env, licenseId) });
 }
 
 async function purchaseOwner(env, req, id, claimToken, installationId) {
@@ -203,7 +246,7 @@ async function route(req, env) {
   const url = new URL(req.url);
   const path = url.pathname;
   if (path === "/health" && req.method === "GET") return json({ ok: true, env: "production", version: VERSION, billingReady: billingReady(env) });
-  const routes = new Set(["/api/trial/start", "/api/plans", "/api/catalog", "/api/checkout/session", "/api/checkout/web-session", "/api/web-purchases/claim", "/api/stripe/webhook", "/api/licenses/claim", "/api/licenses/redeem", "/api/licenses/validate", "/api/licenses/recover", "/api/licenses/deactivate", "/api/admin/grant-license"]);
+  const routes = new Set(["/api/trial/start", "/api/plans", "/api/catalog", "/api/checkout/session", "/api/checkout/web-session", "/api/web-purchases/claim", "/api/stripe/webhook", "/api/licenses/claim", "/api/licenses/redeem", "/api/licenses/validate", "/api/licenses/recover", "/api/licenses/deactivate", "/api/licenses/release", "/api/admin/grant-license"]);
   if (!routes.has(path) && !/^\/api\/purchases\/[^/]+\/status$/.test(path)) throw new ApiError(404, "not_found");
   configured(env);
   if (path === "/api/stripe/webhook" && req.method === "POST") return webhook(env, req);
@@ -222,10 +265,10 @@ async function route(req, env) {
     const row = await installation(env, url.searchParams.get("installationId"), req.headers.get("X-Installation-Token"));
     // USD 19.99 is the regular lifetime price. USD 12.90 applies only while this
     // installation's server-recorded 7-day trial is open. The client cannot select it.
-    return json({ serverTime: Date.now(), trialEndsAt: row.trial_ends_at, offerEndsAt: row.trial_ends_at, plans: [{ id: PLAN, currency: "usd", amount: row.trial_ends_at > Date.now() ? PROMO_AMOUNT : REGULAR_AMOUNT, originalAmount: REGULAR_AMOUNT, billing: "one_time", maxActivations: null }] });
+    return json({ serverTime: Date.now(), trialEndsAt: row.trial_ends_at, offerEndsAt: row.trial_ends_at, plans: [{ id: PLAN, currency: "usd", amount: row.trial_ends_at > Date.now() ? PROMO_AMOUNT : REGULAR_AMOUNT, originalAmount: REGULAR_AMOUNT, billing: "one_time", maxActivations: ACTIVATION_LIMIT }] });
   }
   if (path === "/api/catalog" && req.method === "GET") {
-    return json({ serverTime: Date.now(), plans: [{ id: PLAN, currency: "usd", amount: PROMO_AMOUNT, originalAmount: REGULAR_AMOUNT, billing: "one_time", maxActivations: null }] });
+    return json({ serverTime: Date.now(), plans: [{ id: PLAN, currency: "usd", amount: PROMO_AMOUNT, originalAmount: REGULAR_AMOUNT, billing: "one_time", maxActivations: ACTIVATION_LIMIT }] });
   }
   if (path === "/api/checkout/session" && req.method === "POST") {
     const data = await body(req);
@@ -334,25 +377,44 @@ async function route(req, env) {
     const { purchase, install } = await purchaseOwner(env, req, data.purchaseId, data.claimToken, data.installationId);
     const license = await one(env, "SELECT * FROM polaris_billing_licenses WHERE purchase_id=? AND status='active'", purchase.id);
     if (purchase.status !== "paid" || !license) throw new ApiError(409, "activation_not_ready");
-    return issueActivation(env, license, install);
+    return issueActivation(env, license, install, clientInfo(data.client));
   }
   if (path === "/api/licenses/redeem" && req.method === "POST") {
     const data = await body(req);
     const install = await installation(env, data.installationId, req.headers.get("X-Installation-Token"));
     const license = await one(env, "SELECT * FROM polaris_billing_licenses WHERE key_hash=? AND status='active'", await hash(env.LICENSE_HASH_SECRET, `license:${text(data.licenseKey)}`));
     if (!license) throw new ApiError(400, "invalid_license");
-    return issueActivation(env, license, install);
+    return issueActivation(env, license, install, clientInfo(data.client));
+  }
+  if (path === "/api/licenses/release" && req.method === "POST") {
+    // A full license frees a slot before this installation activates. The caller proves
+    // the license with its key, or with the purchase it made in this installation.
+    const data = await body(req);
+    let license;
+    if (data.licenseKey !== undefined) {
+      await installation(env, data.installationId, req.headers.get("X-Installation-Token"));
+      license = await one(env, "SELECT * FROM polaris_billing_licenses WHERE key_hash=? AND status='active'", await hash(env.LICENSE_HASH_SECRET, `license:${text(data.licenseKey)}`));
+    } else {
+      const { purchase } = await purchaseOwner(env, req, data.purchaseId, data.claimToken, data.installationId);
+      license = await one(env, "SELECT * FROM polaris_billing_licenses WHERE purchase_id=? AND status='active'", purchase.id);
+    }
+    if (!license) throw new ApiError(400, "invalid_license");
+    return releaseActivation(env, license.id, data.activationId);
   }
   if (["/api/licenses/validate", "/api/licenses/deactivate"].includes(path) && req.method === "POST") {
     const data = await body(req);
     const activation = await one(env, "SELECT a.*,l.status AS license_status FROM polaris_billing_activations a JOIN polaris_billing_licenses l ON l.id=a.license_id WHERE a.credential_hash=?", await hash(env.LICENSE_HASH_SECRET, `credential:${text(data.activationToken)}`));
-    if (!activation || activation.status !== "active" || activation.license_status !== "active") return json({ valid: false, entitlement: entitlement("revoked") });
+    if (!activation || activation.status !== "active" || activation.license_status !== "active") {
+      const released = activation && activation.status !== "active" && activation.license_status === "active";
+      return json({ valid: false, entitlement: entitlement("revoked"), ...(released ? { reason: "deactivated" } : {}) });
+    }
     if (path.endsWith("deactivate")) {
+      if (data.activationId !== undefined && data.activationId !== activation.id) return releaseActivation(env, activation.license_id, data.activationId);
       await stmt(env, "UPDATE polaris_billing_activations SET status='revoked',credential_hash=NULL,generation=generation+1 WHERE id=? AND credential_hash=?", activation.id, activation.credential_hash).run();
       return json({ deactivated: true });
     }
     await stmt(env, "UPDATE polaris_billing_activations SET last_validated_at=? WHERE id=?", Date.now(), activation.id).run();
-    return json({ valid: true, entitlement: entitlement(), validatedAt: Date.now(), offlineUntil: Date.now() + DAY });
+    return json({ valid: true, entitlement: entitlement(), validatedAt: Date.now(), offlineUntil: Date.now() + DAY, activationId: activation.id, activations: await activationList(env, activation.license_id) });
   }
   if (path === "/api/licenses/recover" && req.method === "POST") {
     const data = await body(req);
@@ -379,7 +441,7 @@ async function deliverPending(env) {
         from: { email: FROM_ADDRESS, name: "Polaris" },
         to: payload.email,
         subject: "Your Polaris Pro license",
-        text: `Polaris Pro is a one-time lifetime purchase with no device limit.\n\nLicense: ${payload.key}\n\nOpen Polaris settings and choose Redeem license.\n`
+        text: `Polaris Pro is a one-time lifetime purchase for up to 3 browsers at a time. Each browser profile counts separately.\n\nLicense: ${payload.key}\n\nOpen Polaris settings and choose Redeem license.\n`
       });
       await stmt(env, "UPDATE polaris_billing_email_deliveries SET status='sent',attempt_count=attempt_count+1 WHERE id=?", job.id).run();
     } catch {

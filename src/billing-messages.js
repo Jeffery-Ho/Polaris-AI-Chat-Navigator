@@ -1,3 +1,5 @@
+import { BILLING_ERRORS } from "./billing-service.js";
+
 export function createBillingMessageHandler({ chrome, service }) {
   const extensionUrl = new URL(chrome.runtime.getURL(""));
   function trustedPage(sender) {
@@ -17,7 +19,8 @@ export function createBillingMessageHandler({ chrome, service }) {
         case "purchase-status": return { ok: true, view: await service.purchaseStatus() };
         case "redeem": return { ok: true, view: await service.redeem(message.licenseKey) };
         case "recover": return { ok: true, ...await service.recover(message.email) };
-        case "deactivate": return { ok: true, view: await service.deactivate() };
+        case "deactivate": return { ok: true, view: await service.deactivate(message.activationId) };
+        case "release": return { ok: true, view: await service.release({ activationId: message.activationId, licenseKey: message.licenseKey }) };
         case "platforms": return { ok: true, view: await service.selectPlatforms(message.platforms) };
         case "remember-platform": return { ok: true, view: await service.rememberPlatform(message.platform) };
         case "checkout": {
@@ -28,7 +31,8 @@ export function createBillingMessageHandler({ chrome, service }) {
         default: return { ok: false };
       }
     } catch (error) {
-      return { ok: false, error: error?.message === "price_changed" ? "price_changed" : "billing_unavailable" };
+      const code = BILLING_ERRORS.has(error?.message) ? error.message : "billing_unavailable";
+      return { ok: false, error: code, ...(code === "activation_limit_reached" ? { activations: error.activations || [] } : {}) };
     }
   };
 }

@@ -24,6 +24,7 @@ export function createSidepanelBilling({ document, chrome, locale, onChange = ()
   let selectedPlan = "pro";
   let targetPlatform = null;
   let replacedPlatform = "";
+  let fullList = null;
 
   function el(tag, className = "", content = "") {
     const node = document.createElement(tag);
@@ -100,31 +101,72 @@ export function createSidepanelBilling({ document, chrome, locale, onChange = ()
   }
   async function request(action, fields = {}) {
     const result = await chrome.runtime.sendMessage({ type: "POLARIS_BILLING", action, ...fields });
-    if (!result?.ok) throw new Error(result?.error === "price_changed" ? "price_changed" : "billing_unavailable");
+    if (!result?.ok) {
+      const failure = new Error(["price_changed", "activation_limit_reached", "invalid_license", "rate_limited"].includes(result?.error) ? result.error : "billing_unavailable");
+      failure.activations = Array.isArray(result?.activations) ? result.activations : [];
+      throw failure;
+    }
     setView(result.view);
     return result;
   }
   async function perform(task, after) {
     if (busy) return;
-    copyInput(); busy = true; error = ""; renderDialog();
+    copyInput(); busy = true; error = ""; fullList = null; renderDialog();
     try {
       await task();
       if (after) after();
     } catch (failure) {
-      error = failure?.message === "price_changed"
-        ? text("价格已更新，请确认当前金额后重新选择购买。", "The price has changed. Review the current amount before purchasing.")
-        : screen === "redeem"
-        ? text("未能验证许可证。请检查输入或稍后重试，也可通过邮箱找回。", "Could not verify this license. Check it or retry later, or recover it by email.")
-        : text("暂时无法连接许可服务。请检查网络后重试。", "Could not reach the license service. Check your connection and retry.");
+      if (failure?.message === "activation_limit_reached") fullList = failure.activations;
+      else error = failureText(failure);
     } finally {
       busy = false;
       if (settingsPanel?.isConnected) mountSettings(settingsPanel);
       renderDialog();
     }
   }
+  function failureText(failure) {
+    return failure?.message === "price_changed" ? text("价格已更新，请确认当前金额后重新选择购买。", "The price has changed. Review the current amount before purchasing.")
+      : failure?.message === "invalid_license" ? text("许可证无效，请检查后重试。", "This license is invalid. Check it and retry.")
+      : failure?.message === "rate_limited" ? text("请求过于频繁，请稍后重试。", "Too many requests. Please retry later.")
+      : text("暂时无法连接许可服务。请检查网络后重试。", "Could not reach the license service. Check your connection and retry.");
+  }
+  function browserName(item) {
+    return `${item.browser || "Chromium"} · ${item.os || text("未知系统", "Unknown OS")}`;
+  }
+  function since(value) {
+    const minutes = Math.round((Date.now() + (view?.clockOffset || 0) - value) / 60000);
+    const format = new Intl.RelativeTimeFormat(locale === "zh" ? "zh-CN" : "en-US", { numeric: "auto" });
+    if (minutes < 60) return format.format(-Math.max(minutes, 0), "minute");
+    if (minutes < 1440) return format.format(-Math.round(minutes / 60), "hour");
+    return format.format(-Math.round(minutes / 1440), "day");
+  }
+  // The browsers holding this license's slots. Profile names are not readable by
+  // extensions, so the activation date tells two profiles of one browser apart.
+  function deviceList(items, context) {
+    const list = el("ul", "billing-devices");
+    for (const item of items) {
+      const row = el("li", "billing-device");
+      const copy = el("div", "billing-device-copy");
+      const name = el("strong", "billing-device-name", browserName(item));
+      if (item.current) name.append(el("span", "billing-device-tag", text("本浏览器", "This browser")));
+      const date = item.activatedAt ? new Date(item.activatedAt).toLocaleDateString(locale === "zh" ? "zh-CN" : "en-US", { month: "short", day: "numeric" }) : "";
+      const used = item.current ? text("正在使用", "In use now") : item.lastSeenAt ? text(`${since(item.lastSeenAt)}使用`, `Used ${since(item.lastSeenAt)}`) : "";
+      copy.append(name, el("span", "billing-device-meta", [date && text(`激活于 ${date}`, `Activated ${date}`), used].filter(Boolean).join(" · ")));
+      const action = button(text("停用", "Deactivate"), () => confirmDeactivation(item, context), true);
+      action.className = "billing-device-action";
+      action.setAttribute("aria-label", text(`停用 ${browserName(item)}`, `Deactivate ${browserName(item)}`));
+      row.append(copy, action); list.append(row);
+    }
+    return list;
+  }
+  function fullPicker(context) {
+    const wrap = el("div", "billing-full");
+    wrap.append(note(text("3 个浏览器名额已用完。选择一个停用，即可激活本浏览器。", "All 3 browsers are in use. Deactivate one to activate this browser."), true), deviceList(fullList, context));
+    return wrap;
+  }
   function change(next) {
     if (next !== "processing") stopPolling();
-    copyInput(); screen = next; error = "";
+    copyInput(); screen = next; error = ""; fullList = null;
     if (next === "platforms") selection = targetPlatform
       ? [targetPlatform.key, ...(view?.platforms || view?.suggestedPlatforms || []).filter(key => key !== targetPlatform.key)].slice(0, 2)
       : [...(view?.platforms?.length ? view.platforms : view?.suggestedPlatforms || [])];
@@ -142,7 +184,10 @@ export function createSidepanelBilling({ document, chrome, locale, onChange = ()
       if (view?.tier === "pro") { screen = "success"; stopPolling(); }
       else if (["failed", "canceled"].includes(view?.purchaseStatus)) { screen = "upgrade"; stopPolling(); }
       else if (pollCount < 8) pollTimer = win.setTimeout(() => { void poll(); }, 2000 + pollCount * 500);
-    } catch { error = text("暂未收到确认。请稍后重试，无需再次购买。", "Confirmation is not available yet. Retry later; no need to purchase again."); }
+    } catch (failure) {
+      if (failure?.message === "activation_limit_reached") { fullList = failure.activations; stopPolling(); }
+      else error = text("暂未收到确认。请稍后重试，无需再次购买。", "Confirmation is not available yet. Retry later; no need to purchase again.");
+    }
     finally {
       busy = false;
       if (settingsPanel?.isConnected) mountSettings(settingsPanel);
@@ -196,8 +241,8 @@ export function createSidepanelBilling({ document, chrome, locale, onChange = ()
         heading.classList.add("billing-visually-hidden");
         lead.remove();
       } else {
-        heading.textContent = text("像高手一样，掌握长对话。", "Get long conversation like a pro.");
-        lead.textContent = text("全部支持的平台、长对话索引，一次解锁。", "Every supported platform and long-conversation indexing, unlocked with one purchase.");
+        heading.textContent = text("长对话，更得心应手。", "Long chats, made effortless.");
+        lead.textContent = text("解锁全部支持的平台与长对话模式，一次购买，长期使用。", "Unlock every supported platform and long conversation mode. Buy once, use it for good.");
         if (view?.tier === "trial" && view.trialEndsAt) {
           trialBanner = el("section", "billing-trial");
           trialBanner.setAttribute("aria-label", text("完整功能试用", "Full-access trial"));
@@ -240,7 +285,8 @@ export function createSidepanelBilling({ document, chrome, locale, onChange = ()
           if (view.price.amount < view.price.originalAmount && view.offerEndsAt) pro.append(el("p", "billing-offer", text(`首次启用优惠至 ${deadline(view.offerEndsAt)}`, `Welcome offer ends ${deadline(view.offerEndsAt)}`)));
         } else pro.append(el("p", "billing-price-unavailable", text("价格暂不可用", "Price unavailable")));
         const features = el("ul", "billing-features");
-        for (const line of [text("全部支持的平台", "Every supported platform"), text("长对话索引", "Long-conversation indexing"), text("不限设备", "Unlimited devices")]) features.append(el("li", "", line));
+        for (const line of [text("全部支持的平台", "Every supported platform"), text("长对话模式", "Long conversation mode"), text("最多 3 个浏览器", "Up to 3 browsers")]) features.append(el("li", "", line));
+        features.lastChild.append(el("span", "billing-feature-note", text("同一浏览器的每个 Profile 单独计算", "Each browser profile counts separately")));
         if (!pro.querySelector(".billing-offer")) pro.append(el("p", "billing-plan-assurance", text("一次购买，无需续费。", "One purchase. No renewals.")));
         if (view?.hasPurchase && !["failed", "canceled"].includes(view.purchaseStatus)) {
           pro.append(note(view.purchaseStatus === "paid" ? text("付款已确认，等待激活。无需再次购买。", "Payment confirmed. Activation pending; no need to purchase again.") : text("可以继续打开原付款页；若已付款，请查看进度。", "Reopen your existing checkout, or check progress if you’ve already paid.")));
@@ -279,7 +325,12 @@ export function createSidepanelBilling({ document, chrome, locale, onChange = ()
         const rows = [
           [text("功能", "Feature"), "Free", "Pro"],
           [text("同时启用的平台", "Active platforms"), text("任意 2 个", "Any 2"), text("全部", "All")],
-          [text("长对话索引", "Long-conversation indexing"), text("不包含", "Not included"), text("包含", "Included")]
+          [text("目录跳转", "Table of contents"), text("仅已加载", "Loaded only"), text("含更早消息", "Earlier too")],
+          [text("长对话模式", "Long conversation mode"), text("不包含", "Not included"), text("包含", "Included")],
+          [text("大纲导出 Markdown / HTML", "Outline export to Markdown / HTML"), text("包含", "Included"), text("包含", "Included")],
+          [text("对话只留在本机，不会上传", "Conversations stay on your device"), text("包含", "Included"), text("包含", "Included")],
+          [text("深浅色模式与自定义设置", "Light and dark mode, adjustable settings"), text("包含", "Included"), text("包含", "Included")],
+          [text("激活的浏览器", "Activated browsers"), text("无需激活", "No activation"), text("最多 3 个", "Up to 3")]
         ];
         const tableHead = el("thead"); const tableBody = el("tbody");
         rows.forEach((row, rowIndex) => {
@@ -297,24 +348,25 @@ export function createSidepanelBilling({ document, chrome, locale, onChange = ()
       body.append(links);
       const faq = el("section", "billing-faq"); faq.append(el("h2", "billing-section-title", text("常见问题", "Common questions")));
       for (const [question, answer] of [
-        ...(isPro ? [] : [[text("试用结束后会怎样？", "What happens after my trial?"), text("自动进入 Free，你可以选择任意两个平台并随时更换。长对话索引将不可用，但已有本地数据不会删除。不会自动扣款。", "You move to Free and can choose any two platforms, switching anytime. Long-conversation indexing becomes unavailable; local data stays. There is no automatic charge.")]]),
+        ...(isPro ? [] : [[text("试用结束后会怎样？", "What happens after my trial?"), text("自动进入 Free，你可以选择任意两个平台并随时更换。长对话模式将不可用，但已有本地数据不会删除。不会自动扣款。", "You move to Free and can choose any two platforms, switching anytime. Long conversation mode becomes unavailable; local data stays. There is no automatic charge.")]]),
         [text("买断是否需要续费？", "Does lifetime access renew?"), text("一次购买，无需续费。首次启用七天内享受优惠，具体价格与截止时间以上方显示为准。", "One purchase, no renewals. A welcome offer is available for seven days from first use. See the price and deadline above.")],
-        [text("许可证如何用于其他设备？", "How do I activate other devices?"), text("在其他设备打开「已有许可证？」并输入许可证即可激活，不限制设备数。", "Open “Already have a license?” on another device and enter your license to activate it. There is no device limit.")]
+        [text("许可证可以在几个浏览器使用？", "How many browsers can I activate?"), text("最多同时激活 3 个，可与朋友分享。同一浏览器的每个 Profile 单独计算，例如 Dia 的 Work 和 Default 算 2 个。名额用完后，可以选择停用其中一个，再激活新的浏览器。", "Up to 3 at a time, and you can share with friends. Each browser profile counts separately, so Dia’s Work and Default count as 2. When all 3 are in use, deactivate one to activate a new browser.")],
+        [text("长对话模式能做什么？", "What does long conversation mode do?"), text("聊了上百条，也能通过目录和大纲浏览已加载的内容。它只处理 Polaris 可访问的对话内容，不会增加 ChatGPT 的上下文窗口。", "Browse loaded content in chats with hundreds of messages through the table of contents and outline. It works with content available to Polaris and does not extend ChatGPT’s context window.")]
       ]) { const item = el("details"); item.append(el("summary", "", question), el("p", "billing-copy", answer)); faq.append(item); }
       body.append(faq);
       const closing = el("section", "billing-closing");
       const star = el("img", "billing-closing-star");
       star.src = chrome.runtime.getURL("icons/pro-entry-star.svg"); star.alt = ""; star.width = 96; star.height = 86;
       closing.append(star, el("h2", "billing-closing-title", view?.tier === "pro" ? text("继续探索，尽在 Polaris。", "Keep exploring with Polaris.") : text("让长对话，更好读。", "Make more of every conversation.")),
-        el("p", "billing-closing-copy", text("全部支持的平台、长对话索引，一次解锁。", "Every supported platform. Long-conversation indexing. One purchase.")));
+        el("p", "billing-closing-copy", text("解锁全部支持的平台与长对话模式，一次购买，长期使用。", "Unlock every supported platform and long conversation mode. Buy once, use it for good.")));
       const pending = view?.hasPurchase && !["failed", "canceled"].includes(view.purchaseStatus);
       const label = view?.tier === "pro" ? text("返回 Polaris", "Return to Polaris")
         : pending ? view.purchaseStatus === "paid" ? text("重试激活", "Retry activation") : text("继续付款", "Continue to checkout")
         : view?.price ? text(`立即购买 · $${(view.price.amount / 100).toFixed(2)}`, `Buy now · $${(view.price.amount / 100).toFixed(2)}`) : text("重试连接", "Retry connection");
       const purchase = button(label, buy); purchase.classList.add("billing-closing-buy");
-      closing.append(purchase, el("p", "billing-closing-fine", view?.tier === "pro" ? text("已激活 · 不限设备", "Active · Unlimited devices") : pending ? text("已有订单，无需重复购买。", "Your purchase is in progress. No need to buy again.") : text("USD · 一次买断 · 无自动续费", "USD · Lifetime access · No recurring charges")));
+      closing.append(purchase, el("p", "billing-closing-fine", view?.tier === "pro" ? text("已激活 · 最多 3 个浏览器", "Active · Up to 3 browsers") : pending ? text("已有订单，无需重复购买。", "Your purchase is in progress. No need to buy again.") : text("USD · 一次买断 · 无自动续费", "USD · Lifetime access · No recurring charges")));
       if (view?.tier === "pro") {
-        closing.append(link(text("停用本设备", "Deactivate this device"), confirmDeactivation));
+        closing.append(link(text("停用本浏览器", "Deactivate this browser"), () => confirmDeactivation()));
         heading.after(closing);
       } else {
         closing.append(link(text("也可以继续免费使用", "Or continue for free"), () => view?.needsPlatformChoice ? change("platforms") : close()));
@@ -323,24 +375,30 @@ export function createSidepanelBilling({ document, chrome, locale, onChange = ()
     } else if (screen === "checkout" || screen === "processing") {
       const activating = view?.purchaseStatus === "paid";
       heading.textContent = screen === "checkout" ? text("在 Stripe 完成付款", "Complete payment with Stripe") : activating ? text("正在激活 Polaris Pro", "Activating Polaris Pro") : text("正在确认付款", "Confirming your payment");
-      lead.textContent = text("付款页已在新标签页打开。确认付款与启用本设备可能需要一点时间。", "Checkout opens in a new tab. Payment confirmation and device activation may take a moment.");
+      lead.textContent = text("付款页已在新标签页打开。确认付款与启用本浏览器可能需要一点时间。", "Checkout opens in a new tab. Payment confirmation and browser activation may take a moment.");
+      if (fullList) {
+        heading.textContent = text("付款已确认，浏览器名额已满", "Payment confirmed. All 3 browsers are in use");
+        lead.textContent = text("无需再次购买。", "No need to purchase again.");
+        body.append(fullPicker("claim"), button(text("先返回 Polaris", "Return to Polaris"), close, true));
+      } else {
       body.append(note(text("关闭付款页不会被视为付款失败。你可以先继续使用 Polaris，之后在设置中查看进度。", "Closing checkout does not mean payment failed. Keep using Polaris and check progress in Settings later.")));
       if (pollCount >= 8) body.append(note(text("确认时间比预期长。稍后重试即可，无需再次购买。", "Confirmation is taking longer than expected. Retry later; do not purchase again.")));
       body.append(button(busy ? text("正在检查…", "Checking…") : activating ? text("重试激活", "Retry activation") : text("我已返回，查看进度", "I’m back — check progress"), startPolling));
       body.append(button(text("先返回 Polaris", "Return to Polaris"), close, true));
       body.append(link(text("通过购买邮箱找回", "Recover by checkout email"), () => { stopPolling(); change("recover"); }));
+      }
     } else if (screen === "success") {
       const star = el("img", "billing-success-star");
       star.src = chrome.runtime.getURL("icons/pro-entry-star.svg"); star.alt = ""; star.width = 72; star.height = 64;
       body.prepend(star);
       heading.textContent = text("Polaris Pro 已激活", "Welcome to Polaris Pro");
-      lead.textContent = text("全部平台与长对话索引已解锁。", "Every platform and long-conversation indexing, unlocked.");
+      lead.textContent = text("全部平台与长对话模式已解锁。", "Every platform and long conversation mode, unlocked.");
       body.append(button(text("开始使用", "Start exploring"), close));
-      body.append(el("p", "billing-closing-fine", text("一次买断 · 不限设备", "Lifetime access · Unlimited devices")));
+      body.append(el("p", "billing-closing-fine", text("一次买断 · 最多 3 个浏览器", "Lifetime access · Up to 3 browsers")));
     } else if (screen === "redeem" || screen === "recover") {
       const redeeming = screen === "redeem";
       heading.textContent = redeeming ? text("兑换许可证", "Redeem your license") : text("找回许可证", "Recover your license");
-      lead.textContent = redeeming ? text("输入购买邮件中的许可证，即可激活这台设备。", "Enter the license from your purchase email to activate this device.") : text("输入付款时使用的邮箱，无需创建 Polaris 账户。", "Enter the email used at checkout. No Polaris account needed.");
+      lead.textContent = redeeming ? text("输入购买邮件中的许可证，即可激活本浏览器。", "Enter the license from your purchase email to activate this browser.") : text("输入付款时使用的邮箱，无需创建 Polaris 账户。", "Enter the email used at checkout. No Polaris account needed.");
       const form = el("form", "billing-form");
       const label = el("label", "billing-form-label", redeeming ? text("许可证", "License key") : text("购买邮箱", "Checkout email"));
       const input = el("input", "billing-input"); input.type = redeeming ? "text" : "email"; input.name = redeeming ? "license" : "email"; input.id = `billing-${input.name}`;
@@ -348,8 +406,10 @@ export function createSidepanelBilling({ document, chrome, locale, onChange = ()
       if (error) { input.setAttribute("aria-invalid", "true"); input.setAttribute("aria-describedby", "billing-error"); }
       input.value = redeeming ? licenseValue : emailValue; input.placeholder = redeeming ? "POL-…" : "you@example.com"; input.disabled = busy;
       label.htmlFor = input.id;
-      const submit = button(busy ? text("正在处理…", "Working…") : redeeming ? text("激活本设备", "Activate this device") : text("发送找回邮件", "Send recovery email"), () => {}); submit.type = "submit";
-      form.append(label, input, submit);
+      const submit = button(busy ? text("正在处理…", "Working…") : redeeming ? text("激活本浏览器", "Activate this browser") : text("发送找回邮件", "Send recovery email"), () => {}); submit.type = "submit";
+      form.append(label, input);
+      // A full license continues from the browser list below, not by resubmitting.
+      if (!(redeeming && fullList)) form.append(submit);
       form.addEventListener("submit", event => {
         event.preventDefault();
         void perform(() => request(redeeming ? "redeem" : "recover", redeeming ? { licenseKey: input.value } : { email: input.value }), () => {
@@ -358,6 +418,7 @@ export function createSidepanelBilling({ document, chrome, locale, onChange = ()
         });
       });
       body.append(form);
+      if (redeeming && fullList) body.append(fullPicker("redeem"));
       if (redeeming) body.append(link(text("找不到许可证？", "Lost your license?"), () => change("recover")));
       body.append(link(text("返回", "Back"), back));
     } else if (screen === "recovery-sent") {
@@ -449,22 +510,38 @@ export function createSidepanelBilling({ document, chrome, locale, onChange = ()
     win.setTimeout(() => layer.remove(), 3400);
   }
 
-  function confirmDeactivation() {
+  // Without a target, this browser deactivates itself. With one, another browser of the
+  // license is removed: from settings, or to free a slot while activating ("redeem"/"claim").
+  function confirmDeactivation(target = null, context = "settings") {
     if (confirmation) return;
+    const self = !target || target.current;
     const source = document.activeElement;
     confirmation = el("dialog", "billing-dialog");
     const modal = confirmation;
     modal.setAttribute("aria-labelledby", "billing-deactivate-title");
     const body = el("div", "billing-body");
-    const title = el("h2", "billing-title", text("停用这台设备？", "Deactivate this device?")); title.id = "billing-deactivate-title";
+    const title = el("h2", "billing-title", self ? text("停用本浏览器？", "Deactivate this browser?") : text(`停用 ${browserName(target)}？`, `Deactivate ${browserName(target)}?`)); title.id = "billing-deactivate-title";
     const dismiss = () => { modal.close(); modal.remove(); confirmation = null; if (source?.isConnected) source.focus({ preventScroll: true }); };
-    body.append(title, el("p", "billing-copy", text("其他设备与买断许可仍然有效。之后可以使用许可证重新激活。", "Your license and other devices stay active. Reactivate anytime with your license.")));
-    const deactivate = button(text("确认停用本设备", "Deactivate this device"), async () => {
+    body.append(title, el("p", "billing-copy", self
+      ? text("将释放 1 个名额，其他浏览器不受影响。之后可以使用许可证重新激活。", "This frees 1 slot. Other browsers stay active. Reactivate anytime with your license.")
+      : text("该浏览器将退出 Pro，下次联网时生效。之后可以使用许可证重新激活。", "That browser leaves Pro the next time it goes online. It can be reactivated with the license.")));
+    const activating = !self && context !== "settings";
+    const deactivate = button(activating ? text("停用并激活本浏览器", "Deactivate and activate this browser") : text("确认停用", "Deactivate"), async () => {
       deactivate.disabled = true;
-      try { await request("deactivate"); dismiss(); if (dialog) change("upgrade"); }
-      catch { deactivate.disabled = false; body.querySelector("[role=alert]")?.remove(); body.append(note(text("停用失败，请检查网络后重试。", "Could not deactivate. Check your connection and retry."), true)); }
-    }, true);
-    body.append(deactivate, button(text("保留激活", "Keep this device active"), dismiss));
+      try {
+        if (self) { await request("deactivate"); dismiss(); if (dialog) change("upgrade"); return; }
+        if (!activating) { await request("deactivate", { activationId: target.id }); dismiss(); return; }
+        copyInput();
+        await request("release", { activationId: target.id, ...(context === "redeem" ? { licenseKey: licenseValue } : {}) });
+        dismiss();
+        if (context === "redeem") void perform(() => request("redeem", { licenseKey: licenseValue }), () => { licenseValue = ""; screen = "success"; });
+        else startPolling();
+      } catch {
+        deactivate.disabled = false; body.querySelector("[role=alert]")?.remove();
+        body.append(note(text("停用失败，请检查网络后重试。", "Could not deactivate. Check your connection and retry."), true));
+      }
+    }, !activating);
+    body.append(deactivate, button(self ? text("保留激活", "Keep this browser active") : text("取消", "Cancel"), dismiss, activating));
     modal.addEventListener("cancel", event => { event.preventDefault(); dismiss(); });
     modal.append(body); document.body.append(modal); modal.showModal();
   }
@@ -486,10 +563,13 @@ export function createSidepanelBilling({ document, chrome, locale, onChange = ()
     settingsPanel = panel;
     const section = el("section", "settings-section billing-settings");
     section.append(el("h2", "settings-section-title", tierLabel()));
-    if (view?.tier === "pro") section.append(el("p", "billing-copy", text("买断许可 · 不限设备 · 无自动续费", "Lifetime license · Unlimited devices · No recurring charges")));
+    if (view?.tier === "pro") section.append(el("p", "billing-copy", text("买断许可 · 最多 3 个浏览器 · 无自动续费", "Lifetime license · Up to 3 browsers · No recurring charges")));
+    if (view?.remoteDeactivated) section.append(note(text("本浏览器已在另一个浏览器中停用，Pro 已退出。可以使用许可证重新激活。", "This browser was deactivated from another browser and left Pro. Reactivate anytime with your license.")));
     if (view?.tier === "trial") section.append(el("p", "billing-copy", text(`试用至 ${deadline(view.trialEndsAt)}，之后自动转为 Free，不自动扣款。`, `Trial ends ${deadline(view.trialEndsAt)}, then switches to Free with no automatic charge.`)));
     if (view?.unavailable) section.append(note(text("许可服务暂时无法连接。请稍后重试。", "The license service is unavailable. Please retry later.")));
-    section.append(button(view?.tier === "pro" ? text("停用本设备", "Deactivate this device") : text("升级 Polaris Pro", "Upgrade to Polaris Pro"), () => open(view?.tier === "pro" ? "deactivate" : "upgrade"), view?.tier === "pro"));
+    if (view?.tier === "pro" && view.activations?.length) section.append(el("h3", "billing-devices-title", text("已激活的浏览器", "Active browsers")), deviceList(view.activations, "settings"));
+    else if (view?.tier === "pro") section.append(button(text("停用本浏览器", "Deactivate this browser"), () => open("deactivate"), true));
+    else section.append(button(text("升级 Polaris Pro", "Upgrade to Polaris Pro"), () => open("upgrade")));
     if (view?.hasPurchase) section.append(button(text("查看购买进度", "Check purchase progress"), () => { open("processing"); startPolling(); }, true));
     section.append(link(text("已有许可证？", "Already have a license?"), () => open("redeem")));
     if (view?.tier === "free") {
@@ -517,7 +597,7 @@ export function createSidepanelBilling({ document, chrome, locale, onChange = ()
       star.append(image);
       const copy = el("div", "settings-pro-copy");
       copy.append(el("h2", "settings-pro-title", "Get Pro"),
-        el("p", "settings-pro-subtitle", text("全部平台 · 长对话模式", "Every platform · Long conversation mode")));
+        el("p", "settings-pro-subtitle"));
       header.append(star, copy);
       const action = button("", () => open());
       action.className = "settings-pro-cta";
@@ -528,8 +608,8 @@ export function createSidepanelBilling({ document, chrome, locale, onChange = ()
     entry.querySelector(".settings-pro-status").hidden = view?.tier !== "trial";
     entry.querySelector(".settings-pro-title").textContent = view?.tier === "pro" ? "Polaris Pro" : "Get Pro";
     entry.querySelector(".settings-pro-subtitle").textContent = view?.tier === "pro"
-      ? text("已激活 · 不限设备", "Active · Unlimited devices")
-      : text("全部平台 · 长对话模式", "Every platform · Long conversation mode");
+      ? text("已激活 · 最多 3 个浏览器", "Active · Up to 3 browsers")
+      : text("告别反复滚动，轻松浏览和搜索 ChatGPT 长对话，快速找到重要内容，随时保存精彩回答。", "Navigate long ChatGPT chats with a table of contents, chat search, interactive outlines, Markdown or HTML export, and more.");
     entry.querySelector(".settings-pro-cta").textContent = view?.tier === "pro" ? text("查看会员信息", "View membership")
       : text("了解 Pro", "Explore Pro");
   }

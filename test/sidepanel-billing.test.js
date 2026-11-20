@@ -123,8 +123,8 @@ test('license settings remain usable immediately after redemption or payment act
    const settingsButtons=[...f.w.document.querySelectorAll('#settings button')];
    assert.ok(settingsButtons.length>0);
    assert.ok(settingsButtons.every(button=>!button.disabled),flow);
-   f.click('停用本设备');
-   assert.match(f.w.document.querySelector('dialog .billing-title').textContent,/停用这台设备/);
+   f.click('停用本浏览器');
+   assert.match(f.w.document.querySelector('dialog .billing-title').textContent,/停用本浏览器/);
   }finally{f.dom.window.close()}
  }
 });
@@ -299,10 +299,99 @@ test('pro owners see the closing card first without the purchase heading copy',a
   const title=body.querySelector('#billing-title');assert.equal(title.textContent,'Your Polaris Pro');assert.ok(title.classList.contains('billing-visually-hidden'));
   assert.equal(title.nextElementSibling,body.querySelector('.billing-closing'));assert.equal(body.querySelector(':scope > .billing-copy'),null);assert.equal(body.querySelector(':scope > .billing-note'),null);
   assert.equal(body.querySelectorAll('.billing-closing').length,1);assert.equal([...body.querySelectorAll('button')].filter(b=>b.textContent==='Return to Polaris').length,1);
-  assert.ok(body.querySelector('.billing-closing').contains([...body.querySelectorAll('button')].find(b=>b.textContent==='Deactivate this device')))}finally{f.dom.window.close()}
+  assert.ok(body.querySelector('.billing-closing').contains([...body.querySelectorAll('button')].find(b=>b.textContent==='Deactivate this browser')))}finally{f.dom.window.close()}
 });
 
 test('pro owners do not see redeem or trial guidance on the upgrade page',async()=>{
  for(const tier of ['pro','trial']){const f=await fixture({tier,locale:'en'});try{f.billing.open();const page=f.w.document.querySelector('.billing-page');const labels=[...page.querySelectorAll('button')].map(b=>b.textContent);const questions=[...page.querySelectorAll('summary')].map(n=>n.textContent);
-  assert.equal(labels.includes('Already have a license?'),tier!=='pro',tier);assert.ok(labels.includes('Recover your license'),tier);assert.equal(questions.includes('What happens after my trial?'),tier!=='pro',tier);assert.ok(questions.includes('How do I activate other devices?'),tier)}finally{f.dom.window.close()}}
+  assert.equal(labels.includes('Already have a license?'),tier!=='pro',tier);assert.ok(labels.includes('Recover your license'),tier);assert.equal(questions.includes('What happens after my trial?'),tier!=='pro',tier);assert.ok(questions.includes('How many browsers can I activate?'),tier)}finally{f.dom.window.close()}}
+});
+
+async function slotFixture({tier='trial',view={},handle}={}){
+ const dom=new JSDOM('<div id="settings"></div>',{url:'https://extension.test/sidepanel.html',pretendToBeVisual:true});const w=dom.window;w.scrollTo=()=>{};
+ w.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','')};w.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open')};
+ const state={view:{...base,tier,fullAccess:true,activations:[],...view}};const requests=[];
+ const chrome={runtime:{getURL:path=>`https://extension.test/${path}`,onMessage:{addListener(){}},async sendMessage(m){requests.push(m);const result=await handle?.(m,state);return result||{ok:true,view:state.view}}}};
+ const billing=createSidepanelBilling({document:w.document,chrome,locale:'zh',onOpenPage:page=>w.document.body.append(page)});await billing.ready;billing.mountSettings(w.document.querySelector('#settings'));
+ const find=label=>[...w.document.querySelectorAll('button')].find(n=>n.textContent===label);
+ return {dom,w,billing,requests,state,find,submit(value){w.document.querySelector('input[name=license]').value=value;w.document.querySelector('form').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}))}};
+}
+const slots=[{id:'act-work',browser:'Dia',os:'macOS',activatedAt:Date.now()-86400000,lastSeenAt:Date.now()-7200000},{id:'act-home',browser:'Dia',os:'macOS',activatedAt:Date.now()-172800000,lastSeenAt:Date.now()-259200000},{id:'act-friend',browser:'Edge',os:'Windows',activatedAt:Date.now()-3600000,lastSeenAt:null}];
+
+test('redeem errors are specific, and a full license lets the user deactivate one browser and continue',async()=>{
+ let released=false;
+ const f=await slotFixture({handle(m,state){
+  if(m.action==='redeem'&&m.licenseKey==='bad')return {ok:false,error:'invalid_license'};
+  if(m.action==='redeem'&&m.licenseKey==='busy')return {ok:false,error:'rate_limited'};
+  if(m.action==='redeem'&&!released)return {ok:false,error:'activation_limit_reached',activations:slots};
+  if(m.action==='release'){released=true;return {ok:true,view:state.view};}
+  if(m.action==='redeem'){state.view={...state.view,tier:'pro'};return {ok:true,view:state.view};}
+ }});
+ try{
+  f.billing.open('redeem');
+  f.submit('bad');await tick();assert.match(f.w.document.querySelector('[role=alert]').textContent,/许可证无效/);
+  f.submit('busy');await tick();assert.match(f.w.document.querySelector('[role=alert]').textContent,/请求过于频繁/);
+  f.submit('POL-KEY');await tick();
+  assert.match(f.w.document.querySelector('.billing-full').textContent,/3 个浏览器名额已用完/);
+  assert.deepEqual([...f.w.document.querySelectorAll('.billing-device-name')].map(n=>n.textContent),['Dia · macOS','Dia · macOS','Edge · Windows']);
+  assert.equal(f.w.document.querySelector('input[name=license]').value,'POL-KEY','the entered license is kept');
+  f.w.document.querySelectorAll('.billing-device-action')[1].click();
+  assert.match(f.w.document.querySelector('dialog .billing-title').textContent,/停用 Dia · macOS？/);
+  f.find('取消').click();assert.equal(f.w.document.querySelector('dialog'),null);
+  assert.equal(f.requests.some(r=>r.action==='release'),false);
+  f.w.document.querySelectorAll('.billing-device-action')[1].click();
+  f.find('停用并激活本浏览器').click();await tick();await tick();
+  assert.deepEqual(f.requests.find(r=>r.action==='release'),{type:'POLARIS_BILLING',action:'release',activationId:'act-home',licenseKey:'POL-KEY'});
+  assert.equal(f.requests.filter(r=>r.action==='redeem').at(-1).licenseKey,'POL-KEY');
+  assert.equal(f.w.document.querySelector('.billing-page').dataset.screen,'success');
+ }finally{f.dom.window.close()}
+});
+
+test('a paid order that hits the limit offers the same browser list and retries the claim',async()=>{
+ let released=false;
+ const f=await slotFixture({handle(m,state){
+  if(m.action==='purchase-status'&&!released)return {ok:false,error:'activation_limit_reached',activations:slots};
+  if(m.action==='release'){released=true;return {ok:true,view:state.view};}
+  if(m.action==='purchase-status'){state.view={...state.view,tier:'pro',hasPurchase:false};return {ok:true,view:state.view};}
+ },view:{hasPurchase:true,purchaseStatus:'paid'}});
+ try{
+  f.billing.open('upgrade');f.find('重试激活').click();await tick();await tick();
+  assert.match(f.w.document.querySelector('.billing-title').textContent,/付款已确认，浏览器名额已满/);
+  f.w.document.querySelector('.billing-device-action').click();f.find('停用并激活本浏览器').click();await tick();await tick();await tick();
+  const release=f.requests.find(r=>r.action==='release');
+  assert.equal(release.activationId,'act-work');assert.equal(release.licenseKey,undefined,'the purchase proves the license');
+  assert.equal(f.w.document.querySelector('.billing-page').dataset.screen,'success');
+ }finally{f.dom.window.close()}
+});
+
+test('settings list the active browsers and remove another one without leaving Pro',async()=>{
+ const f=await slotFixture({tier:'pro',handle(m,state){if(m.action==='deactivate'){state.view={...state.view,activations:state.view.activations.filter(item=>item.id!==m.activationId)};return {ok:true,view:state.view};}},view:{activations:[{...slots[0],current:true},slots[2]]}});
+ try{
+  const settings=f.w.document.querySelector('#settings');
+  assert.match(settings.textContent,/已激活的浏览器/);assert.match(settings.textContent,/最多 3 个浏览器/);
+  assert.match(settings.querySelector('.billing-device-tag').textContent,/本浏览器/);
+  settings.querySelectorAll('.billing-device-action')[1].click();
+  assert.match(f.w.document.querySelector('dialog .billing-copy').textContent,/下次联网时生效/);
+  f.find('确认停用').click();await tick();
+  assert.deepEqual(f.requests.find(r=>r.action==='deactivate'),{type:'POLARIS_BILLING',action:'deactivate',activationId:'act-friend'});
+  f.billing.mountSettings(settings);
+  assert.equal(settings.querySelectorAll('.billing-device').length,1);
+  settings.querySelector('.billing-device-action').click();
+  assert.match(f.w.document.querySelector('dialog .billing-title').textContent,/停用本浏览器？/);
+ }finally{f.dom.window.close()}
+});
+
+test('a browser removed elsewhere explains why it left Pro',async()=>{
+ const f=await slotFixture({tier:'free',view:{remoteDeactivated:true}});
+ try{assert.match(f.w.document.querySelector('#settings').textContent,/本浏览器已在另一个浏览器中停用/)}finally{f.dom.window.close()}
+});
+
+test('the feature comparison matches the website plans in both languages',async()=>{
+ for(const [locale,rows] of [['zh',['同时启用的平台','目录跳转','长对话模式','大纲导出 Markdown / HTML','对话只留在本机，不会上传','深浅色模式与自定义设置','激活的浏览器']],['en',['Active platforms','Table of contents','Long conversation mode','Outline export to Markdown / HTML','Conversations stay on your device','Light and dark mode, adjustable settings','Activated browsers']]]){
+  const f=await fixture({locale});
+  try{f.billing.open();const table=f.w.document.querySelector('.billing-comparison');
+   assert.deepEqual([...table.querySelectorAll('tbody th')].map(n=>n.textContent),rows);
+   assert.deepEqual([...table.querySelectorAll('tbody tr:last-child td')].map(n=>n.textContent),locale==='zh'?['无需激活','最多 3 个']:['No activation','Up to 3']);
+  }finally{f.dom.window.close()}
+ }
 });

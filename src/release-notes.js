@@ -1,5 +1,10 @@
 const RELEASE_NOTES = Object.freeze([
   {
+    version: "1.6.0",
+    en: { title: "One license, up to 3 browsers", changes: ["Each Pro license activates up to 3 browsers at a time. Each browser profile counts separately, so Dia’s Work and Default count as 2.", "When all 3 are in use, pick one from the list to deactivate and this browser activates right away. Settings list every active browser."] },
+    zh: { title: "一份许可，最多 3 个浏览器", changes: ["每份 Pro 许可最多同时激活 3 个浏览器。同一浏览器的每个 Profile 单独计算，例如 Dia 的 Work 和 Default 算 2 个。", "名额用完时，从列表中选一个停用，本浏览器随即激活。设置页会列出所有已激活的浏览器。"] }
+  },
+  {
     version: "1.5.0",
     en: { title: "Backfill your own long chats", changes: ["With your permission, long conversation mode renders the unmounted messages of your open chat using only the page's own list, beneath a cover, then restores your place. Shared chats are skipped.", "It pauses while the page is hidden and stops when you use the page; the progress card offers Continue loading. Polaris still does not call website APIs."] },
     zh: { title: "自动补齐你自己的长对话", changes: ["经你同意后，长对话模式会只用网页自身的列表，在遮罩下补齐当前对话未显示的消息，结束后恢复原阅读位置；分享页不补齐。", "页面不可见时暂停，操作网页即停止，进度卡片提供「继续补齐」。Polaris 仍不调用网站接口。"] }

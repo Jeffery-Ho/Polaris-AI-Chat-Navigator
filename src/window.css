@@ -1762,6 +1762,18 @@ button.chapter-node-toggle svg { display: none; }
 .billing-fine { text-align: center; margin: 16px 0 0; color: var(--polaris-text-secondary); font-size: 11px; line-height: 1.7; }
 .billing-note { margin: 16px 0; padding: 12px; border-radius: var(--polaris-radius-md); background: var(--polaris-bg-subtle); color: var(--polaris-text-secondary); font-size: 12px; line-height: 1.7; }
 .billing-note.is-error { color: var(--polaris-text); border: 1px solid var(--polaris-accent); }
+.billing-feature-note { display: block; margin-top: 2px; color: var(--polaris-text-secondary); font-size: 12px; font-weight: 400; }
+.billing-devices-title { margin: 16px 0 0; font-size: 13px; font-weight: 600; }
+.billing-devices { margin: 8px 0 0; padding: 0; list-style: none; border: 1px solid var(--polaris-border); border-radius: var(--polaris-radius-md); overflow: hidden; }
+.billing-device { display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: var(--polaris-bg-elevated); }
+.billing-device + .billing-device { border-top: 1px solid var(--polaris-border); }
+.billing-device-copy { flex: 1; min-width: 0; }
+.billing-device-name { display: block; font-size: 13px; font-weight: 600; }
+.billing-device-tag { margin-left: 6px; padding: 0 6px; border-radius: 999px; background: var(--polaris-accent-subtle); color: var(--polaris-accent-text); font-size: 11px; font-weight: 600; }
+.billing-device-meta { display: block; color: var(--polaris-text-secondary); font-size: 12px; }
+.billing-device-action { flex: none; min-height: 32px; padding: 4px 12px; border: 1px solid var(--polaris-border-strong); border-radius: var(--polaris-radius-sm); background: transparent; color: var(--polaris-text); font-size: 12px; cursor: pointer; }
+.billing-device-action:hover { border-color: var(--polaris-accent); color: var(--polaris-accent-text); }
+.billing-device-action:disabled { opacity: .5; cursor: default; }
 .billing-form-label { display: block; font-size: 13px; margin: 20px 0 8px; }
 .billing-input { width: 100%; padding: 11px 12px; border: 1px solid var(--polaris-border); border-radius: var(--polaris-radius-md); background: var(--polaris-bg); color: var(--polaris-text); caret-color: var(--polaris-accent); }
 .billing-platforms { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 20px 0; }

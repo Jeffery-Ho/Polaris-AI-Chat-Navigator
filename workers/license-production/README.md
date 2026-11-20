@@ -4,13 +4,13 @@ Separate from `polaris-license-test`. This Worker uses its own D1 database and i
 
 `GET /health` returns `env: "production"`. `billingReady` is true only when the live Stripe key, webhook secret, both Price IDs, signing secrets, and email binding are all present. Health alone does not prove a completed purchase.
 
-Checkout accepts only live Stripe sessions (`cs_live_`) and sends buyers back to `https://polaris-ai.work/v2/checkout-return/`. The return path is fixed in the Worker. A client cannot supply another URL. USD 19.99 is the regular one-time lifetime price. USD 12.90 applies only while an extension installation's server-recorded seven-day trial is still open. The client cannot choose or extend that window. There is no device limit. Test-mode keys, test sessions, and localhost returns are rejected.
+Checkout accepts only live Stripe sessions (`cs_live_`) and sends buyers back to `https://polaris-ai.work/v2/checkout-return/`. The return path is fixed in the Worker. A client cannot supply another URL. USD 19.99 is the regular one-time lifetime price. USD 12.90 applies only while an extension installation's server-recorded seven-day trial is still open. The client cannot choose or extend that window. Each license activates up to 3 browsers at a time (see Activation limit). Test-mode keys, test sessions, and localhost returns are rejected.
 
 ## Public website contract
 
 These routes are for `https://polaris-ai.work` only. Anonymous website buyers get the USD 12.90 launch price.
 
-`GET /api/catalog` returns `{ serverTime, plans: [{ id: "pro", currency: "usd", amount: 1290, originalAmount: 1999, billing: "one_time", maxActivations: null }] }`.
+`GET /api/catalog` returns `{ serverTime, plans: [{ id: "pro", currency: "usd", amount: 1290, originalAmount: 1999, billing: "one_time", maxActivations: 3 }] }`.
 
 `POST /api/checkout/web-session` requires `Origin: https://polaris-ai.work`. An ordinary direct purchase is `{ planId: "pro", expectedAmount: 1290 }` and needs no installation. The response is `{ checkoutUrl, purchaseId, claimToken, amount, currency: "usd", originalAmount: 1999 }`. `checkoutUrl` is `https://checkout.stripe.com/...` and its path contains `cs_live_`. Stripe returns only to `https://polaris-ai.work/v2/checkout-return/?result=success&purchase=<purchaseId>` or the same path with `result=cancel`. `result=success` is not proof of payment.
 
@@ -43,3 +43,19 @@ pnpm license:grant buyer@example.com
 ```
 
 The script reads the token from `POLARIS_ADMIN_TOKEN` or the ignored `workers/license-production/.admin-token`.
+
+## Activation limit
+
+A license counts its `active` rows in `polaris_billing_activations` (one per `installation_hash`). Migration `0002_activation_limit.sql` adds triggers that abort an insert, or an update back to `active`, when the license already holds 3 active rows. The check is part of the write, so concurrent redeem and claim requests cannot exceed it. An installation that is already active reuses its row and succeeds even when the license is full.
+
+- `POST /api/licenses/redeem` and `POST /api/licenses/claim` accept an optional `client: { browser, os }` label (letters, digits, space, `._-`, at most 32 characters; anything else is stored as null). Success adds `activationId` and `activations` to the response.
+- A full license returns `409 { error: "activation_limit_reached", limit: 3, activations: [{ id, browser, os, activatedAt, lastSeenAt }] }`. Anyone with the license key can see this list.
+- `POST /api/licenses/release` with `X-Installation-Token` and `{ installationId, activationId, licenseKey }` or `{ installationId, activationId, purchaseId, claimToken }` frees that slot. A replay returns `released: false` and frees nothing else.
+- `POST /api/licenses/deactivate` with `{ activationToken, activationId }` removes another browser of the same license; without `activationId` it deactivates the caller, as before.
+- A released row keeps its credential hash and bumps its generation, so `validate` returns `{ valid: false, reason: "deactivated" }` and the old credential cannot be renewed. `validate` success includes `activationId` and `activations`. Offline grace still applies until the next validation.
+
+Apply the migration before deploying the Worker:
+
+```sh
+pnpm wrangler d1 migrations apply polaris-license-production --remote --config workers/license-production/wrangler.jsonc
+```

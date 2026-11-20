@@ -5,8 +5,33 @@ export const BILLING_STORAGE_KEY = "polaris-billing-v1";
 const DAY = 86400000;
 const REFRESH_INTERVAL = 600000;
 const platformKeys = new Set(SUPPORTED_PLATFORMS.map(({ key }) => key));
+export const BILLING_ERRORS = new Set(["price_changed", "activation_limit_reached", "invalid_license", "rate_limited"]);
+const BRAND_NAMES = [["Microsoft Edge", "Edge"], ["Google Chrome", "Chrome"], ["Opera", "Opera"], ["Brave", "Brave"], ["Arc", "Arc"], ["Dia", "Dia"], ["Vivaldi", "Vivaldi"]];
 
-export function createBillingService({ storage, fetch: request = globalThis.fetch, now = Date.now, apiUrl = BILLING_API_URL, stripeMode = BILLING_STRIPE_MODE, onChange = () => {} }) {
+// A label the user can recognize in the license's browser list. Profile names are not
+// readable by extensions, so two profiles of one browser differ only by their dates.
+export function describeBrowser(nav = globalThis.navigator) {
+  const brands = (nav?.userAgentData?.brands || []).map(({ brand }) => brand);
+  const agent = nav?.userAgent || "";
+  const known = BRAND_NAMES.find(([brand]) => brands.includes(brand));
+  const browser = known ? known[1] : /Firefox\//.test(agent) ? "Firefox" : brands.includes("Chromium") || /Chrome\//.test(agent) ? "Chromium" : null;
+  const platform = `${nav?.userAgentData?.platform || ""} ${agent}`;
+  const os = /CrOS/.test(platform) ? "ChromeOS" : /Mac/.test(platform) ? "macOS" : /Win/.test(platform) ? "Windows" : /Android/.test(platform) ? "Android" : /Linux/.test(platform) ? "Linux" : null;
+  return { browser, os };
+}
+
+function activationList(value) {
+  if (!Array.isArray(value)) return [];
+  return value.filter(item => typeof item?.id === "string").slice(0, 3).map(item => ({
+    id: item.id,
+    browser: typeof item.browser === "string" ? item.browser : null,
+    os: typeof item.os === "string" ? item.os : null,
+    activatedAt: Number(item.activatedAt) || null,
+    lastSeenAt: Number(item.lastSeenAt) || null
+  }));
+}
+
+export function createBillingService({ storage, fetch: request = globalThis.fetch, now = Date.now, apiUrl = BILLING_API_URL, stripeMode = BILLING_STRIPE_MODE, client = describeBrowser(), onChange = () => {} }) {
   let data = null;
   let initialization = null;
   let loading = null;
@@ -44,8 +69,9 @@ export function createBillingService({ storage, fetch: request = globalThis.fetc
     });
     if (!response.ok) {
       const result = await response.json().catch(() => null);
-      const error = new Error(result?.error === "price_changed" ? "price_changed" : "billing_unavailable");
+      const error = new Error(BILLING_ERRORS.has(result?.error) ? result.error : "billing_unavailable");
       error.status = response.status;
+      if (result?.error === "activation_limit_reached") error.activations = activationList(result.activations);
       throw error;
     }
     return response.json();
@@ -71,7 +97,9 @@ export function createBillingService({ storage, fetch: request = globalThis.fetc
       suggestedPlatforms: (data?.recentPlatforms || []).slice(0, 2),
       needsPlatformChoice: tier === "free" && platforms.length !== 2,
       purchaseStatus: data?.purchase?.status || "none",
-      hasPurchase: Boolean(data?.purchase)
+      hasPurchase: Boolean(data?.purchase),
+      activations: pro ? activationList(data.activations).map(item => ({ ...item, current: item.id === data.activationId })) : [],
+      remoteDeactivated: !pro && Boolean(data?.remoteDeactivated)
     };
   }
 
@@ -83,11 +111,20 @@ export function createBillingService({ storage, fetch: request = globalThis.fetc
       const serverNow = now() + (data.clockOffset || 0);
       data.offlineUntil = Math.min(Number(result.offlineUntil) || serverNow, serverNow + DAY);
       data.lastValidatedAt = now();
+      if (typeof result.activationId === "string") data.activationId = result.activationId;
+      if (Array.isArray(result.activations)) data.activations = activationList(result.activations);
     } else {
-      delete data.activationToken;
-      delete data.offlineUntil;
-      data.entitlement = null;
+      clearActivation();
+      data.remoteDeactivated = result.reason === "deactivated";
     }
+  }
+
+  function clearActivation() {
+    delete data.activationToken;
+    delete data.offlineUntil;
+    delete data.activationId;
+    delete data.activations;
+    data.entitlement = null;
   }
 
   async function loadCatalog() {
@@ -153,6 +190,9 @@ export function createBillingService({ storage, fetch: request = globalThis.fetc
     const serverNow = now() + (data.clockOffset || 0);
     data.offlineUntil = Math.min(Number(result.offlineUntil) || serverNow, serverNow + DAY);
     data.lastValidatedAt = now();
+    data.activationId = typeof result.activationId === "string" ? result.activationId : null;
+    data.activations = activationList(result.activations);
+    delete data.remoteDeactivated;
     delete data.purchase;
     unavailable = false;
     await save();
@@ -210,7 +250,7 @@ export function createBillingService({ storage, fetch: request = globalThis.fetc
       await save();
       if (result.status === "paid" && result.activationReady) {
         return activate(await call("/api/licenses/claim", {
-          purchaseId: purchase.purchaseId, claimToken: purchase.claimToken, installationId: data.installationId
+          purchaseId: purchase.purchaseId, claimToken: purchase.claimToken, installationId: data.installationId, client
         }));
       }
       return view();
@@ -218,7 +258,7 @@ export function createBillingService({ storage, fetch: request = globalThis.fetc
     redeem: licenseKey => serial(async () => {
       await initialize();
       if (typeof licenseKey !== "string" || !licenseKey.trim() || licenseKey.length > 256) throw new Error("invalid_license");
-      return activate(await call("/api/licenses/redeem", { licenseKey: licenseKey.trim(), installationId: data.installationId }));
+      return activate(await call("/api/licenses/redeem", { licenseKey: licenseKey.trim(), installationId: data.installationId, client }));
     }),
     recover: email => serial(async () => {
       await initialize();
@@ -226,13 +266,33 @@ export function createBillingService({ storage, fetch: request = globalThis.fetc
       await call("/api/licenses/recover", { email });
       return { accepted: true };
     }),
-    deactivate: () => serial(async () => {
+    // Frees one slot of a full license before this browser activates. The license key
+    // (redeem) or this browser's paid purchase (claim) proves the license.
+    release: ({ activationId, licenseKey } = {}) => serial(async () => {
       await initialize();
+      if (typeof activationId !== "string" || !activationId) throw new Error("invalid_request");
+      const proof = typeof licenseKey === "string" && licenseKey.trim()
+        ? { licenseKey: licenseKey.trim() }
+        : data.purchase ? { purchaseId: data.purchase.purchaseId, claimToken: data.purchase.claimToken } : null;
+      if (!proof) throw new Error("invalid_license");
+      const result = await call("/api/licenses/release", { ...proof, installationId: data.installationId, activationId });
+      if (!Array.isArray(result.activations)) throw new Error("release_not_confirmed");
+      return view();
+    }),
+    deactivate: activationId => serial(async () => {
+      await initialize();
+      if (data.activationToken && typeof activationId === "string" && activationId !== data.activationId) {
+        const result = await call("/api/licenses/deactivate", { activationToken: data.activationToken, activationId });
+        if (!Array.isArray(result.activations)) throw new Error("deactivation_not_confirmed");
+        data.activations = activationList(result.activations);
+        await save();
+        return view();
+      }
       if (data.activationToken) {
         const result = await call("/api/licenses/deactivate", { activationToken: data.activationToken });
         if (result.deactivated !== true && result.valid !== false) throw new Error("deactivation_not_confirmed");
       }
-      delete data.activationToken; delete data.offlineUntil; data.entitlement = null;
+      clearActivation();
       await save();
       return view();
     }),

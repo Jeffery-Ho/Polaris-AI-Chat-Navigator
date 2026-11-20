@@ -10,6 +10,13 @@
 - Version update type must be declared by the user before recording a build.
 - After each build is recorded, confirm the build number and version with the user.
 
+## 445
+- Date: 2026-11-20
+- Version: 1.6.0
+- Summary: Limit each Pro license to 3 active browsers and let a full license deactivate one from a list.
+- Notes: The production Worker counts active `installation_hash` rows per license. Migration `0002_activation_limit.sql` adds `browser`/`os` columns and two triggers that abort an insert or a reactivation once a license holds 3 active rows, so concurrent redeem/claim cannot exceed the limit; an installation that is already active reuses its slot even when full. A full license returns `409 { error: "activation_limit_reached", limit: 3, activations }`. `POST /api/licenses/release` frees a slot with the license key or the installation's paid purchase; `POST /api/licenses/deactivate` with `activationId` removes another browser from an active one. A released row keeps its credential hash so `validate` answers `reason: "deactivated"`, and its generation bump stops the old credential from returning. `validate` and activation responses carry the browser list. The client sends a browser/OS label from client hints (profile names are not readable), passes known error codes through billing-service, billing-messages and the sidepanel, and maps unknown ones to the unavailable message. Sidepanel copy replaces "unlimited devices"/"this device" with "up to 3 browsers"/"this browser", renames long-conversation indexing to long conversation mode, adopts the POL-16 store summary on the settings card, expands the feature comparison to match the website plans (TOC reach, long conversation mode, outline export, local-only, theme and settings, activated browsers), and adds the full-license picker, the settings browser list and the remotely deactivated notice. The license email and plan `maxActivations` now say 3.
+- Validation: Worker tests cover the 3-browser limit, reuse when full, release and replay, the reason on a released credential, and racing activations (new and reactivated); client tests cover error codes, release and remote deactivation; sidepanel tests cover specific redeem errors, the full-license picker for redeem and claim, and the settings list. `pnpm check`, `pnpm build`, `pnpm test` (783) and `pnpm license:check` (13) passed. Not checked in a loaded extension or against the deployed Worker; the D1 migration is not applied yet, and Dia's brand detection through client hints is untested.
+
 ## 444
 - Date: 2026-11-18
 - Version: 1.5.18

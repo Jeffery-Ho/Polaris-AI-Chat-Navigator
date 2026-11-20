@@ -103,3 +103,64 @@ test('platforms chosen during trial apply at expiry without deleting local data 
  const selected=await f.service.getView();assert.equal(selected.fullAccess,true);assert.equal(selected.trialEndsAt,trial.trialEndsAt);
  f.advance(8*86400000);const free=await f.service.getView();assert.equal(free.tier,'free');assert.equal(free.needsPlatformChoice,false);assert.deepEqual(free.platforms,['kimi','gemini']);assert.equal(free.trialEndsAt,trial.trialEndsAt);
 });
+
+function slotFixture() {
+ const local = {}; const requests = []; let full = true; let releasedReason = false;
+ const list = [{id:'act-work',browser:'Dia',os:'macOS',activatedAt:1,lastSeenAt:2},{id:'act-home',browser:'Dia',os:'macOS',activatedAt:3,lastSeenAt:4},{id:'act-friend',browser:'Edge',os:'Windows',activatedAt:5,lastSeenAt:6}];
+ const storage = { async get(key) { return {[key]: structuredClone(local[key])}; }, async set(value) { Object.assign(local,structuredClone(value)); } };
+ const fetch = async (url,options={}) => {
+  const path=new URL(url).pathname; const data=options.body?JSON.parse(options.body):{}; requests.push({path,data});
+  if(path==='/api/trial/start')return Response.json({serverTime:1,trialEndsAt:9e12,offerEndsAt:9e12});
+  if(path==='/api/plans')return Response.json({serverTime:1,plans:[{id:'pro',amount:1290,originalAmount:1999,currency:'usd'}]});
+  if(path==='/api/licenses/redeem'){
+   if(data.licenseKey==='POL-RATE')return Response.json({error:'rate_limited'},{status:429});
+   if(data.licenseKey==='POL-BAD')return Response.json({error:'invalid_license'},{status:400});
+   if(full)return Response.json({error:'activation_limit_reached',limit:3,activations:list,installationHash:'leak'},{status:409});
+   return Response.json({activationToken:'token-new',activationId:'act-new',entitlement:{plan:'pro',status:'active'},offlineUntil:9e12,activations:[list[0],list[2],{id:'act-new',browser:'Chrome',os:'macOS'}]});
+  }
+  if(path==='/api/licenses/release'){full=false;return Response.json({released:true,activations:[list[0],list[2]]});}
+  if(path==='/api/licenses/deactivate'&&data.activationId)return Response.json({released:true,activations:[{id:'act-new',browser:'Chrome',os:'macOS'}]});
+  if(path==='/api/licenses/validate')return releasedReason?Response.json({valid:false,entitlement:{status:'revoked'},reason:'deactivated'}):Response.json({valid:true,entitlement:{plan:'pro',status:'active'},offlineUntil:9e12,activationId:'act-new',activations:[list[0],{id:'act-new'}]});
+  return Response.json({error:'unexpected'},{status:404});
+ };
+ const service=createBillingService({storage,fetch,now:()=>1,client:{browser:'Chrome',os:'macOS'}});
+ return {service,requests,releaseThisBrowser(){releasedReason=true}};
+}
+
+test('a full license reports its browsers, and releasing one lets this browser activate',async()=>{
+ const f=slotFixture();
+ await assert.rejects(f.service.redeem('POL-BAD'),{message:'invalid_license'});
+ await assert.rejects(f.service.redeem('POL-RATE'),{message:'rate_limited'});
+ const failure=await f.service.redeem('POL-KEY').catch(error=>error);
+ assert.equal(failure.message,'activation_limit_reached');
+ assert.deepEqual(failure.activations.map(item=>item.id),['act-work','act-home','act-friend']);
+ assert.equal(JSON.stringify(failure.activations).includes('leak'),false);
+ assert.equal(f.requests.find(r=>r.path==='/api/licenses/redeem').data.client.browser,'Chrome');
+ await f.service.release({activationId:'act-home',licenseKey:' POL-KEY '});
+ assert.deepEqual(f.requests.find(r=>r.path==='/api/licenses/release').data,{licenseKey:'POL-KEY',installationId:f.requests[0].data.installationId,activationId:'act-home'});
+ const view=await f.service.redeem('POL-KEY');
+ assert.equal(view.tier,'pro');
+ assert.deepEqual(view.activations.map(item=>[item.id,item.current]),[['act-work',false],['act-friend',false],['act-new',true]]);
+ assert.equal(JSON.stringify(view).includes('token-new'),false);
+});
+
+test('another browser can be removed from settings, and a removed browser learns why',async()=>{
+ const f=slotFixture();
+ await f.service.redeem('POL-KEY').catch(()=>{});await f.service.release({activationId:'act-home',licenseKey:'POL-KEY'});await f.service.redeem('POL-KEY');
+ const after=await f.service.deactivate('act-work');
+ assert.equal(after.tier,'pro');
+ assert.deepEqual(f.requests.at(-1).data,{activationToken:'token-new',activationId:'act-work'});
+ assert.deepEqual(after.activations.map(item=>item.id),['act-new']);
+ f.releaseThisBrowser();
+ const removed=await f.service.refresh();
+ assert.notEqual(removed.tier,'pro');
+ assert.equal(removed.remoteDeactivated,true);
+ assert.deepEqual(removed.activations,[]);
+});
+
+test('browser labels come from client hints, never from profile names',async()=>{
+ const { describeBrowser }=await import('../src/billing-service.js');
+ assert.deepEqual(describeBrowser({userAgentData:{brands:[{brand:'Not A(Brand'},{brand:'Microsoft Edge'},{brand:'Chromium'}],platform:'Windows'},userAgent:'Mozilla/5.0 (Windows NT 10.0) Chrome/130 Edg/130'}),{browser:'Edge',os:'Windows'});
+ assert.deepEqual(describeBrowser({userAgentData:{brands:[{brand:'Chromium'}],platform:'macOS'},userAgent:'Mozilla/5.0 (Macintosh) Chrome/130'}),{browser:'Chromium',os:'macOS'});
+ assert.deepEqual(describeBrowser({userAgent:'Mozilla/5.0 (X11; Linux x86_64; rv:130.0) Gecko/20100101 Firefox/130.0'}),{browser:'Firefox',os:'Linux'});
+});

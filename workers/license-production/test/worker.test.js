@@ -66,7 +66,7 @@ test("catalog is the lifetime welcome price and an empty mail queue sends nothin
     assert.equal(priced.data.plans[0].amount, 1290);
     assert.equal(priced.data.plans[0].originalAmount, 1999);
     assert.equal(priced.data.plans[0].billing, "one_time");
-    assert.equal(priced.data.plans[0].maxActivations, null);
+    assert.equal(priced.data.plans[0].maxActivations, 3);
     await worker.scheduled({}, env);
     assert.equal(sent, 0);
   } finally { env.DB.close(); }
@@ -289,5 +289,114 @@ test("operator grant issues one license per email and delivers it", async () => 
     const redeemed = await request(env, "/api/licenses/redeem", { licenseKey: key, installationId: install.installationId });
     assert.equal(redeemed.status, 200);
     assert.equal(redeemed.data.entitlement.status, "active");
+  } finally { env.DB.close(); }
+});
+
+async function grantedKey(env) {
+  const mails = [];
+  env.ADMIN_TOKEN = "admin-token-only-used-by-tests-0123456789";
+  env.EMAIL = { async send(message) { mails.push(message); } };
+  await request(env, "/api/admin/grant-license", { email: "slots@example.com" }, { Authorization: `Bearer ${env.ADMIN_TOKEN}` });
+  return mails[0].text.match(/POL-[0-9a-f]{64}/)[0];
+}
+
+function browserInstall(name) {
+  const value = { installationId: `installation-${name}`, installationToken: `${name}-installation-secret-with-32-characters` };
+  const headers = { "X-Installation-Token": value.installationToken };
+  return {
+    ...value,
+    start: (env) => request(env, "/api/trial/start", value, headers),
+    post: (env, path, data) => request(env, path, { installationId: value.installationId, ...data }, headers)
+  };
+}
+
+test("a license holds 3 browsers, lists them when full, and frees a slot on release", async () => {
+  const env = environment();
+  try {
+    const key = await grantedKey(env);
+    const [work, home, friend, fourth] = ["work", "home", "friend", "fourth"].map(browserInstall);
+    for (const item of [work, home, friend, fourth]) await item.start(env);
+    const first = await work.post(env, "/api/licenses/redeem", { licenseKey: key, client: { browser: "Dia", os: "macOS" } });
+    assert.equal(first.status, 200);
+    assert.equal(first.data.activations.length, 1);
+    assert.deepEqual([first.data.activations[0].browser, first.data.activations[0].os], ["Dia", "macOS"]);
+    assert.equal(first.data.activationId, first.data.activations[0].id);
+    await home.post(env, "/api/licenses/redeem", { licenseKey: key, client: { browser: "Dia", os: "macOS" } });
+    await friend.post(env, "/api/licenses/redeem", { licenseKey: key, client: { browser: "<script>", os: "Windows" } });
+
+    const full = await fourth.post(env, "/api/licenses/redeem", { licenseKey: key });
+    assert.equal(full.status, 409);
+    assert.equal(full.data.error, "activation_limit_reached");
+    assert.equal(full.data.limit, 3);
+    assert.equal(full.data.activations.length, 3);
+    assert.equal(full.data.activations[2].browser, null, "unsafe browser labels are not stored");
+    assert.equal(full.data.activationToken, undefined);
+
+    const again = await work.post(env, "/api/licenses/redeem", { licenseKey: key });
+    assert.equal(again.status, 200, "an active browser reuses its slot when the license is full");
+    assert.equal(again.data.activations.length, 3);
+
+    assert.equal((await fourth.post(env, "/api/licenses/release", { licenseKey: "POL-wrong", activationId: full.data.activations[1].id })).status, 400);
+    const released = await fourth.post(env, "/api/licenses/release", { licenseKey: key, activationId: full.data.activations[1].id });
+    assert.equal(released.data.released, true);
+    assert.equal(released.data.activations.length, 2);
+    const replay = await fourth.post(env, "/api/licenses/release", { licenseKey: key, activationId: full.data.activations[1].id });
+    assert.equal(replay.data.released, false, "a replayed release frees nothing else");
+    assert.equal(replay.data.activations.length, 2);
+
+    const activated = await fourth.post(env, "/api/licenses/redeem", { licenseKey: key });
+    assert.equal(activated.status, 200);
+    assert.equal(activated.data.activations.length, 3);
+  } finally { env.DB.close(); }
+});
+
+test("a released browser learns why it left Pro and its old credential cannot return", async () => {
+  const env = environment();
+  try {
+    const key = await grantedKey(env);
+    const [work, home] = ["work", "home"].map(browserInstall);
+    for (const item of [work, home]) await item.start(env);
+    const workActivation = await work.post(env, "/api/licenses/redeem", { licenseKey: key });
+    const homeActivation = await home.post(env, "/api/licenses/redeem", { licenseKey: key });
+
+    const listed = await request(env, "/api/licenses/validate", { activationToken: workActivation.data.activationToken });
+    assert.equal(listed.data.valid, true);
+    assert.equal(listed.data.activationId, workActivation.data.activationId);
+    assert.equal(listed.data.activations.length, 2);
+
+    const removed = await request(env, "/api/licenses/deactivate", { activationToken: workActivation.data.activationToken, activationId: homeActivation.data.activationId });
+    assert.equal(removed.data.released, true);
+    assert.equal(removed.data.activations.length, 1);
+
+    const stale = await request(env, "/api/licenses/validate", { activationToken: homeActivation.data.activationToken });
+    assert.equal(stale.data.valid, false);
+    assert.equal(stale.data.reason, "deactivated");
+    assert.equal((await request(env, "/api/licenses/validate", { activationToken: workActivation.data.activationToken })).data.valid, true);
+
+    const back = await home.post(env, "/api/licenses/redeem", { licenseKey: key });
+    assert.equal(back.status, 200);
+    assert.notEqual(back.data.activationToken, homeActivation.data.activationToken);
+    assert.equal((await request(env, "/api/licenses/validate", { activationToken: homeActivation.data.activationToken })).data.valid, false);
+  } finally { env.DB.close(); }
+});
+
+test("two browsers racing for the last slot get exactly one activation", async () => {
+  const env = environment();
+  try {
+    const key = await grantedKey(env);
+    const items = ["a", "b", "c", "d"].map(browserInstall);
+    for (const item of items) await item.start(env);
+    await items[0].post(env, "/api/licenses/redeem", { licenseKey: key });
+    await items[1].post(env, "/api/licenses/redeem", { licenseKey: key });
+    const results = await Promise.all([items[2], items[3]].map((item) => item.post(env, "/api/licenses/redeem", { licenseKey: key })));
+    assert.deepEqual(results.map((result) => result.status).sort(), [200, 409]);
+    assert.equal((await env.DB.prepare("SELECT count(*) AS count FROM polaris_billing_activations WHERE status='active'").first()).count, 3);
+
+    const winner = results.find((result) => result.status === 200);
+    await request(env, "/api/licenses/deactivate", { activationToken: winner.data.activationToken });
+    const loser = items[results[0].status === 200 ? 3 : 2];
+    const reactivate = await Promise.all([loser, items[results[0].status === 200 ? 2 : 3]].map((item) => item.post(env, "/api/licenses/redeem", { licenseKey: key })));
+    assert.deepEqual(reactivate.map((result) => result.status).sort(), [200, 409], "reactivation and a new browser also race safely");
+    assert.equal((await env.DB.prepare("SELECT count(*) AS count FROM polaris_billing_activations WHERE status='active'").first()).count, 3);
   } finally { env.DB.close(); }
 });
