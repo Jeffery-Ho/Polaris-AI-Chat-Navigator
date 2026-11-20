@@ -400,3 +400,21 @@ test("two browsers racing for the last slot get exactly one activation", async (
     assert.equal((await env.DB.prepare("SELECT count(*) AS count FROM polaris_billing_activations WHERE status='active'").first()).count, 3);
   } finally { env.DB.close(); }
 });
+
+test("the license email explains activation, the 3-browser limit, the product and how to get help", async () => {
+  const { licenseEmail } = await import("../src/index.js");
+  const key = `POL-${"a".repeat(64)}`;
+  const mail = licenseEmail(key);
+  for (const body of [mail.text, mail.html]) {
+    assert.equal(body.split(key).length - 1, 2, "the key appears once per language");
+    assert.match(body, /up to 3 browsers/);
+    assert.match(body, /最多同时激活 3 个浏览器/);
+    assert.match(body, /long conversation mode/);
+    assert.match(body, /jefferyho\.build@gmail\.com/);
+    assert.match(body, /github\.com\/Jeffery-Ho\/Polaris-AI-Chat-Navigator\/issues/);
+    assert.match(body, /https:\/\/polaris-ai\.work\//);
+    assert.doesNotMatch(body, /no device limit|unlimited/i);
+  }
+  assert.match(mail.html, /href="mailto:jefferyho\.build@gmail\.com"/);
+  assert.doesNotMatch(licenseEmail("<b>x</b>").html, /<b>x<\/b>/);
+});

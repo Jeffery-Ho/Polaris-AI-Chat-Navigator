@@ -427,6 +427,73 @@ async function route(req, env) {
   throw new ApiError(404, "not_found");
 }
 
+const SUPPORT_EMAIL = "jefferyho.build@gmail.com";
+const ISSUES_URL = "https://github.com/Jeffery-Ho/Polaris-AI-Chat-Navigator/issues";
+const WEBSITE_URL = "https://polaris-ai.work/";
+
+// Bilingual (English, then Simplified Chinese) because buyers come from both store listings.
+const EMAIL_SECTIONS = [
+  {
+    heading: "Thanks for getting Polaris Pro.",
+    license: "Your license",
+    activate: "Activate it",
+    steps: ["Open the Polaris side panel and go to Settings → Pro and license.", "Choose “Already have a license?” and paste the license above."],
+    limit: "One license activates up to 3 browsers at a time, and you can share it with friends. Each browser profile counts separately, so Dia’s Work and Default count as 2. When all 3 are in use, Polaris lists them so you can deactivate one.",
+    about: "What you get",
+    aboutText: "Polaris turns long AI chats into a table of contents and an outline you can jump through. Pro unlocks every supported platform and long conversation mode, which keeps earlier messages in the table of contents. Conversations stay on your device and are never uploaded.",
+    help: "Questions or feedback",
+    helpText: `Email ${SUPPORT_EMAIL} or open an issue at ${ISSUES_URL}. Include your checkout email; there is no need to send the full license.`,
+    keep: "Keep this email. If you lose it, choose “Recover your license” in Polaris with your checkout email."
+  },
+  {
+    heading: "感谢购买 Polaris Pro。",
+    license: "你的许可证",
+    activate: "如何激活",
+    steps: ["打开 Polaris 侧边栏，进入「设置 → Pro 与许可」。", "选择「已有许可证？」，粘贴上方的许可证。"],
+    limit: "每份许可最多同时激活 3 个浏览器，可与朋友分享。同一浏览器的每个 Profile 单独计算，例如 Dia 的 Work 和 Default 算 2 个。名额用完时，Polaris 会列出已激活的浏览器，选一个停用即可。",
+    about: "Pro 包含什么",
+    aboutText: "Polaris 把长篇 AI 对话整理成可跳转的目录和大纲。Pro 解锁全部支持的平台与长对话模式，目录会保留更早的消息。对话只留在本机，不会上传。",
+    help: "问题与反馈",
+    helpText: `发送邮件至 ${SUPPORT_EMAIL}，或在 ${ISSUES_URL} 提交 issue。请附上购买邮箱，无需发送完整许可证。`,
+    keep: "请保留这封邮件。如果遗失，可在 Polaris 中选择「找回许可证」，用购买邮箱找回。"
+  }
+];
+
+export function licenseEmail(key) {
+  const text = EMAIL_SECTIONS.map((copy) => [
+    copy.heading,
+    `${copy.license}: ${key}`,
+    `${copy.activate}\n${copy.steps.map((step, index) => `${index + 1}. ${step}`).join("\n")}\n${copy.limit}`,
+    `${copy.about}\n${copy.aboutText}`,
+    `${copy.help}\n${copy.helpText}`,
+    copy.keep
+  ].join("\n\n")).join("\n\n— — —\n\n") + `\n\n${WEBSITE_URL}\n`;
+  const escape = (value) => value.replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char]);
+  const link = (value) => escape(value)
+    .replace(escape(SUPPORT_EMAIL), `<a href="mailto:${SUPPORT_EMAIL}" style="color:#a04c2f">${SUPPORT_EMAIL}</a>`)
+    .replace(escape(ISSUES_URL), `<a href="${ISSUES_URL}" style="color:#a04c2f">GitHub</a>`);
+  const h2 = (value) => `<h2 style="margin:24px 0 8px;font-size:15px;color:#2a2724">${escape(value)}</h2>`;
+  const p = (value, extra = "") => `<p style="margin:0 0 12px;font-size:14px;line-height:1.7;color:#57534c${extra}">${value}</p>`;
+  const section = (copy) => `
+    <h1 style="margin:0 0 20px;font-family:Georgia,serif;font-size:22px;color:#2a2724">${escape(copy.heading)}</h1>
+    ${h2(copy.license)}
+    <p style="margin:0 0 12px;padding:12px 14px;border-radius:10px;background:#f4f3f0;font-family:ui-monospace,Menlo,monospace;font-size:13px;word-break:break-all;color:#2a2724">${escape(key)}</p>
+    ${h2(copy.activate)}
+    <ol style="margin:0 0 12px;padding-left:20px;font-size:14px;line-height:1.7;color:#57534c">${copy.steps.map((step) => `<li>${escape(step)}</li>`).join("")}</ol>
+    ${p(escape(copy.limit))}
+    ${h2(copy.about)}
+    ${p(escape(copy.aboutText))}
+    ${h2(copy.help)}
+    ${p(link(copy.helpText))}
+    ${p(escape(copy.keep), ";font-size:13px;color:#77726a")}`;
+  const html = `<!doctype html><html><body style="margin:0;padding:24px;background:#fafaf8;font-family:-apple-system,'Segoe UI','PingFang SC',sans-serif">
+  <div style="max-width:560px;margin:0 auto;padding:28px;border:1px solid #e0ddd7;border-radius:16px;background:#ffffff">
+    ${EMAIL_SECTIONS.map(section).join('<hr style="margin:28px 0;border:0;border-top:1px solid #e0ddd7">')}
+    <p style="margin:28px 0 0;font-size:13px;color:#77726a"><a href="${WEBSITE_URL}" style="color:#a04c2f">polaris-ai.work</a></p>
+  </div></body></html>`;
+  return { text, html };
+}
+
 async function deliverPending(env) {
   if (!env.EMAIL?.send || env.EMAIL_FROM_ADDRESS !== FROM_ADDRESS) return;
   const jobs = await stmt(env, "SELECT e.*,l.delivery_cipher,l.status AS license_status FROM polaris_billing_email_deliveries e JOIN polaris_billing_licenses l ON l.id=e.license_id WHERE e.status='pending' AND e.next_attempt_at<=? LIMIT 20", Date.now()).all();
@@ -441,7 +508,7 @@ async function deliverPending(env) {
         from: { email: FROM_ADDRESS, name: "Polaris" },
         to: payload.email,
         subject: "Your Polaris Pro license",
-        text: `Polaris Pro is a one-time lifetime purchase for up to 3 browsers at a time. Each browser profile counts separately.\n\nLicense: ${payload.key}\n\nOpen Polaris settings and choose Redeem license.\n`
+        ...licenseEmail(payload.key)
       });
       await stmt(env, "UPDATE polaris_billing_email_deliveries SET status='sent',attempt_count=attempt_count+1 WHERE id=?", job.id).run();
     } catch {
