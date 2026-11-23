@@ -108,6 +108,19 @@ async function bootPackagedContent({ delayConfig = false, pageUrl = "https://cha
   return { dom, win, runtime, storage, messages, errors, configWrites, pendingConfigReads, flush, inject, invalidate };
 }
 
+test("a filtered reply keeps its recognition hint when the index has no Maker rows", async () => {
+  const s = await bootPackagedContent({ savedConfig: { historyMode: "loaded", enabledLevelsByPlatform: { chatgpt: [1] } } });
+  try {
+    await s.inject();
+    await new Promise(resolve => setTimeout(resolve, 160));
+    const snapshots = s.messages.filter(message => message.type === "POLARIS_CONTENT_STATE").map(message => message.snapshot);
+    const snapshot = snapshots.find(value => value.conversationIndex?.count === 0 && value.markerItems.some(item => item.type === "user"));
+    assert.ok(snapshot);
+    const user = snapshot.markerItems.find(item => item.type === "user");
+    assert.deepEqual([...snapshot.recognitionHintGroups], [user.groupKey]);
+  } finally { s.invalidate(); s.win.close(); }
+});
+
 test("packaged long mode publishes readable batches without scrolling the website", async () => {
   const html = `<html><body><main>${Array.from({ length: 7 }, (_, i) =>
     `<article data-message-author-role="user" data-message-id="m${i}"><p>Loaded message ${i}</p></article>`).join("")}</main></body></html>`;

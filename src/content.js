@@ -5467,8 +5467,8 @@ export function initializeContent() {
       conversationStalled: conversationReadingState(conversationIndex.snapshot()).stalled,
       conversationTitle: conversationIndex.snapshot()?.title || conversationIndex.title(),
       allMarkerItems,
-      recognitionHintGroups: indexed ? indexed.recognitionHintGroups || []
-        : groups.filter((group) => group.hasReplyContent && !group.visibleHeadings.length).map((group) => group.key),
+      recognitionHintGroups: indexed?.items.length || !items.length ? indexed?.recognitionHintGroups || []
+        : groups.filter((group) => (group.hasReplyContent || group.headings.length) && !group.visibleHeadings.length).map((group) => group.key),
       headings: state.headings.map((heading) => ({
         id: heading.id,
         markerKey: markerKeyForHeading(heading),

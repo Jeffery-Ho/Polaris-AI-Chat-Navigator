@@ -10,6 +10,11 @@
 - Version update type must be declared by the user before recording a build.
 - After each build is recorded, confirm the build number and version with the user.
 
+## 446
+- Date: 2026-11-23
+- Version: 1.6.1
+- Summary: Show the existing recognition hint under replies whose Makers are all filtered out while the index is empty.
+
 ## 445
 - Date: 2026-11-20
 - Version: 1.6.0
