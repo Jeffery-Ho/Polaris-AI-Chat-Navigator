@@ -91,8 +91,7 @@ test("DOM indexes virtualize file labels and user thumbnails without claiming co
     await new Promise((resolve) => setTimeout(resolve, 30));
     assert.match(s.win.document.querySelector(".maker-attachments").textContent, /history.md/);
     assert.equal(s.win.document.querySelector(".maker-thumb").src, "https://cdn.test/upload.png");
-    assert.match(s.win.document.querySelector(".index-list-status").textContent, /loaded messages indexed/);
-    assert.doesNotMatch(s.win.document.querySelector(".index-list-status").textContent, /All .*messages/);
+    assert.equal(s.win.document.querySelector(".index-list-status"), null);
     assert.equal(s.win.document.querySelector(".window-search input").placeholder, "Search Makers");
     s.win.document.querySelector(".maker-thumb").click();
     assert.equal(s.commands.findLast((command) => command.command === "request-image-preview").groupKey, "index:u1");
@@ -915,6 +914,7 @@ test("opening the sidepanel after indexing shows completed feedback without inve
     const empty = { ...s.snapshot, config: { historyMode: "loaded" }, conversationLoading: false,
       conversationIndex: { source: "dom", generation: "empty-shell", phase: "complete", count: 0 } };
     s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: empty });
+    assert.equal(doc.querySelector(".index-list-status"), null);
     assert.equal(doc.querySelector(".conversation-read-status"), null);
     const ready = { ...empty, conversationIndex: { source: "dom", generation: "ready-before-panel-opened", phase: "complete", count: 7 } };
     s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: ready });
@@ -923,7 +923,8 @@ test("opening the sidepanel after indexing shows completed feedback without inve
     assert.equal(card.querySelector(".read").dataset.state, "done");
     assert.equal(card.querySelector(".prepare").dataset.state, "done");
     assert.equal(doc.querySelector(".conversation-skeleton"), null);
-    assert.ok(doc.querySelector(".index-list-status"));
+    assert.ok(doc.querySelector(".maker-list"));
+    assert.equal(doc.querySelector(".index-list-status"), null);
     await new Promise(resolve => setTimeout(resolve, 850));
     assert.equal(doc.querySelector(".conversation-read-status"), null);
     s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...ready, conversationIndex: { ...ready.conversationIndex, revision: 2, count: 8 } } });
@@ -973,7 +974,8 @@ test("enabling long mode leaves Preferences and keeps an honest completion card 
       assert.equal(card.querySelector(".read").dataset.state, "done");
       assert.equal(card.querySelector(".prepare").dataset.state, "done");
       assert.equal(doc.querySelector(".conversation-skeleton"), null, "completed indexing must release the real list immediately");
-      assert.ok(doc.querySelector(".index-list-status"));
+      assert.ok(doc.querySelector(".maker-list"));
+      assert.equal(doc.querySelector(".index-list-status"), null);
       await new Promise(resolve => setTimeout(resolve, 850));
       assert.equal(doc.querySelector(".conversation-read-status"), null);
       s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: complete });
@@ -1313,7 +1315,7 @@ test("indexed Makers render during loading and long mode scrolls the sidebar to 
     assert.equal(s.win.document.querySelector(".conversation-skeleton"), null);
     assert.ok(s.win.document.querySelector(".conversation-read-status"));
     assert.match(s.win.document.querySelector(".maker-list").textContent, /Earliest loaded message/);
-    assert.match(s.win.document.querySelector(".index-list-status").textContent, /已索引 1 条已加载消息/);
+    assert.equal(s.win.document.querySelector(".index-list-status"), null);
     s.win.scrollTo({ top: 300 });
     s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...firstBatch,
       markerItems: [...firstBatch.markerItems, { key: "index:next", markerKey: "index:next", type: "user", title: "Next loaded message" }],

@@ -933,6 +933,7 @@ export function initializeSidepanel() {
       }
       virtualMarkers.setItems(items);
       panel.querySelector(':scope > .index-list-status')?.remove();
+      if (!searching && !readFailed) return panel;
       const status = element("div", "index-list-status"); status.setAttribute("role", "status");
       status.textContent = fullSearch
         ? state.fullSearch.loading ? (locale === "zh" ? "正在搜索已加载消息…" : "Searching loaded messages…") : (locale === "zh" ? `已加载内容中 ${state.fullSearch.total} 条消息匹配` : `${state.fullSearch.total} matching loaded messages`)
