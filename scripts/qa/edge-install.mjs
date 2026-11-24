@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { readFile, realpath } from "node:fs/promises";
+import { readFile, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -73,10 +73,13 @@ export async function installEdgeExtension(context, extensionPath, evidencePath)
     const pid = processInfo.find(p => p.type === "browser")?.id;
     if (!pid) throw new Error("无法确认 Edge 测试进程");
     await page.goto("edge://extensions/");
-    const load = page.getByRole("button", {name: /load unpacked|加载解压缩|加载已解压|加载解包/i});
+    const load = page.getByText(/^(Load unpacked(?: extension)?|加载解压缩(?:的扩展)?|加载已解压(?:的扩展程序)?|加载解包(?:的扩展)?)[…\.]?$/i).first();
     if (!(await load.isVisible())) {
-      const devMode = page.getByText(/^(Developer mode|开发人员模式|开发者模式)$/i).first();
-      await devMode.click({timeout: 10000});
+      const toggle = page.locator("fluent-switch#dev-switch");
+      await toggle.click({timeout: 10000});
+      if (!await toggle.evaluate(el => el.checked || el.getAttribute("aria-checked") === "true")) {
+        throw new Error("Edge 开发人员模式未开启");
+      }
     }
     await load.click({timeout: 10000, noWaitAfter: true});
     if (process.platform === "darwin") await selectMacFolder(directory, pid);
@@ -88,10 +91,15 @@ export async function installEdgeExtension(context, extensionPath, evidencePath)
       predicate: worker => worker.url().startsWith("chrome-extension://") && worker.url().endsWith(manifest.background.service_worker),
       timeout: 10000
     });
-    const installed = await worker.evaluate(() => chrome.runtime.getManifest().version);
+    let installed;
+    for (let attempt = 0; attempt < 25 && !installed; attempt++) {
+      installed = await worker.evaluate(() => globalThis.chrome?.runtime?.getManifest?.()?.version);
+      if (!installed) await delay(200);
+    }
     if (installed !== manifest.version) throw new Error("已安装的 Edge 扩展版本与候选包不符");
   } catch (error) {
     failed = true;
+    if (evidencePath) await writeFile(path.join(evidencePath, "edge-manager.txt"), await page.locator("body").ariaSnapshot().catch(() => "无法读取扩展管理页")).catch(() => {});
     if (evidencePath) await page.screenshot({ path: path.join(evidencePath, "edge-manager.png"), timeout: 3000 }).catch(() => {});
     throw error;
   } finally {

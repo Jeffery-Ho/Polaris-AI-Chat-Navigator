@@ -37,19 +37,25 @@ export async function launch({ browser, profile, out, packagePath, fixturePage, 
   const context = await chromium.launchPersistentContext(profile,{
     executablePath,headless:false,acceptDownloads:true,serviceWorkers:"allow",
     ignoreDefaultArgs:["--disable-extensions"],env:{...process.env,GTK_USE_PORTAL:"0",LANG:"C.UTF-8"},
-    args:["--lang=en-US","--remote-debugging-port=0","--disable-background-networking",
+    args:["--lang=en-US","--enable-unsafe-extension-debugging","--remote-debugging-port=0","--disable-background-networking",
       "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost",
       ...(isEdge ? [] : ["--disable-extensions-except="+packagePath,"--load-extension="+packagePath])]
   });
   let cdp;
   try {
     if (isEdge) await installEdgeExtension(context,packagePath,out);
-    const worker = context.serviceWorkers()[0] || await context.waitForEvent("serviceworker",{timeout:12000});
+    const manifest = JSON.parse(await readFile(path.join(packagePath, "manifest.json"), "utf8"));
+    const isCandidate = worker => worker.url().startsWith("chrome-extension://") &&
+      new URL(worker.url()).pathname === "/" + manifest.background.service_worker;
+    const worker = context.serviceWorkers().find(isCandidate) || await context.waitForEvent("serviceworker",{predicate:isCandidate, timeout:12000});
     const extensionOrigin = "chrome-extension://" + new URL(worker.url()).host;
-    await worker.evaluate(async () => {
-      await chrome.storage.local.set({"polaris-onboarding-version":1,"polaris-release-notice-version":chrome.runtime.getManifest().version});
-    });
     cdp = await devtools(profile);
+    const workerTarget = (await cdp.call("Target.getTargets")).targetInfos.find(t => t.url === worker.url());
+    const setup = (await cdp.call("Target.attachToTarget",{targetId:workerTarget.targetId,flatten:true})).sessionId;
+    await until(async () => (await cdp.call("Runtime.evaluate",{expression:'typeof chrome !== "undefined" && !!chrome.storage',returnByValue:true},setup)).result.value, "候选包后台扩展 API 初始化超时");
+    const stored = await cdp.call("Runtime.evaluate",{expression:'chrome.storage.local.set({"polaris-onboarding-version":1,"polaris-release-notice-version":chrome.runtime.getManifest().version})',awaitPromise:true},setup);
+    await cdp.call("Target.detachFromTarget",{sessionId:setup});
+    if (stored.exceptionDetails) throw Error(worker.url() + ": " + stored.exceptionDetails.exception?.description);
     const { product, userAgent } = await cdp.call("Browser.getVersion");
     if (isEdge) assert.match(userAgent,/Edg\//);
     else assert.match(await readFile(path.join(path.dirname(executablePath),"../Resources/Info.plist"),"utf8").catch(()=>executablePath), /Chrome for Testing|chrome/i);
@@ -82,18 +88,30 @@ export async function launch({ browser, profile, out, packagePath, fixturePage, 
       source:(fn,arg)=>page.evaluate(fn,arg),
       async openPanel() {
         const all = async () => (await cdp.call("Target.getTargets")).targetInfos;
-        const target = await until(async ()=>(await all()).find(t=> t.url===worker.url()),"后台 worker 未启动");
-        const workerSession = (await cdp.call("Target.attachToTarget",{targetId:target.targetId,flatten:true})).sessionId;
-        try {
-          const {result:windowId} = await cdp.call("Runtime.evaluate",{expression:"(await chrome.windows.getCurrent()).id",replMode:true,awaitPromise:true,returnByValue:true},workerSession);
-          const res = await cdp.call("Runtime.evaluate",{expression:'chrome.sidePanel.open({windowId:'+Number(windowId.value)+'})',awaitPromise:true,userGesture:true},workerSession);
-          if (res.exceptionDetails) throw Error(res.exceptionDetails.exception?.description || res.exceptionDetails.text);
-        } finally { await cdp.call("Target.detachFromTarget",{sessionId:workerSession}); }
+        const targets = await all();
+        const open = targets.find(t => t.url.startsWith(extensionOrigin+"/") && t.url.includes("sidepanel.html"));
+        if (!open) {
+          const tabs = (await cdp.call("Target.getTargets",{filter:[{type:"tab"}]})).targetInfos;
+          const source = tabs.find(t => t.url === page.url());
+          if (!source) throw Error("找不到样本标签页 " + JSON.stringify(tabs));
+          await cdp.call("Extensions.triggerAction",{id:new URL(worker.url()).host,targetId:source.targetId});
+        }
         const panel=await until(async ()=>(await all()).find(t=> t.url.startsWith(extensionOrigin+"/") && t.url.includes("sidepanel.html")),"未找到原生侧栏目标");
         if(sessionId) await cdp.call("Target.detachFromTarget",{sessionId}).catch(()=>{});
         sessionId=(await cdp.call("Target.attachToTarget",{targetId:panel.targetId,flatten:true})).sessionId;
+        await cdp.call("Emulation.setFocusEmulationEnabled",{enabled:true},sessionId);
       },
       panel:evaluate,
+      async clickPanel(selector) {
+        const {x,y} = await evaluate(selector => {
+          const node = document.querySelector(selector);
+          node.scrollIntoView({block:"nearest"});
+          const rect = node.getBoundingClientRect();
+          return {x:rect.x+rect.width/2,y:rect.y+rect.height/2};
+        },selector);
+        await cdp.call("Input.dispatchMouseEvent",{type:"mousePressed",button:"left",clickCount:1,x,y},sessionId);
+        await cdp.call("Input.dispatchMouseEvent",{type:"mouseReleased",button:"left",clickCount:1,x,y},sessionId);
+      },
       async capture(key) {
         await writeFile(path.join(out,key+"-actions.json"), JSON.stringify(actions,null,2));
         await page.screenshot({path:path.join(out,key+".png")});

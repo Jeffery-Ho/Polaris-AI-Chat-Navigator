@@ -94,8 +94,13 @@ for (const browser of browsers) {
 }
 const unitLog = path.join(output, "regression.log");
 const transcript = existsSync(unitLog) ? readFileSync(unitLog, "utf8") : "";
+const unitLines = transcript.split("\n");
+const unitCounts = Object.fromEntries(unitLines.flatMap(line => {
+  const match = line.match(/^# (tests|pass|fail|skipped|cancelled|todo) (\d+)$/);
+  return match ? [[match[1], Number(match[2])]] : [];
+}));
 const adapters = SUPPORTED_PLATFORMS.map(({ key }) => {
-  const line = transcript.split("\n").find(text => new RegExp("^(not ok|ok) [0-9]+ - " + key + " 合成会话").test(text));
+  const line = unitLines.find(text => new RegExp("^(not ok|ok) [0-9]+ - " + key + " 合成会话").test(text));
   if (!line || /# (?:SKIP|TODO)/i.test(line)) return { key, status: "skip" };
   return { key, status: line.startsWith("ok ") ? "pass" : "fail" };
 });
@@ -105,6 +110,7 @@ const lines = [
   "# Polaris 发布前离线验收", "",
   "结论：" + (ok ? "通过" : "未通过") + "。版本 " + manifest.version_name + "，提交 " + sha + (dirty ? "（包含工作树改动）" : "") + "。",
   "开始时间 " + new Date(started).toISOString() + "，总耗时 " + Math.round((Date.now() - started) / 1000) + " 秒。",
+  "", unitCounts.tests ? "Node 测试共 " + unitCounts.tests + " 项，通过 " + unitCounts.pass + "，失败 " + unitCounts.fail + "，跳过 " + unitCounts.skipped + "。" : "Node 测试未取得完整统计。",
   "", "浏览器场景通过 " + count(rows, "pass") + "，失败 " + count(rows, "fail") + "，未运行或结果缺失 " + count(rows, "skip") + "。",
   "", "| 阶段 | 结果 | 秒 |", "|---|---|---:|",
   ...phases.map(x => "| [" + x.name + "](" + x.log + ") | " + (x.ok ? "通过" : "失败") + " | " + x.seconds + " |"),

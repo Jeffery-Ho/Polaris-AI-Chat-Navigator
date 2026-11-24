@@ -28,8 +28,13 @@ export async function until(check, message, timeout = 12000) {
 }
 
 async function verifyExport(key, session) {
-  const before = new Set(await readdir(runner.downloadDir));
-  await runner.panel(() => document.querySelector(".conversation-copy-button:not(:disabled)")?.click());
+  // Native panels may overwrite the previous file with the same conversation title.
+  for (const name of await readdir(runner.downloadDir)) {
+    if (name.endsWith(".md")) await rm(path.join(runner.downloadDir,name));
+  }
+  await until(() => runner.panel(() => !!document.querySelector(".conversation-copy-button:not(:disabled)")), "导出按钮不可用");
+  if (runner.clickPanel) await runner.clickPanel(".conversation-copy-button");
+  else await runner.panel(() => document.querySelector(".conversation-copy-button").click());
   await until(() => runner.panel(() => {
     const button = document.querySelector("dialog[open] .conversation-export-save");
     if (!button) return false;
@@ -37,7 +42,7 @@ async function verifyExport(key, session) {
   }), "导出对话框未打开");
   const markdown = await until(async () => {
     const files = await readdir(runner.downloadDir);
-    const name = files.find(name => !before.has(name) && name.endsWith(".md"));
+    const name = files.find(name => name.endsWith(".md"));
     if (!name || files.some(name => /\.(part|crdownload)$/.test(name))) return false;
     return readFile(path.join(runner.downloadDir,name),"utf8");
   }, "未收到完整的 Markdown 下载文件");
@@ -80,10 +85,13 @@ async function runPlatform(key) {
       await until(() => runner.panel(text => [...document.querySelectorAll(".chapter-node-title")].some(n => n.textContent.includes(text)), a.prompts[0]), "目录未收到首轮消息 " + a.prompts[0]);
     });
     await step(async () => {
-      await runner.panel(text => {
-        const title = [...document.querySelectorAll(".chapter-node-title")].find(n => n.textContent.includes(text));
-        if (title?.getAttribute("aria-expanded") === "false") title.click();
-      }, a.prompts[0]);
+      await until(() => runner.panel(([prompt, heading]) => {
+        const titles = [...document.querySelectorAll(".chapter-node-title")];
+        if (titles.some(n => n.textContent.includes(heading))) return true;
+        const parent = titles.find(n => n.textContent.includes(prompt));
+        if (parent?.getAttribute("aria-expanded") === "false") parent.click();
+        return false;
+      }, [a.prompts[0], a.heading]), "目录未生成跳转标题 " + a.heading);
       await runner.source(() => { document.querySelector("main").scrollTop = 0; });
       assert.equal(await runner.source(() => {
         const main = document.querySelector("main").getBoundingClientRect();
@@ -133,6 +141,7 @@ async function runPlatform(key) {
       await verifyExport(key,"B");
     });
   } catch (error) {
+    console.error(key,scenarios[next],error.message);
     await runner.capture(key).catch(() => {});
     results.push({ platform:key, scenario:scenarios[next++], status:"fail", detail:error.message });
   } finally {
