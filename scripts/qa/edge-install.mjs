@@ -10,7 +10,7 @@ const exec = (program, args, options) => executeFile(program, args, {timeout: 15
 
 // The folder chooser belongs to the browser process; Playwright's page
 // filechooser event only covers file inputs owned by a web page.
-async function selectLinuxFolder(directory, browserPid) {
+async function selectLinuxFolder(directory, browserPid, evidencePath) {
   for (let attempt = 0; attempt < 40; attempt++) {
     const { stdout } = await exec("xdotool", ["search", "--onlyvisible", "--pid", String(browserPid), "--name", "[Ss]elect|[Ff]older|[Dd]irectory|[Oo]pen"])
       .catch(() => ({ stdout: "" }));
@@ -25,7 +25,14 @@ async function selectLinuxFolder(directory, browserPid) {
       await delay(500);
       const {stdout: windows} = await exec("xdotool", ["search", "--onlyvisible", "--pid", String(browserPid)]).catch(() => ({stdout: ""}));
       if (windows.trim().split(/\s+/).includes(id)) {
-        await exec("/usr/bin/python3", [fileURLToPath(new URL("./gtk-choose-folder.py", import.meta.url)), String(browserPid)]);
+        try {
+          await exec("/usr/bin/python3", [fileURLToPath(new URL("./gtk-choose-folder.py", import.meta.url)), String(browserPid)]);
+        } catch (error) {
+          if (evidencePath && process.env.GITHUB_ACTIONS) {
+            await exec("import", ["-window", id, path.join(evidencePath, "edge-folder.png")]).catch(() => {});
+          }
+          throw error;
+        }
       }
       return;
     }
@@ -56,10 +63,22 @@ async function selectMacFolder(directory, browserPid) {
         set chooserWindow to first window whose name contains "Extensions"
         set chooserSheet to sheet 1 of chooserWindow
         keystroke "g" using {command down, shift down}
-        delay 0.4
-        keystroke wantedPath
+        repeat 30 times
+          if exists text field 1 of sheet 1 of chooserSheet then exit repeat
+          delay 0.15
+        end repeat
+        set pathField to text field 1 of sheet 1 of chooserSheet
+        set value of pathField to wantedPath
+        key code 124
+        keystroke "/"
+        delay 0.6
+        if (value of pathField as string) does not start with wantedPath then error "系统目录输入不符"
         key code 36
-        delay 0.8
+        repeat 30 times
+          if not (exists sheet 1 of chooserSheet) then exit repeat
+          delay 0.15
+        end repeat
+        delay 0.3
         tell splitter group 1 of chooserSheet
           set chooserFolder to value of pop up button "Where:"
           if not (wantedPath ends with ("/" & chooserFolder)) then error ("系统文件选择器未进入候选目录 (" & chooserFolder & ")")
@@ -90,9 +109,13 @@ export async function installEdgeExtension(context, extensionPath, evidencePath)
     }
     await load.click({timeout: 10000, noWaitAfter: true});
     if (process.platform === "darwin") await selectMacFolder(directory, pid);
-    else if (process.platform === "linux") await selectLinuxFolder(directory, pid);
+    else if (process.platform === "linux") await selectLinuxFolder(directory, pid, evidencePath);
     else throw new Error("Edge 自动目录选择当前支持 macOS 和 Linux");
-    await page.getByText(/Polaris/i).first().waitFor({timeout: 15000});
+    await page.getByText(/Polaris/i).filter({visible:true}).first().waitFor({timeout: 15000});
+    const extensions = await page.evaluate(() => new Promise(resolve => chrome.developerPrivate.getExtensionsInfo({}, resolve)));
+    if (!extensions.some(item => item.path === directory)) {
+      throw new Error("Edge 安装目录与本次候选包路径不符。已加载 " + JSON.stringify(extensions.map(item => item.path)));
+    }
   } catch (error) {
     failed = true;
     if (evidencePath) await writeFile(path.join(evidencePath, "edge-manager.txt"), await page.locator("body").ariaSnapshot().catch(() => "无法读取扩展管理页")).catch(() => {});
