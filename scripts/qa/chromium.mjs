@@ -106,25 +106,35 @@ export async function launch({ browser, profile, out, packagePath, fixturePage, 
       },
       panel:evaluate,
       async clickPanel(selector) {
-        // Native panels can appear before the browser has transferred mouse
-        // focus into their view. Activate the focused button via its real
-        // keyboard path, and verify that the panel received the trusted click.
+        // A first native-panel click may transfer focus without activating a
+        // button. Repeat only a missed input event, never an activated export.
         await evaluate(selector => {
           const node = document.querySelector(selector);
           if (!node || node.disabled) throw Error("侧栏操作不可用 " + selector);
-          node.focus();
-          if (document.activeElement !== node) throw Error("侧栏按钮未获得焦点 " + selector);
           window.__polarisQaActivation = null;
-          node.addEventListener("click", event => {
-            window.__polarisQaActivation = { trusted:event.isTrusted, disabled:node.disabled };
-          },{once:true});
+          document.addEventListener("click", function record(event) {
+            if (!event.target.closest(selector)) return;
+            window.__polarisQaActivation = {trusted:event.isTrusted};
+            document.removeEventListener("click",record,true);
+          },true);
         },selector);
-        const key = { key:"Enter",code:"Enter",windowsVirtualKeyCode:13,nativeVirtualKeyCode:13 };
-        await cdp.call("Input.dispatchKeyEvent",{...key,type:"rawKeyDown"},sessionId);
-        await cdp.call("Input.dispatchKeyEvent",{...key,type:"keyUp"},sessionId);
-        const activation = await evaluate(() => window.__polarisQaActivation);
-        actions.push({ time:new Date().toISOString(), scope:"panel", selector, activation });
-        assert.ok(activation?.trusted && !activation.disabled,"侧栏未收到原生按钮激活事件 " + selector);
+        let activation;
+        for (let dispatch = 0; dispatch < 2 && !activation; dispatch++) {
+          const {x,y} = await until(() => evaluate(selector => {
+            const node = document.querySelector(selector);
+            if (!node || node.disabled) return null;
+            node.scrollIntoView({block:"nearest"});
+            const rect = node.getBoundingClientRect();
+            const x = rect.x + rect.width/2, y = rect.y + rect.height/2;
+            return node.contains(document.elementFromPoint(x,y)) ? {x,y} : null;
+          },selector), "侧栏按钮未就绪或被遮挡 " + selector);
+          await cdp.call("Input.dispatchMouseEvent",{type:"mouseMoved",x,y},sessionId);
+          await cdp.call("Input.dispatchMouseEvent",{type:"mousePressed",button:"left",buttons:1,clickCount:1,x,y},sessionId);
+          await cdp.call("Input.dispatchMouseEvent",{type:"mouseReleased",button:"left",buttons:0,clickCount:1,x,y},sessionId);
+          activation = await evaluate(() => window.__polarisQaActivation);
+          actions.push({time:new Date().toISOString(),scope:"panel",selector,x,y,activation});
+        }
+        assert.ok(activation?.trusted,"侧栏未收到原生按钮激活事件 " + selector);
       },
       async capture(key) {
         await writeFile(path.join(out,key+"-actions.json"), JSON.stringify(actions,null,2));
