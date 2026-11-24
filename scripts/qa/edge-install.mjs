@@ -61,19 +61,21 @@ async function selectMacFolder(directory, browserPid) {
   await exec("osascript", ["-e", script, String(browserPid), directory], {timeout: 20000});
 }
 
-export async function installEdgeExtension(context, extensionPath) {
+export async function installEdgeExtension(context, extensionPath, evidencePath) {
   const directory = await realpath(extensionPath);
   const manifest = JSON.parse(await readFile(path.join(directory, "manifest.json"), "utf8"));
   const page = await context.newPage();
   const session = await context.browser().newBrowserCDPSession();
+  if (evidencePath) await context.tracing.start({ screenshots: true, snapshots: true });
+  let failed = false;
   try {
     const {processInfo} = await session.send("SystemInfo.getProcessInfo");
     const pid = processInfo.find(p => p.type === "browser")?.id;
     if (!pid) throw new Error("无法确认 Edge 测试进程");
     await page.goto("edge://extensions/");
-    const load = page.getByRole("button", {name: /load unpacked/i});
+    const load = page.getByRole("button", {name: /load unpacked|加载解压缩|加载已解压|加载解包/i});
     if (!(await load.isVisible())) {
-      const devMode = page.getByText("Developer mode", {exact: true}).first();
+      const devMode = page.getByText(/^(Developer mode|开发人员模式|开发者模式)$/i).first();
       await devMode.click({timeout: 10000});
     }
     await load.click({timeout: 10000, noWaitAfter: true});
@@ -88,7 +90,12 @@ export async function installEdgeExtension(context, extensionPath) {
     });
     const installed = await worker.evaluate(() => chrome.runtime.getManifest().version);
     if (installed !== manifest.version) throw new Error("已安装的 Edge 扩展版本与候选包不符");
+  } catch (error) {
+    failed = true;
+    if (evidencePath) await page.screenshot({ path: path.join(evidencePath, "edge-manager.png"), timeout: 3000 }).catch(() => {});
+    throw error;
   } finally {
+    if (evidencePath) await context.tracing.stop(failed ? { path: path.join(evidencePath, "edge-install-trace.zip") } : {});
     await session.detach();
     await page.close();
   }

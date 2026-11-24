@@ -27,7 +27,7 @@ export async function until(check, message, timeout = 12000) {
   throw Error(message + (last ? ' (' + last.message + ')' : ''));
 }
 
-async function verifyExport(session) {
+async function verifyExport(key, session) {
   const before = new Set(await readdir(runner.downloadDir));
   await runner.panel(() => document.querySelector(".conversation-copy-button:not(:disabled)")?.click());
   await until(() => runner.panel(() => {
@@ -35,11 +35,21 @@ async function verifyExport(session) {
     if (!button) return false;
     button.click(); return true;
   }), "导出对话框未打开");
-  const file = await until(async () => (await readdir(runner.downloadDir)).find(name => !before.has(name) && name.endsWith(".md")), "未收到 Markdown 文件");
-  const markdown = await readFile(path.join(runner.downloadDir, file), "utf8");
+  const markdown = await until(async () => {
+    const files = await readdir(runner.downloadDir);
+    const name = files.find(name => !before.has(name) && name.endsWith(".md"));
+    if (!name || files.some(name => /\.(part|crdownload)$/.test(name))) return false;
+    return readFile(path.join(runner.downloadDir,name),"utf8");
+  }, "未收到完整的 Markdown 下载文件");
   const { prompts, heading, listItem, tableCell, code } = expected(session);
+  await writeFile(path.join(out,key+"-"+session+"-export.md"),markdown);
   for (const token of [...prompts, heading, listItem, tableCell, code]) assert.ok(markdown.includes(token), '导出缺少 ' + token);
   for (const token of expected(session === "A" ? "B" : "A").prompts) assert.ok(!markdown.includes(token), '导出混入其他会话 ' + token);
+  if (browser === "chrome") {
+    const clipboard = await runner.panel(() => navigator.clipboard.readText());
+    for (const token of [...prompts, heading, listItem, tableCell, code]) assert.ok(clipboard.includes(token), "复制内容缺少 " + token);
+    for (const token of expected(session === "A" ? "B" : "A").prompts) assert.ok(!clipboard.includes(token), "剪贴板混入其他会话 " + token);
+  }
   await runner.panel(() => document.querySelector(".conversation-export-close")?.click());
 }
 
@@ -59,6 +69,8 @@ async function runPlatform(key) {
     });
     await step(async () => {
       await runner.openPanel();
+      const favicon = SUPPORTED_PLATFORMS.find(platform => platform.key === key).favicon;
+      await until(() => runner.panel(favicon => document.querySelector(".window-platform-icon")?.src.endsWith("/" + favicon),favicon), "侧栏未识别当前平台 " + key);
       await until(() => runner.panel(() => {
         const tab = document.querySelector('[data-window-tab="chapters"]');
         if (!tab) return false;
@@ -91,7 +103,7 @@ async function runPlatform(key) {
         return r.top >= Math.max(0, main.top)-1 && r.bottom <= Math.min(innerHeight, main.bottom)+1;
       }), "跳转目标在视口外");
     });
-    await step(() => verifyExport("A"));
+    await step(() => verifyExport(key,"A"));
     if (browser !== "chrome") return;
     await step(async () => {
       await runner.panel(text => {
@@ -118,7 +130,7 @@ async function runPlatform(key) {
       await runner.source(() => document.querySelector("#fixture-switch").click());
       await until(() => runner.panel(text => document.querySelector(".chapter-tree-reader")?.textContent.includes(text), expected("B").prompts[0]), "目录未切换至 B");
       assert.equal(await runner.panel(text => document.querySelector(".chapter-tree-reader").textContent.includes(text), a.prompts[0]), false);
-      await verifyExport("B");
+      await verifyExport(key,"B");
     });
   } catch (error) {
     await runner.capture(key).catch(() => {});

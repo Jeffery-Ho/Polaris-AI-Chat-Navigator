@@ -21,13 +21,17 @@ const packages = [];
 const versions = {};
 const browsers = ["chrome", "edge", "firefox"];
 
-function run(name, command, args) {
+function run(name, command, args, timeout = 10 * 60_000) {
   const since = Date.now();
   console.log("[验收]", name);
-  const result = spawnSync(command, args, { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  const result = spawnSync(command, args, { cwd: root, encoding: "utf8", timeout, maxBuffer: 64 * 1024 * 1024 });
   const log = name + ".log";
   writeFileSync(path.join(output, log), [result.stdout, result.stderr, result.error?.message].filter(Boolean).join("\n"));
   phases.push({ name, ok: result.status === 0, log, seconds: ((Date.now() - since) / 1000).toFixed(1) });
+  if (result.status !== 0) {
+    const last = [result.stdout, result.stderr, result.error?.message].filter(Boolean).join("\n").trim().split("\n").slice(-18);
+    console.error(last.join("\n").slice(-4000));
+  }
   return result.status === 0;
 }
 function savePackage(source, filename) {
@@ -51,7 +55,10 @@ function collect(browser, evidence, ready) {
     for (const scenario of cases) {
       const hits = observed.filter(item => item.platform === key && item.scenario === scenario);
       const item = hits.length === 1 ? hits[0] : null;
-      batch.push({ browser, platform: key, scenario, status: item?.status === "pass" && versions[browser] ? "pass" : item?.status === "fail" || hits.length > 1 ? "fail" : "skip", detail: item?.detail || "" });
+      let status = "skip";
+      if (item?.status === "pass" && versions[browser]) status = "pass";
+      if (item?.status === "fail" || hits.length > 1) status = "fail";
+      batch.push({ browser, platform: key, scenario, status, detail: item?.detail || "" });
     }
   }
   rows.push(...batch);
@@ -66,7 +73,7 @@ for (const browser of browsers) {
     const built = run("package-" + browser, "pnpm", [browser === "chrome" ? "zip" : "zip:" + browser]);
     if (browser === "chrome" && built) {
       run("metadata", process.execPath, ["scripts/validate-extension-package.js"]);
-      run("regression", "pnpm", ["test"]);
+      run("regression", "pnpm", ["test", "--test-reporter=tap"]);
     }
     if (built) {
       const stem = "polaris-ai-chat-navigator-" + manifest.version + "-";
@@ -85,7 +92,14 @@ for (const browser of browsers) {
     collect(browser, evidence, false);
   }
 }
-const ok = packages.length === 4 && phases.every(x => x.ok) && rows.length > 0 && rows.every(x => x.status === "pass");
+const unitLog = path.join(output, "regression.log");
+const transcript = existsSync(unitLog) ? readFileSync(unitLog, "utf8") : "";
+const adapters = SUPPORTED_PLATFORMS.map(({ key }) => {
+  const line = transcript.split("\n").find(text => new RegExp("^(not ok|ok) [0-9]+ - " + key + " 合成会话").test(text));
+  if (!line || /# (?:SKIP|TODO)/i.test(line)) return { key, status: "skip" };
+  return { key, status: line.startsWith("ok ") ? "pass" : "fail" };
+});
+const ok = adapters.every(item => item.status === "pass") && packages.length === 4 && phases.every(x => x.ok) && rows.length > 0 && rows.every(x => x.status === "pass");
 const count = (group, status) => group.filter(row => row.status === status).length;
 const lines = [
   "# Polaris 发布前离线验收", "",
@@ -94,6 +108,8 @@ const lines = [
   "", "浏览器场景通过 " + count(rows, "pass") + "，失败 " + count(rows, "fail") + "，未运行或结果缺失 " + count(rows, "skip") + "。",
   "", "| 阶段 | 结果 | 秒 |", "|---|---|---:|",
   ...phases.map(x => "| [" + x.name + "](" + x.log + ") | " + (x.ok ? "通过" : "失败") + " | " + x.seconds + " |"),
+  "", "## 平台适配器回归", "",
+  ...adapters.map(item => "- " + item.key + "：" + ({pass:"通过",fail:"失败",skip:"缺测"})[item.status]),
   "", "| 浏览器 | 实测版本 | 平台 | 场景 | 结果 |", "|---|---|---|---|---|",
   ...rows.map(x => "| " + [x.browser, versions[x.browser] || "未取得", x.platform, x.scenario, ({pass:"通过",fail:"失败",skip:"未运行或缺测"})[x.status]].join(" | ") + " |"),
   "", "## 失败明细", "",
@@ -106,5 +122,6 @@ writeFileSync(path.join(output, "report.md"), report);
 writeFileSync(path.join(assets, "SHA256SUMS"), packages.map(p => p.digest + "  " + p.filename).join("\n") + "\n");
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, report);
 if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, "output=" + output + "\n");
+console.log(report);
 console.log(path.join(output, "report.md"));
 process.exitCode = ok ? 0 : 1;

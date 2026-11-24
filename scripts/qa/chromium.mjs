@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright";
 import { installEdgeExtension } from "./edge-install.mjs";
@@ -43,9 +43,9 @@ export async function launch({ browser, profile, out, packagePath, fixturePage, 
   });
   let cdp;
   try {
-    if (isEdge) await installEdgeExtension(context,packagePath);
+    if (isEdge) await installEdgeExtension(context,packagePath,out);
     const worker = context.serviceWorkers()[0] || await context.waitForEvent("serviceworker",{timeout:12000});
-    const extensionOrigin = new URL(worker.url()).origin === "null" ? worker.url().split("/").slice(0,3).join("/") : new URL(worker.url()).origin;
+    const extensionOrigin = "chrome-extension://" + new URL(worker.url()).host;
     await worker.evaluate(async () => {
       await chrome.storage.local.set({"polaris-onboarding-version":1,"polaris-release-notice-version":chrome.runtime.getManifest().version});
     });
@@ -54,6 +54,7 @@ export async function launch({ browser, profile, out, packagePath, fixturePage, 
     if (isEdge) assert.match(userAgent,/Edg\//);
     else assert.match(await readFile(path.join(path.dirname(executablePath),"../Resources/Info.plist"),"utf8").catch(()=>executablePath), /Chrome for Testing|chrome/i);
     const version = isEdge ? userAgent.match(/Edg\/([\d.]+)/)[1] : product;
+    await cdp.call("Browser.grantPermissions",{origin:extensionOrigin,permissions:["clipboardReadWrite","clipboardSanitizedWrite"]});
     await cdp.call("Browser.setDownloadBehavior",{behavior:"allow",downloadPath:downloadDir});
     let fixtureKey;
     await context.route(/^https?:\/\//, route => {
@@ -66,7 +67,9 @@ export async function launch({ browser, profile, out, packagePath, fixturePage, 
     const page = await context.newPage();
     await page.bringToFront();
     let sessionId;
+    let actions = [];
     async function evaluate(fn,arg) {
+      actions.push({ time: new Date().toISOString(), scope: "panel", operation: fn.toString(), argument: arg });
       const expression = '(' + fn.toString() + ')(' + (JSON.stringify(arg) ?? '') + ')';
       const response = await cdp.call("Runtime.evaluate",{expression,returnByValue:true,awaitPromise:true,userGesture:true},sessionId);
       if(response.exceptionDetails) throw Error(response.exceptionDetails.exception?.description || response.exceptionDetails.text);
@@ -74,7 +77,7 @@ export async function launch({ browser, profile, out, packagePath, fixturePage, 
     }
     return {
       version,downloadDir,
-      async begin(key) { fixtureKey=key; await context.tracing.start({screenshots:true,snapshots:true}); },
+      async begin(key) { fixtureKey=key; actions = []; await context.tracing.start({screenshots:true,snapshots:true}); },
       async goto(url) { await page.goto(url,{timeout:15000}); },
       source:(fn,arg)=>page.evaluate(fn,arg),
       async openPanel() {
@@ -91,7 +94,16 @@ export async function launch({ browser, profile, out, packagePath, fixturePage, 
         sessionId=(await cdp.call("Target.attachToTarget",{targetId:panel.targetId,flatten:true})).sessionId;
       },
       panel:evaluate,
-      capture:key=>page.screenshot({path:path.join(out,key+".png")}),
+      async capture(key) {
+        await writeFile(path.join(out,key+"-actions.json"), JSON.stringify(actions,null,2));
+        await page.screenshot({path:path.join(out,key+".png")});
+        if (sessionId) {
+          const dump = await evaluate(() => document.body.innerText).catch(()=>"");
+          await writeFile(path.join(out,key+"-panel.txt"),dump);
+          const image = await cdp.call("Page.captureScreenshot",{},sessionId).catch(()=>null);
+          if (image?.data) await writeFile(path.join(out,key+"-panel.png"),Buffer.from(image.data,"base64"));
+        }
+      },
       end:(key,failed)=>context.tracing.stop(failed?{path:path.join(out,key+"-trace.zip")} : {}),
       async close(){ cdp.close(); await context.close(); }
     };

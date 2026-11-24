@@ -8,6 +8,9 @@ Polaris: AI Chat Navigator automatically detects headings and list titles in AI 
 
 Run `pnpm test:release` to package all three browsers and run offline acceptance. Each run writes its Markdown report, per-browser evidence and candidate digests under `Release/qa/`. The independent **Offline acceptance** workflow runs on pull requests and supports manual runs. The release workflow publishes the exact archives from a passing run.
 
+For a local run, set `POLARIS_CHROME_PATH` to the Chrome for Testing executable and `POLARIS_EDGE_PATH` to the Microsoft Edge executable. Install Firefox and geckodriver (`GECKODRIVER_PATH` overrides PATH). Linux requires a display or Xvfb and xdotool for the native Edge folder chooser. macOS uses System Events with Accessibility access. All three browsers use temporary test profiles. To run hosted acceptance, select **Offline acceptance → Run workflow**. See [real-site smoke setup](docs/live-smoke.md) for dedicated account configuration.
+
+
 `dist/` is the only extension package Chrome should load, and it is not committed. After cloning, run this once:
 
 ```bash

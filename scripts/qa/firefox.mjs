@@ -114,11 +114,10 @@ export async function launch({ profile, out, packagePath, fixturePage, fixtureUR
       // The extension runs out-of-process. Target the actual sidebar document
       // through its Marionette actor, keeping the conversation tab active.
       return execute(`
-        const sidebar = window.SidebarController.browser.browsingContext;
-        const extension = sidebar.getAllBrowsingContextsInSubtree().find(bc =>
-          bc.currentWindowGlobal?.documentURI.spec.startsWith("moz-extension:") &&
-          bc.currentWindowGlobal.documentURI.spec.includes("sidepanel.html"));
-        if (!extension) throw Error("Firefox 侧栏文档未就绪");
+        const host = window.SidebarController.browser.contentDocument;
+        const extension = host?.getElementById("webext-panels-browser")?.browsingContext;
+        if (!extension?.currentWindowGlobal?.documentURI.spec.includes("/sidepanel.html"))
+          throw Error("Firefox 侧栏文档未就绪");
         const actor = extension.currentWindowGlobal.getActor("MarionetteCommands");
         return actor.executeScript(arguments[0], [], {});
       `, ["return (" + fn.toString() + ")(" + (JSON.stringify(arg) ?? "") + ");"]);
