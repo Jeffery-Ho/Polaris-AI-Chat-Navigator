@@ -49,12 +49,17 @@ async function selectLinuxFolder(directory, browserPid, evidencePath) {
 }
 
 async function selectMacFolder(directory, browserPid) {
+  const {stdout: sessionState} = await exec("ioreg", ["-n", "Root", "-d1", "-w0"]);
+  if (/"CGSSessionScreenIsLocked"=Yes/.test(sessionState)) {
+    throw new Error("macOS 屏幕已锁定，无法操作 Edge 的系统目录选择器");
+  }
   const script = `on run args
     set wantedPID to item 1 of args as integer
     set wantedPath to item 2 of args
     tell application "System Events"
       set edgeProcess to first application process whose unix id is wantedPID
       tell edgeProcess
+        set frontmost to true
         set foundChooser to false
         repeat 40 times
           if exists (first window whose name contains "Extensions") then
@@ -66,7 +71,7 @@ async function selectMacFolder(directory, browserPid) {
           end if
           delay 0.25
         end repeat
-        if not foundChooser then error "Edge 系统目录选择器未出现"
+        if not foundChooser then error ("Edge 系统目录选择器未出现；窗口 " & (name of windows as string))
         set frontmost to true
         set chooserWindow to first window whose name contains "Extensions"
         set chooserSheet to sheet 1 of chooserWindow
