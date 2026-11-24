@@ -33,7 +33,8 @@ export async function launch({ browser, profile, out, packagePath, fixturePage, 
   const isEdge = browser === "edge";
   const executablePath = process.env[isEdge ? "POLARIS_EDGE_PATH" : "POLARIS_CHROME_PATH"];
   assert.ok(executablePath,"缺少 " + (isEdge ? "POLARIS_EDGE_PATH" : "POLARIS_CHROME_PATH"));
-  if (!isEdge) assert.match(execFileSync(executablePath,["--version"],{encoding:"utf8"}),/Google Chrome for Testing/i,"需要 Chrome for Testing");
+  const binaryVersion = execFileSync(executablePath, ["--version"], { encoding: "utf8" }).trim();
+  assert.match(binaryVersion, isEdge ? /Microsoft Edge [0-9]/i : /Google Chrome for Testing/i);
   const downloadDir = path.join(profile,"downloads");
   await mkdir(downloadDir);
   const context = await chromium.launchPersistentContext(profile,{
@@ -62,7 +63,7 @@ export async function launch({ browser, profile, out, packagePath, fixturePage, 
     if (stored.exceptionDetails) throw Error(worker.url() + ": " + stored.exceptionDetails.exception?.description);
     const { product, userAgent } = await cdp.call("Browser.getVersion");
     if (isEdge) assert.match(userAgent,/Edg\//);
-    const version = isEdge ? userAgent.match(/Edg\/([\d.]+)/)[1] : product;
+    const version = isEdge ? binaryVersion : product;
     await cdp.call("Browser.grantPermissions",{origin:extensionOrigin,permissions:["clipboardReadWrite","clipboardSanitizedWrite"]});
     await cdp.call("Browser.setDownloadBehavior",{behavior:"allow",downloadPath:downloadDir});
     let fixtureKey;

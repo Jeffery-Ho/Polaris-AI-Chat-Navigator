@@ -26,10 +26,10 @@ async function selectLinuxFolder(directory, browserPid, evidencePath) {
       const {stdout: windows} = await exec("xdotool", ["search", "--onlyvisible", "--pid", String(browserPid)]).catch(() => ({stdout: ""}));
       if (windows.trim().split(/\s+/).includes(id)) {
         try {
-          await exec("/usr/bin/python3", [fileURLToPath(new URL("./gtk-choose-folder.py", import.meta.url)), String(browserPid)]);
+          await exec("/usr/bin/python3", [fileURLToPath(new URL("./gtk-choose-folder.py", import.meta.url)), String(browserPid), title.trim()]);
         } catch (error) {
           if (evidencePath && process.env.GITHUB_ACTIONS) {
-            await exec("import", ["-window", id, path.join(evidencePath, "edge-folder.png")]).catch(() => {});
+            await exec("xwd", ["-silent", "-id", id, "-out", path.join(evidencePath, "edge-folder.xwd")]).catch(() => {});
           }
           throw error;
         }
