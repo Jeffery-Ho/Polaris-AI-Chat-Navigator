@@ -50,12 +50,18 @@ async function selectMacFolder(directory, browserPid) {
         end repeat
         if not foundChooser then error "Edge 系统目录选择器未出现"
         set frontmost to true
+        set chooserWindow to first window whose name contains "Extensions"
+        set chooserSheet to sheet 1 of chooserWindow
         keystroke "g" using {command down, shift down}
         delay 0.4
         keystroke wantedPath
         key code 36
-        delay 0.6
-        key code 36
+        delay 0.8
+        tell splitter group 1 of chooserSheet
+          set chooserFolder to value of pop up button "Where:"
+          if not (wantedPath ends with ("/" & chooserFolder)) then error ("系统文件选择器未进入候选目录 (" & chooserFolder & ")")
+          click button "Select"
+        end tell
       end tell
     end tell
   end run`;
