@@ -31,14 +31,14 @@ jobs:
         continue-on-error: true
         run: |
           echo "POLARIS_EDGE_PATH=$(command -v microsoft-edge)" >> "$GITHUB_ENV"
-          sudo apt-get update -qq && sudo apt-get install -y xdotool python3-pyatspi at-spi2-core dbus-x11 x11-apps
+          sudo apt-get update -qq && sudo apt-get install -y xdotool x11-apps
       - name: Run candidate acceptance
         id: qa
         env:
           GTK_USE_PORTAL: "0"
           LANG: C.UTF-8
           POLARIS_CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
-        run: dbus-run-session -- sh -c 'gsettings set org.gnome.desktop.interface toolkit-accessibility true && GTK_MODULES=atk-bridge xvfb-run -a pnpm test:release'
+        run: xvfb-run -a pnpm test:release
       - name: Save diagnostics
         id: diagnostics
         if: always()

@@ -2,7 +2,6 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 
 const executeFile = promisify(execFile);
@@ -25,13 +24,21 @@ async function selectLinuxFolder(directory, browserPid, evidencePath) {
       await delay(500);
       const {stdout: windows} = await exec("xdotool", ["search", "--onlyvisible", "--pid", String(browserPid)]).catch(() => ({stdout: ""}));
       if (windows.trim().split(/\s+/).includes(id)) {
-        try {
-          await exec("/usr/bin/python3", [fileURLToPath(new URL("./gtk-choose-folder.py", import.meta.url)), String(browserPid), title.trim()]);
-        } catch (error) {
+        // GTK keeps focus in the location entry after autocompleting the folder.
+        // Its Open action is anchored to the bottom-right of this native window.
+        const {stdout: geometry} = await exec("xdotool", ["getwindowgeometry", "--shell", id]);
+        const dimension = key => Number(geometry.match(new RegExp("^" + key + "=(\\d+)$", "m"))?.[1]);
+        const x = dimension("WIDTH") - 48;
+        const y = dimension("HEIGHT") - 22;
+        if (!(x > 0 && y > 0)) throw new Error("无法取得 Edge 目录选择器的尺寸");
+        await exec("xdotool", ["mousemove", "--window", id, String(x), String(y), "click", "1"]);
+        await delay(600);
+        const remaining = await exec("xdotool", ["search", "--onlyvisible", "--pid", String(browserPid)]).catch(() => ({stdout: ""}));
+        if (remaining.stdout.trim().split(/\s+/).includes(id)) {
+          await exec("xdotool", ["mousemove", "--window", id, String(x), String(y), "click", "1"]);
           if (evidencePath && process.env.GITHUB_ACTIONS) {
             await exec("xwd", ["-silent", "-id", id, "-out", path.join(evidencePath, "edge-folder.xwd")]).catch(() => {});
           }
-          throw error;
         }
       }
       return;
@@ -50,8 +57,9 @@ async function selectMacFolder(directory, browserPid) {
       tell edgeProcess
         set foundChooser to false
         repeat 40 times
-          if exists window 1 then
-            if (exists sheet 1 of window 1) or (subrole of window 1 is "AXDialog") then
+          if exists (first window whose name contains "Extensions") then
+            set chooserWindow to first window whose name contains "Extensions"
+            if exists sheet 1 of chooserWindow then
               set foundChooser to true
               exit repeat
             end if
