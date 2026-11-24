@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright";
@@ -32,6 +33,7 @@ export async function launch({ browser, profile, out, packagePath, fixturePage, 
   const isEdge = browser === "edge";
   const executablePath = process.env[isEdge ? "POLARIS_EDGE_PATH" : "POLARIS_CHROME_PATH"];
   assert.ok(executablePath,"缺少 " + (isEdge ? "POLARIS_EDGE_PATH" : "POLARIS_CHROME_PATH"));
+  if (!isEdge) assert.match(execFileSync(executablePath,["--version"],{encoding:"utf8"}),/Google Chrome for Testing/i,"需要 Chrome for Testing");
   const downloadDir = path.join(profile,"downloads");
   await mkdir(downloadDir);
   const context = await chromium.launchPersistentContext(profile,{
@@ -53,12 +55,13 @@ export async function launch({ browser, profile, out, packagePath, fixturePage, 
     const workerTarget = (await cdp.call("Target.getTargets")).targetInfos.find(t => t.url === worker.url());
     const setup = (await cdp.call("Target.attachToTarget",{targetId:workerTarget.targetId,flatten:true})).sessionId;
     await until(async () => (await cdp.call("Runtime.evaluate",{expression:'typeof chrome !== "undefined" && !!chrome.storage',returnByValue:true},setup)).result.value, "候选包后台扩展 API 初始化超时");
+    const build = await cdp.call("Runtime.evaluate",{expression:"chrome.runtime.getManifest().version",returnByValue:true},setup);
+    assert.equal(build.result.value,manifest.version,"安装版本与候选包不一致");
     const stored = await cdp.call("Runtime.evaluate",{expression:'chrome.storage.local.set({"polaris-onboarding-version":1,"polaris-release-notice-version":chrome.runtime.getManifest().version})',awaitPromise:true},setup);
     await cdp.call("Target.detachFromTarget",{sessionId:setup});
     if (stored.exceptionDetails) throw Error(worker.url() + ": " + stored.exceptionDetails.exception?.description);
     const { product, userAgent } = await cdp.call("Browser.getVersion");
     if (isEdge) assert.match(userAgent,/Edg\//);
-    else assert.match(await readFile(path.join(path.dirname(executablePath),"../Resources/Info.plist"),"utf8").catch(()=>executablePath), /Chrome for Testing|chrome/i);
     const version = isEdge ? userAgent.match(/Edg\/([\d.]+)/)[1] : product;
     await cdp.call("Browser.grantPermissions",{origin:extensionOrigin,permissions:["clipboardReadWrite","clipboardSanitizedWrite"]});
     await cdp.call("Browser.setDownloadBehavior",{behavior:"allow",downloadPath:downloadDir});

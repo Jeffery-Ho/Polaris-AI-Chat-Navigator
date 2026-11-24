@@ -32,7 +32,15 @@ async function verifyExport(key, session) {
   for (const name of await readdir(runner.downloadDir)) {
     if (name.endsWith(".md")) await rm(path.join(runner.downloadDir,name));
   }
-  await until(() => runner.panel(() => !!document.querySelector(".conversation-copy-button:not(:disabled)")), "导出按钮不可用");
+  // A scroll or SPA change can briefly invalidate the export source while the
+  // background worker publishes the new chapter snapshot.
+  let readySince;
+  await until(async () => {
+    const ready = await runner.panel(() => !!document.querySelector(".conversation-copy-button:not(:disabled)"));
+    if (!ready) readySince = undefined;
+    else readySince ??= Date.now();
+    return ready && Date.now() - readySince >= 650;
+  }, "导出数据尚未就绪");
   if (runner.clickPanel) await runner.clickPanel(".conversation-copy-button");
   else await runner.panel(() => document.querySelector(".conversation-copy-button").click());
   await until(() => runner.panel(() => {
@@ -74,6 +82,10 @@ async function runPlatform(key) {
     });
     await step(async () => {
       await runner.openPanel();
+      if (browser === "edge") {
+        const origin = new URL(fixtureURL(key)).origin + "/*";
+        assert.ok(await runner.panel(origin => chrome.permissions.contains({permissions:["sidePanel","tabs"],origins:[origin]}),origin), "Edge 未授予侧栏或站点权限 " + origin);
+      }
       const favicon = SUPPORTED_PLATFORMS.find(platform => platform.key === key).favicon;
       await until(() => runner.panel(favicon => document.querySelector(".window-platform-icon")?.src.endsWith("/" + favicon),favicon), "侧栏未识别当前平台 " + key);
       await until(() => runner.panel(() => {

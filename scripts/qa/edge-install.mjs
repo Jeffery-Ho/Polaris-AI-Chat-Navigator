@@ -1,10 +1,11 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { readFile, realpath, writeFile } from "node:fs/promises";
+import { realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
-const exec = promisify(execFile);
+const executeFile = promisify(execFile);
+const exec = (program, args, options) => executeFile(program, args, {timeout: 15000, ...options});
 
 // The folder chooser belongs to the browser process; Playwright's page
 // filechooser event only covers file inputs owned by a web page.
@@ -63,7 +64,6 @@ async function selectMacFolder(directory, browserPid) {
 
 export async function installEdgeExtension(context, extensionPath, evidencePath) {
   const directory = await realpath(extensionPath);
-  const manifest = JSON.parse(await readFile(path.join(directory, "manifest.json"), "utf8"));
   const page = await context.newPage();
   const session = await context.browser().newBrowserCDPSession();
   if (evidencePath) await context.tracing.start({ screenshots: true, snapshots: true });
@@ -86,17 +86,6 @@ export async function installEdgeExtension(context, extensionPath, evidencePath)
     else if (process.platform === "linux") await selectLinuxFolder(directory, pid);
     else throw new Error("Edge 自动目录选择当前支持 macOS 和 Linux");
     await page.getByText(/Polaris/i).first().waitFor({timeout: 15000});
-    const extensionWorker = context.serviceWorkers().find(worker => worker.url().startsWith("chrome-extension://") && worker.url().endsWith(manifest.background.service_worker));
-    const worker = extensionWorker || await context.waitForEvent("serviceworker", {
-      predicate: worker => worker.url().startsWith("chrome-extension://") && worker.url().endsWith(manifest.background.service_worker),
-      timeout: 10000
-    });
-    let installed;
-    for (let attempt = 0; attempt < 25 && !installed; attempt++) {
-      installed = await worker.evaluate(() => globalThis.chrome?.runtime?.getManifest?.()?.version);
-      if (!installed) await delay(200);
-    }
-    if (installed !== manifest.version) throw new Error("已安装的 Edge 扩展版本与候选包不符");
   } catch (error) {
     failed = true;
     if (evidencePath) await writeFile(path.join(evidencePath, "edge-manager.txt"), await page.locator("body").ariaSnapshot().catch(() => "无法读取扩展管理页")).catch(() => {});
