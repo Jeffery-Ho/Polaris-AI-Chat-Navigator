@@ -6,6 +6,8 @@ Polaris: AI Chat Navigator automatically detects headings and list titles in AI 
 
 ## Development
 
+Run `pnpm test:release` to package all three browsers and run offline acceptance. Each run writes its Markdown report, per-browser evidence and candidate digests under `Release/qa/`. The independent **Offline acceptance** workflow runs on pull requests and supports manual runs. The release workflow publishes the exact archives from a passing run.
+
 `dist/` is the only extension package Chrome should load, and it is not committed. After cloning, run this once:
 
 ```bash
@@ -147,7 +149,7 @@ Do not commit `dist/` or load `dist.zip` as the extension. The release workflow 
 
 Store descriptions and marketplace copy rules are maintained in [store-listing.md](store-listing.md).
 
-Current version: `1.6.10(460)`
+Current version: `1.6.10(461)`
 
 ## License
 

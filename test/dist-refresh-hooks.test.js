@@ -86,7 +86,7 @@ test("prepare installs git hooks only outside CI", () => {
 test("WXT development is isolated and hooks keep production dist current", async () => {
   const [pkg, workflow, gitignore, prepare] = await Promise.all([
     readFile(new URL("../package.json", import.meta.url), "utf8").then(JSON.parse),
-    readFile(new URL("../.github/workflows/release.yml", import.meta.url), "utf8"),
+    readFile(new URL("../.github/workflows/offline.yml", import.meta.url), "utf8"),
     readFile(new URL("../.gitignore", import.meta.url), "utf8"),
     readFile(new URL("../scripts/prepare.js", import.meta.url), "utf8")
   ]);
@@ -98,7 +98,7 @@ test("WXT development is isolated and hooks keep production dist current", async
   assert.match(gitignore, /^dist\/$/m);
   assert.match(gitignore, /^\.output\/$/m);
   assert.match(workflow, /pnpm install --frozen-lockfile/);
-  assert.ok(workflow.indexOf("run: pnpm build") < workflow.indexOf("run: pnpm test"));
+  assert.match(workflow, /pnpm test:release/);
   assert.doesNotMatch(workflow, /githooks|refresh-extension|core\.hooksPath/);
 });
 

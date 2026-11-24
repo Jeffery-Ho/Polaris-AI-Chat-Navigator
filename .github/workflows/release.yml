@@ -14,67 +14,34 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verify:
+    uses: ./.github/workflows/offline.yml
+    permissions:
+      contents: read
   release:
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+      - uses: actions/download-artifact@v4
         with:
-          version: 11.19.0
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Check source
-        run: pnpm check
-
-      - name: Build extension
-        run: pnpm build
-
-      - name: Run tests
-        run: pnpm test
-
-      - name: Validate build metadata
+          name: tested-candidates
+          path: Release/wxt
+      - name: Verify tested bytes and prepare stable archive
         id: metadata
-        run: node scripts/validate-extension-package.js
-
-      - name: Package release assets
-        env:
-          VERSION: ${{ steps.metadata.outputs.version }}
-          BUILD: ${{ steps.metadata.outputs.build }}
         run: |
+          (cd Release/wxt && sha256sum -c SHA256SUMS)
+          VERSION=$(jq -r .version manifest.build.json)
+          BUILD=$(jq -r '.version_name | capture("\\((?<build>[0-9]+)\\)$").build' manifest.build.json)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
           mkdir -p release
           archive="Polaris-AI-${VERSION}-build-${BUILD}.zip"
           stable_archive="release/Polaris-AI.zip"
-          (cd dist && zip -qr "../release/${archive}" . -x '*.DS_Store')
+          cp "Release/wxt/polaris-ai-chat-navigator-${VERSION}-chrome.zip" "release/${archive}"
           cp "release/${archive}" "$stable_archive"
-          unzip -Z1 "release/${archive}" | grep -qx 'manifest.json'
-          unzip -Z1 "$stable_archive" | grep -qx 'manifest.json'
-
-      # Store packages from `wxt zip`; dist/ was already archived above, so the rebuild cannot change it.
-      - name: Package WXT store archives
-        env:
-          VERSION: ${{ steps.metadata.outputs.version }}
-        run: |
-          pnpm zip
-          pnpm zip:edge
-          pnpm zip:firefox
-          for target in chrome edge firefox sources; do
-            wxt_archive="Release/wxt/polaris-ai-chat-navigator-${VERSION}-${target}.zip"
-            unzip -t "$wxt_archive" >/dev/null
-            if [[ "$target" != "sources" ]]; then
-              unzip -Z1 "$wxt_archive" | grep -qx 'manifest.json'
-            fi
-          done
 
       - name: Create or update GitHub Release
         env:
