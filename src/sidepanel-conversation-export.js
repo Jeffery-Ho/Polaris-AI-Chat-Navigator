@@ -129,19 +129,22 @@ export function createSidepanelConversationExport({ document: doc, locale, appNa
   trigger.addEventListener("click", async () => {
     if (!available || busy) return;
     const job = ++operation; busy = true; trigger.disabled = true; trigger.setAttribute("aria-busy", "true");
-    status.textContent = label("正在复制…", "Copying…");
+    status.textContent = label("正在准备导出…", "Preparing export…");
     try {
       const conversation = await onRead();
       if (job !== operation) return;
       if (!conversation.messages?.length) throw new Error("No messages");
       const data = buildConversationExport({ document: doc, conversation, locale, appName });
-      if (!win.navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
-      await win.navigator.clipboard.writeText(data.text);
+      try {
+        await win.navigator.clipboard?.writeText(data.text);
+      } catch {
+        // File downloads remain available when the browser denies clipboard access.
+      }
       if (job !== operation) return;
       status.textContent = "";
       showDialog(data, conversation.scope);
     } catch {
-      if (job === operation) status.textContent = label("复制失败，请重试。", "Copy failed. Try again.");
+      if (job === operation) status.textContent = label("导出失败，请重试。", "Export failed. Try again.");
     } finally {
       if (job === operation) { busy = false; trigger.disabled = !available; trigger.removeAttribute("aria-busy"); }
     }

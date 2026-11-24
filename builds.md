@@ -10,6 +10,16 @@
 - Version update type must be declared by the user before recording a build.
 - After each build is recorded, confirm the build number and version with the user.
 
+## 454
+- Date: 2026-11-24
+- Version: 1.6.9
+- Summary: Export loaded conversation messages when the index is empty.
+
+## 453
+- Date: 2026-11-24
+- Version: 1.6.8
+- Summary: Keep file export available when clipboard writes fail.
+
 ## 452
 - Date: 2026-11-24
 - Version: 1.6.7

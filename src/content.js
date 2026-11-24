@@ -5629,7 +5629,7 @@ export function initializeContent() {
     if (!billingAllowsIndex(billingView) && message.command === "read-retained-message") return { ok: false, reason: "pro-required" };
     if (message.command === "search-conversation") return conversationIndex.search(String(message.query || ""), { offset: Number(message.offset) || 0 });
     if (message.command === "get-conversation-export") {
-      if (conversationIndex.enabled()) {
+      if (conversationIndex.enabled() && conversationIndex.snapshot()?.count) {
         const data = conversationIndex.exportConversation();
         return data ? { ok: true, ...data, url: currentRouteKey() } : { ok: false, reason: "not-ready" };
       }

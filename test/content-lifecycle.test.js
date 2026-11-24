@@ -116,6 +116,12 @@ test("a filtered reply keeps its recognition hint when the index has no Maker ro
     const snapshots = s.messages.filter(message => message.type === "POLARIS_CONTENT_STATE").map(message => message.snapshot);
     const snapshot = snapshots.find(value => value.conversationIndex?.count === 0 && value.markerItems.some(item => item.type === "user"));
     assert.ok(snapshot);
+    const exported = await new Promise(resolve => {
+      for (const listener of s.runtime.listeners) listener({ type: "POLARIS_WINDOW_COMMAND",
+        command: "get-conversation-export", expectResult: true }, {}, resolve);
+    });
+    assert.equal(exported.ok, true);
+    assert.deepEqual(Array.from(exported.messages, message => message.role), ["user", "assistant"]);
     const user = snapshot.markerItems.find(item => item.type === "user");
     assert.deepEqual([...snapshot.recognitionHintGroups], [user.groupKey]);
   } finally { s.invalidate(); s.win.close(); }

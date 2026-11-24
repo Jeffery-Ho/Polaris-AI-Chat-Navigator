@@ -23,7 +23,7 @@ function setup({ onRead = async () => sample, copy, locale = 'en' } = {}) {
   return { dom, doc, win, control, copied, downloads, blobs };
 }
 
-test('global copy opens an optional MD/HTML export dialog only after clipboard success', async () => {
+test('global copy opens an optional MD/HTML export dialog and copies conversation text', async () => {
   const s = setup();
   try {
     s.doc.querySelector('.conversation-copy-button').click(); await settle();
@@ -53,17 +53,23 @@ test('global copy opens an optional MD/HTML export dialog only after clipboard s
   } finally { s.dom.window.close(); }
 });
 
-test('failed clipboard writes show retry feedback without a false success dialog', async () => {
-  let fail = true;
-  const s = setup({ copy: async () => { if (fail) throw new Error('Denied'); } });
+test('clipboard denial still allows the conversation file to be downloaded', async () => {
+  const s = setup({ copy: async () => { throw new Error('Denied'); } });
+  try {
+    s.doc.querySelector('.conversation-copy-button').click(); await settle();
+    s.doc.querySelector('dialog[open] .conversation-export-save').click();
+    assert.deepEqual(s.downloads, ['Long conversation.md']);
+  } finally { s.dom.window.close(); }
+});
+
+test('conversation read errors show export feedback and allow retry', async () => {
+  const s = setup({ onRead: async () => { throw new Error('Source unavailable'); } });
   try {
     const trigger = s.doc.querySelector('.conversation-copy-button');
     trigger.click(); await settle();
     assert.equal(s.doc.querySelector('dialog'), null);
-    assert.match(s.doc.querySelector('[role="status"]').textContent, /Copy failed/);
+    assert.match(s.doc.querySelector('[role="status"]').textContent, /Export failed/);
     assert.equal(trigger.disabled, false);
-    fail = false; trigger.click(); await settle();
-    assert.ok(s.doc.querySelector('dialog[open]'));
   } finally { s.dom.window.close(); }
 });
 

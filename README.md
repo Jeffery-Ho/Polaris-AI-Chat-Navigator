@@ -147,7 +147,7 @@ Do not commit `dist/` or load `dist.zip` as the extension. The release workflow 
 
 Store descriptions and marketplace copy rules are maintained in [store-listing.md](store-listing.md).
 
-Current version: `1.6.7(452)`
+Current version: `1.6.9(454)`
 
 ## License
 
