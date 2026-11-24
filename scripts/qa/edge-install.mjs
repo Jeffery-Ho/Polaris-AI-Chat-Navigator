@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 
 const executeFile = promisify(execFile);
@@ -23,7 +24,9 @@ async function selectLinuxFolder(directory, browserPid) {
       await exec("xdotool", ["key", "Return"]);
       await delay(500);
       const {stdout: windows} = await exec("xdotool", ["search", "--onlyvisible", "--pid", String(browserPid)]).catch(() => ({stdout: ""}));
-      if (windows.trim().split(/\s+/).includes(id)) await exec("xdotool", ["key", "--window", id, "Return"]);
+      if (windows.trim().split(/\s+/).includes(id)) {
+        await exec("/usr/bin/python3", [fileURLToPath(new URL("./gtk-choose-folder.py", import.meta.url)), String(browserPid)]);
+      }
       return;
     }
     await delay(250);
