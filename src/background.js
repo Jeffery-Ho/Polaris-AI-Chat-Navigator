@@ -481,15 +481,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return;
   }
 
-  if (message.type === "POLARIS_WINDOW_IMAGE") {
-    void isCurrentSourceTab(sender.tab).then((isCurrent) => {
-      if (!isCurrent) return;
-      return chrome.runtime.sendMessage({
-        type: "POLARIS_WINDOW_IMAGE",
-        imageUrls: message.imageUrls
-      });
-    }).catch(() => {});
-  }
+
 });
 
 chrome.tabs.onActivated.addListener((activeInfo) => {

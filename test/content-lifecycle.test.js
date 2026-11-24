@@ -569,29 +569,6 @@ test("invalidation while storage is pending cannot revive an old content instanc
   }
 });
 
-test("an image preview requested before invalidation cannot overwrite a new instance", async () => {
-  const s = await bootPackagedContent();
-  try {
-    await s.inject();
-    for (const listener of s.runtime.listeners) {
-      listener({ type: "POLARIS_WINDOW_COMMAND", command: "request-image-preview" }, {}, () => {});
-    }
-    s.invalidate();
-    await s.flush();
-    assert.equal(s.messages.some((message) => message.type === "POLARIS_WINDOW_IMAGE"), false);
-    await s.inject();
-    for (const listener of s.runtime.listeners) {
-      listener({ type: "POLARIS_WINDOW_COMMAND", command: "request-image-preview" }, {}, () => {});
-    }
-    await s.flush();
-    assert.equal(s.messages.filter((message) => message.type === "POLARIS_WINDOW_IMAGE").length, 1);
-    assert.deepEqual(s.errors, []);
-  } finally {
-    s.invalidate();
-    s.dom.window.close();
-  }
-});
-
 test("clipboard completion from an old instance cannot add a toast to a new overlay", async () => {
   const s = await bootPackagedContent();
   try {

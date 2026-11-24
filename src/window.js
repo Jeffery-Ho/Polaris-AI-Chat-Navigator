@@ -1,3 +1,4 @@
+import { showImagePreview } from "./image-preview.js";
 import { createBackIcon, createPageNavigation } from "./sidepanel-navigation.js";
 import { billingAllowsIndex, billingAllowsPlatform } from "./billing-access.js";
 import { normalizeHistoryMode } from "./history-mode.js";
@@ -25,6 +26,7 @@ export function initializeSidepanel() {
   const SYSTEM_THEME_QUERY = "(prefers-color-scheme: dark)";
   const root = document.getElementById("polaris-window");
   const { locale, t } = createI18n();
+  let dismissPreview;
   let billingPage = null;
   let billingOrigin = null;
   const billing = createSidepanelBilling({ document, chrome, locale, onChange: () => render(),
@@ -70,8 +72,6 @@ export function initializeSidepanel() {
     chapterQuery: "",
     chaptersStatus: "idle",
     treeChapters: [],
-    imageUrls: [],
-    imageIndex: 0,
     sourceTabId: null,
     lastUsedPlatform: "",
     routeKey: "",
@@ -480,7 +480,6 @@ export function initializeSidepanel() {
     const focusedTab = document.activeElement?.dataset?.windowTab || "";
     const focusedSettingsControl = document.activeElement?.dataset?.settingsFocus || "";
     const focusedPlatform = document.activeElement?.classList.contains("window-platform");
-    document.querySelector(".image-preview")?.remove();
     applyTheme(snapshot);
     syncSourceRetry(state.snapshot);
     if (state.activeTab !== "chapters") chapterReader?.suspend();
@@ -533,7 +532,6 @@ export function initializeSidepanel() {
     }
     platformMenu.refresh();
     if (focusedPlatform) root.querySelector(".window-platform")?.focus({ preventScroll: true });
-    if (state.imageUrls.length) renderImagePreview();
     if (state.makerStartPending && state.activeTab === "navigation" && virtualMarkers
       && snapshot.conversationIndex?.count > 0 && !state.markerQuery.trim()) {
       state.makerStartPending = false;
@@ -1071,7 +1069,8 @@ export function initializeSidepanel() {
       }
       copy.append(labels);
     }
-    row.replaceChildren(copy);
+    const existingThumbnail = row.querySelector(":scope > .maker-thumb");
+    row.replaceChildren(...(existingThumbnail ? [existingThumbnail, copy] : [copy]));
     syncWindowMarkerThumbnail(row, item);
     if (item.type === "user" && item.imageCount > 1) {
       copy.append(element("span", "index-result-meta", locale === "zh" ? `${item.imageCount} 张图片` : `${item.imageCount} images`));
@@ -1301,9 +1300,19 @@ export function initializeSidepanel() {
       image.addEventListener("error", () => {
         image.remove();
       });
+      image.tabIndex = 0;
+      image.setAttribute("role", "button");
+      image.setAttribute("aria-label", t("userMarker.openImage"));
+      image.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        event.stopPropagation();
+        image.click();
+      });
       image.addEventListener("click", (event) => {
         event.stopPropagation();
-        send({ command: "request-image-preview", groupKey: button.dataset.groupKey || "" });
+        dismissPreview?.();
+        dismissPreview = showImagePreview(image, document.body, t, () => { dismissPreview = null; });
       });
       button.insertBefore(image, button.querySelector(":scope > .maker-copy"));
     }
@@ -1733,30 +1742,6 @@ export function initializeSidepanel() {
     panel.appendChild(platforms);
   }
 
-  function renderImagePreview() {
-    const overlay = element("div", "image-preview");
-    overlay.addEventListener("click", (event) => { if (event.target === overlay) { state.imageUrls = []; render(); } });
-    const close = element("button", "preview-close", "×");
-    close.type = "button";
-    close.setAttribute("aria-label", t("userMarker.closeImagePreview"));
-    close.addEventListener("click", () => { state.imageUrls = []; render(); });
-    const image = element("img", "preview-image");
-    image.src = state.imageUrls[state.imageIndex] || "";
-    image.alt = t("userMarker.imagePreview");
-    const previous = element("button", "preview-nav preview-previous", "‹");
-    previous.type = "button";
-    previous.setAttribute("aria-label", t("userMarker.previousImage"));
-    previous.disabled = state.imageUrls.length < 2;
-    previous.addEventListener("click", () => { state.imageIndex = (state.imageIndex - 1 + state.imageUrls.length) % state.imageUrls.length; render(); });
-    const next = element("button", "preview-nav preview-next", "›");
-    next.type = "button";
-    next.setAttribute("aria-label", t("userMarker.nextImage"));
-    next.disabled = state.imageUrls.length < 2;
-    next.addEventListener("click", () => { state.imageIndex = (state.imageIndex + 1) % state.imageUrls.length; render(); });
-    overlay.append(close, previous, image, next);
-    document.body.appendChild(overlay);
-  }
-
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!message || typeof message.type !== "string") return;
     if (message.type === "POLARIS_WINDOW_STATE" && message.snapshot) {
@@ -1778,8 +1763,7 @@ export function initializeSidepanel() {
         state.markerQuery = ""; state.chapterQuery = ""; state.fullSearch = { key: "", items: [], total: 0, hasMore: false, loading: false };
         window.clearTimeout(searchTimer); resetVirtualMarkers();
         state.treeChapters = [];
-        state.imageUrls = [];
-        state.imageIndex = 0;
+        dismissPreview?.();
         state.chaptersStatus = "idle";
         windowMarkerListReconciler.reset();
         markerStreamingIndicator.reset();
@@ -1821,11 +1805,6 @@ export function initializeSidepanel() {
         changeContentMode("chapters");
       } else render();
     }
-    if (message.type === "POLARIS_WINDOW_IMAGE") {
-      state.imageUrls = Array.isArray(message.imageUrls) ? message.imageUrls : [];
-      state.imageIndex = 0;
-      if (state.imageUrls.length) render();
-    }
   });
 
   const onboarding = createSidepanelOnboarding({ document, chrome, locale, t, platforms: supportedPlatforms,
@@ -1842,12 +1821,23 @@ export function initializeSidepanel() {
       send({ command: "request-chapters", onlyIfChanged: true });
     }
   }, 1500);
-  // The pinned search bar only shows its divider once the main header has scrolled away.
+  let scrollAnchor = Math.max(0, window.scrollY);
   function updateSearchStuck() {
     const header = root.querySelector(":scope > .window-header--main");
-    const stuck = Boolean(header && root.querySelector(":scope > .window-search-bar")
-      && window.scrollY > 0 && header.getBoundingClientRect().bottom <= 0.5);
-    if (root.hasAttribute("data-search-stuck") !== stuck) root.toggleAttribute("data-search-stuck", stuck);
+    const y = Math.max(0, window.scrollY);
+    if (!header || !root.querySelector(":scope > .window-search-bar") || y === 0) {
+      root.removeAttribute("data-search-stuck");
+      scrollAnchor = y;
+    } else if (Math.abs(y - scrollAnchor) >= 6) {
+      root.toggleAttribute("data-search-stuck", y > scrollAnchor && y >= header.offsetHeight);
+      scrollAnchor = y;
+    }
+    if (header) {
+      const height = header.offsetHeight + "px";
+      if (root.style.getPropertyValue("--window-header-height") !== height) {
+        root.style.setProperty("--window-header-height", height);
+      }
+    }
   }
   function updateWindowScrollState() { updateSearchStuck(); updateScrollControls(); }
   window.addEventListener("scroll", () => {
@@ -1875,17 +1865,9 @@ export function initializeSidepanel() {
       focusSearchInput({ select: true });
     }
     if (event.key === "Escape") {
-      if (state.imageUrls.length) {
-        state.imageUrls = [];
-        render();
-      } else if (state.activeTab === "settings") {
+      if (state.activeTab === "settings") {
         backFromSettings();
       }
-    }
-    if (!event.metaKey && !event.ctrlKey && !event.altKey && state.imageUrls.length && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
-      event.preventDefault();
-      state.imageIndex = (state.imageIndex + (event.key === "ArrowLeft" ? -1 : 1) + state.imageUrls.length) % state.imageUrls.length;
-      render();
     }
   });
   void sendReady();

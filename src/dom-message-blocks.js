@@ -220,7 +220,8 @@ export function domMessageBlocks(element, { baseUrl = element.ownerDocument.base
     && textRoots.some((root) => root === node || root.contains(node));
   const containsAttachment = (node) => Array.from(attachments.keys()).some((owner) => owner !== node && node.contains(owner));
   const mediaButton = (node) => node.matches(CONTROL_SELECTOR)
-    && /(?:open|view|preview)\s+(?:image|attachment)|查看图片|预览图片|打开附件/i.test(node.getAttribute("aria-label") || "");
+    && (role === "user" && node.matches('button[aria-label="User attachment" i][aria-haspopup="dialog"]')
+      || /(?:open|view|preview)\s+(?:image|attachment)|查看图片|预览图片|打开附件/i.test(node.getAttribute("aria-label") || ""));
   const isControl = (node) => node.nodeType === 1 && node.matches(CONTROL_SELECTOR) && !mediaButton(node);
   const appendInline = (target, values) => {
     for (const value of values) {

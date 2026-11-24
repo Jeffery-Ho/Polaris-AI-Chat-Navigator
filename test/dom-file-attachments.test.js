@@ -126,3 +126,12 @@ test("ChatGPT 用户消息只有 Uploaded an image 文字时保留为附件标�
     assert.equal(domMessageBlocks(dom.window.document.querySelector("article")).some((block) => block.type === "attachment"), false, "回复里的同样文字不算上传");
   } finally { dom.window.close(); withImage.window.close(); }
 });
+
+test("ChatGPT 纯图片消息保留附件预览按钮内的 blob 图片", () => {
+  const src = "blob:https://chatgpt.com/upload";
+  const dom = new JSDOM(`<article><button aria-label="User attachment" aria-haspopup="dialog"><img alt="User attachment" src="${src}"></button></article>`, { url: "https://chatgpt.com/c/example" });
+  const blocks = domMessageBlocks(dom.window.document.querySelector("article"), { role: "user" });
+  assert.equal(blocks[0]?.type, "image");
+  assert.equal(blocks[0].src, src);
+  dom.window.close();
+});

@@ -1,3 +1,4 @@
+@import "./image-preview.css";
 @import "./tokens.css";
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/utilities.css" layer(utilities) source(none);
@@ -127,31 +128,32 @@ button { color: inherit; }
   background: var(--window-header-background);
 }
 
-/* Sidepanel main header scrolls away instead of sticking; only the search bar stays pinned. */
 #polaris-window > .window-header--main {
-  position: static;
+  position: sticky;
+  top: 0;
+  z-index: 4;
   padding-bottom: 0;
   border-bottom: 0;
+  transition: transform 160ms var(--polaris-ease);
 }
 
-/* The centered platform switcher overhangs the header; keep it above the search bar until the bar is stuck. */
-#polaris-window:not([data-search-stuck]) > .window-header--main {
-  position: relative;
-  z-index: 4;
+#polaris-window[data-search-stuck] > .window-header--main {
+  transform: translateY(-100%);
 }
 
 .window-search-bar {
   position: sticky;
-  top: 0;
+  top: var(--window-header-height, 0px);
+  transition: top 160ms var(--polaris-ease), border-color var(--window-fast-duration) var(--polaris-ease), box-shadow var(--window-fast-duration) var(--polaris-ease);
   z-index: 3;
   margin: 0 calc(var(--polaris-space-4) * -1);
   padding: var(--polaris-space-3) var(--polaris-space-4) var(--polaris-space-2);
   border-bottom: 1px solid transparent;
   background: var(--window-header-background);
-  transition: border-color var(--window-fast-duration) var(--polaris-ease), box-shadow var(--window-fast-duration) var(--polaris-ease);
 }
 
 #polaris-window[data-search-stuck] > .window-search-bar {
+  top: 0;
   border-bottom-color: var(--polaris-border);
   box-shadow: 0 8px 16px -14px rgba(0, 0, 0, 0.35);
 }
@@ -1516,8 +1518,6 @@ button { color: inherit; }
 .maker-card:focus-visible,
 .maker-user-toggle:focus-visible,
 .maker-attachment:focus-visible,
-.preview-close:focus-visible,
-.preview-nav:focus-visible,
 .settings-link:focus-visible {
   outline: 2px solid var(--polaris-focus);
   outline-offset: 2px;
@@ -1542,57 +1542,9 @@ button { color: inherit; }
 
 }
 
-.image-preview {
-  position: fixed;
-  inset: 0;
-  z-index: 5;
-  display: grid;
-  place-items: center;
-  padding: var(--polaris-space-6);
-  background: var(--polaris-overlay);
-}
-
-.preview-image {
-  max-width: 100%;
-  max-height: 78vh;
-  border-radius: var(--polaris-radius-lg);
-  box-shadow: none;
-}
-
-.preview-close,
-.preview-nav {
-  position: absolute;
-  border: 1px solid var(--polaris-border);
-  border-radius: var(--polaris-radius-pill);
-  background: var(--polaris-bg-elevated);
-  color: var(--polaris-text);
-  cursor: pointer;
-}
-
-.preview-close {
-  top: var(--polaris-space-4);
-  right: var(--polaris-space-4);
-  width: 32px;
-  height: 32px;
-  font-size: 20px;
-}
-
-.preview-nav {
-  top: 50%;
-  width: 32px;
-  height: 32px;
-  transform: translateY(-50%);
-  font-size: 24px;
-}
-
-.preview-previous { left: var(--polaris-space-4); }
-.preview-next { right: var(--polaris-space-4); }
-
 @media (prefers-reduced-motion: reduce) {
   #polaris-window,
-  #polaris-window *,
-  .image-preview,
-  .image-preview * {
+  #polaris-window * {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
   }

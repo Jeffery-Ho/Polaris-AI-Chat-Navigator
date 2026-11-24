@@ -10,6 +10,36 @@
 - Version update type must be declared by the user before recording a build.
 - After each build is recorded, confirm the build number and version with the user.
 
+## 460
+- Date: 2026-11-24
+- Version: 1.6.10
+- Summary: Reveal the sidebar header when scrolling back through earlier content.
+
+## 459
+- Date: 2026-11-24
+- Version: 1.6.10
+- Summary: Keep the image viewer close button visible over white photos.
+
+## 458
+- Date: 2026-11-24
+- Version: 1.6.10
+- Summary: Extend the image zoom viewport to every edge of the viewer.
+
+## 457
+- Date: 2026-11-24
+- Version: 1.6.10
+- Summary: Center the image viewer close icon within its circular button.
+
+## 456
+- Date: 2026-11-24
+- Version: 1.6.10
+- Summary: Open the selected Maker thumbnail in a single-image viewer with enter and exit transitions.
+
+## 455
+- Date: 2026-11-24
+- Version: 1.6.10
+- Summary: Recognize ChatGPT upload previews with localized labels or attachment content URLs in User Makers.
+
 ## 454
 - Date: 2026-11-24
 - Version: 1.6.9

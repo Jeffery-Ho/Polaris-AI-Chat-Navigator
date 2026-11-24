@@ -93,11 +93,19 @@ test("DOM indexes virtualize file labels and user thumbnails without claiming co
     assert.equal(s.win.document.querySelector(".maker-thumb").src, "https://cdn.test/upload.png");
     assert.equal(s.win.document.querySelector(".index-list-status"), null);
     assert.equal(s.win.document.querySelector(".window-search input").placeholder, "Search Makers");
+    s.win.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
     s.win.document.querySelector(".maker-thumb").click();
-    assert.equal(s.commands.findLast((command) => command.command === "request-image-preview").groupKey, "index:u1");
+    const preview = s.win.document.querySelector("dialog.polaris-image-viewer[open]");
+    assert.equal(preview.querySelector("img").src, "https://cdn.test/upload.png");
+    assert.equal(preview.querySelectorAll("button").length, 1);
     s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...snapshot, markerItems: [{ ...snapshot.markerItems[0], imageCount: 2 }] } });
     await new Promise((resolve) => setTimeout(resolve, 30));
     assert.match(s.win.document.querySelector(".maker-copy").textContent, /2 images/);
+    assert.equal(preview.isConnected, true);
+    preview.querySelector("button").click();
+    await Promise.resolve();
+    assert.equal(preview.isConnected, false);
+    assert.equal(s.win.document.activeElement, s.win.document.querySelector(".maker-thumb"));
   } finally { s.dom.window.close(); }
 });
 
@@ -313,14 +321,19 @@ test("pinned search bar shows its divider only after the main header scrolls awa
     const { document } = s.win;
     const root = document.getElementById("polaris-window");
     const header = () => document.querySelector("#polaris-window > .window-header--main");
-    let headerBottom = 56;
-    header().getBoundingClientRect = () => ({ bottom: headerBottom - s.win.scrollY });
+    Object.defineProperty(header(), "offsetHeight", { value: 56 });
     s.win.dispatchEvent(new s.win.Event("scroll"));
     assert.equal(root.hasAttribute("data-search-stuck"), false);
     s.win.scrollTo({ top: 30 });
     s.win.dispatchEvent(new s.win.Event("scroll"));
     assert.equal(root.hasAttribute("data-search-stuck"), false, "header still partly visible");
     s.win.scrollTo({ top: 200 });
+    s.win.dispatchEvent(new s.win.Event("scroll"));
+    assert.equal(root.hasAttribute("data-search-stuck"), true);
+    s.win.scrollTo({ top: 180 });
+    s.win.dispatchEvent(new s.win.Event("scroll"));
+    assert.equal(root.hasAttribute("data-search-stuck"), false, "scrolling back reveals the header away from the top");
+    s.win.scrollTo({ top: 220 });
     s.win.dispatchEvent(new s.win.Event("scroll"));
     assert.equal(root.hasAttribute("data-search-stuck"), true);
     s.win.scrollTo({ top: 0 });

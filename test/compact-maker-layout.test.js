@@ -117,13 +117,13 @@ test("当前 Maker 提示条所在行在 Maker 列表中保持最高层级", () 
   );
 });
 
-test("提示条图片独立响应点击，并支持键盘打开页内画廊", () => {
+test("提示条图片独立响应点击，并支持键盘打开页内大图", () => {
   assert.match(contentSource, /gpt-paragraph-nav__marker-shell/);
   assert.match(contentSource, /function createImagePreviewZoomIcon\(\)/);
   assert.match(contentSource, /gpt-paragraph-nav__label-thumbnail-zoom/);
   assert.match(contentSource, /labelThumbnail\.setAttribute\("role", "button"\)/);
   assert.match(contentSource, /labelThumbnail\.tabIndex = -1/);
-  assert.match(contentSource, /openImagePreview\(userImagePreviewSources\.get\(labelThumbnail\) \|\| \[\], labelThumbnail\)/);
+  assert.match(contentSource, /openImagePreview\(labelThumbnail\)/);
   assert.match(contentSource, /event\.stopPropagation\(\);[\s\S]*?openImagePreview/);
   assert.match(
     styles,
@@ -131,70 +131,9 @@ test("提示条图片独立响应点击，并支持键盘打开页内画廊", ()
   );
 });
 
-test("页内图片画廊提供计数、切换、关闭和失败回退", () => {
-  assert.match(contentSource, /const IMAGE_PREVIEW_CLASS = "gpt-paragraph-nav__image-preview-overlay";/);
-  assert.match(contentSource, /role", "dialog"/);
-  assert.match(contentSource, /stepImagePreview\(-1\)/);
-  assert.match(contentSource, /stepImagePreview\(1\)/);
-  assert.match(contentSource, /closeImagePreviewOverlay\(\)/);
-  assert.match(contentSource, /userMarker\.imagePreviewLoadFailure/);
-  assert.match(styles, /--gpt-nav-image-preview-z-index: 2147483648;/);
-  assert.match(styles, /\.gpt-paragraph-nav__image-preview-overlay \{[\s\S]*?z-index: var\(--gpt-nav-image-preview-z-index\);/);
-  assert.match(styles, /\.gpt-paragraph-nav__image-preview-image \{[\s\S]*?object-fit: contain;/);
-});
-
-test("图片预览遮罩沿用 AI content 毛玻璃背景", () => {
-  assert.match(
-    styles,
-    /\.gpt-paragraph-nav__image-preview-overlay \{[\s\S]*?background: var\(--gpt-ai-content-bg\);[\s\S]*?background: color-mix\(in srgb, var\(--gpt-ai-content-bg\) 76%, transparent\);[\s\S]*?-webkit-backdrop-filter: blur\(var\(--gpt-glass-blur\)\) saturate\(var\(--gpt-glass-saturate\)\);[\s\S]*?backdrop-filter: blur\(var\(--gpt-glass-blur\)\) saturate\(var\(--gpt-glass-saturate\)\);/
-  );
-  assert.match(styles, /--gpt-ai-content-bg: var\(--gpt-glass-bg\);/);
-  assert.match(
-    styles,
-    /\.gpt-paragraph-nav__image-preview-content \{[\s\S]*?background: var\(--gpt-ai-content-bg\);[\s\S]*?background: color-mix\(in srgb, var\(--gpt-ai-content-bg\) 76%, transparent\);/
-  );
-  assert.match(contentSource, /function firstOpaqueBackgroundColor\(elements\)/);
-  assert.match(contentSource, /root\.style\.setProperty\("--gpt-ai-content-bg", aiContentBackground\)/);
-  assert.doesNotMatch(
-    styles,
-    /\.gpt-paragraph-nav__image-preview-overlay \{[\s\S]*?background: rgba\(2, 6, 23, 0\.62\);/
-  );
-});
-
-test("图片预览关闭按钮复用章节弹窗的关闭按钮定义", () => {
-  assert.match(
-    contentSource,
-    /closeButton\.className = "gpt-paragraph-nav__image-preview-close gpt-paragraph-nav__explosion-close";/
-  );
-  assert.match(
-    styles,
-    /\.gpt-paragraph-nav__image-preview-overlay \{[\s\S]*?--gpt-explosion-close-bg: var\(--polaris-bg-subtle\);/
-  );
-  assert.match(
-    styles,
-    /\.gpt-paragraph-nav__image-preview-close\.gpt-paragraph-nav__explosion-close \{[\s\S]*?position: absolute;[\s\S]*?top: 12px;[\s\S]*?right: 12px;/
-  );
-  assert.doesNotMatch(styles, /\.gpt-paragraph-nav__image-preview-close::before/);
-  assert.doesNotMatch(styles, /\.gpt-paragraph-nav__image-preview-close:hover/);
-});
-
-test("图片预览翻页按钮复用浅灰默认背景并移除照片阴影", () => {
-  assert.match(
-    styles,
-    /\.gpt-paragraph-nav__image-preview-overlay \{[\s\S]*?--gpt-explosion-action-bg: var\(--polaris-bg-subtle\);[\s\S]*?--gpt-explosion-action-text: var\(--gpt-arco-text-2\);/
-  );
-  assert.match(
-    styles,
-    /\.gpt-paragraph-nav__image-preview-nav \{[\s\S]*?border: 1px solid var\(--gpt-explosion-action-border\);[\s\S]*?background: var\(--gpt-explosion-action-bg\);[\s\S]*?color: var\(--gpt-explosion-action-text\);/
-  );
-  assert.match(
-    styles,
-    /\.gpt-paragraph-nav__image-preview-counter,[\s\S]*?color: var\(--gpt-arco-text-2\);/
-  );
-  assert.match(
-    styles,
-    /\.gpt-paragraph-nav__image-preview-image \{[\s\S]*?box-shadow: none;/
-  );
+test("页内大图从点击的缩略图打开，并在离开会话时关闭", () => {
+  assert.match(contentSource, /showImagePreview\(thumbnail, getRoot\(\), t,/);
+  assert.match(contentSource, /dismissPreview\?\.\(\)/);
 });
 
 test("缩小模式为折叠分组的标题、余量和箭头扩展宽度", () => {
@@ -214,14 +153,11 @@ test("折叠 Maker 分组仅保留后置余量和箭头", () => {
 test("所有箭头和下拉 chevron 使用统一的视觉居中规则", () => {
   assert.match(
     styles,
-    /\.gpt-paragraph-nav__control-tab-chevron,[\s\S]*?\.gpt-paragraph-nav__explosion-copy-menu-trigger::after,[\s\S]*?\.gpt-paragraph-nav__image-preview-nav::before,[\s\S]*?\.gpt-paragraph-nav__fold-chevron \{[\s\S]*?display: block;[\s\S]*?box-sizing: border-box;[\s\S]*?transform-origin: center;/
+    /\.gpt-paragraph-nav__control-tab-chevron,[\s\S]*?\.gpt-paragraph-nav__explosion-copy-menu-trigger::after,[\s\S]*?\.gpt-paragraph-nav__fold-chevron \{[\s\S]*?display: block;[\s\S]*?box-sizing: border-box;[\s\S]*?transform-origin: center;/
   );
   assert.match(styles, /\.gpt-paragraph-nav__explosion-copy-menu-trigger::after \{[\s\S]*?flex: 0 0 6px;/);
   assert.match(styles, /\.gpt-paragraph-nav__user-chevron \{[\s\S]*?transform: translateY\(-1px\) rotate\(45deg\);/);
   assert.match(styles, /\.gpt-paragraph-nav__fold-chevron \{[\s\S]*?transform: translateY\(-1px\) rotate\(45deg\);/);
-  assert.match(contentSource, /previousButton\.className = "gpt-paragraph-nav__image-preview-nav is-previous";/);
-  assert.doesNotMatch(contentSource, /previousButton\.textContent = "‹"/);
-  assert.doesNotMatch(contentSource, /nextButton\.textContent = "›"/);
 });
 
 test("Maker 列表 chevron 复用主导航的 6px 几何和居中偏移", () => {

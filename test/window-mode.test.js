@@ -28,7 +28,6 @@ test("侧栏跟随最近的普通标签页", () => {
   assert.match(background, /publishEmptySnapshot\(targetTab\.id, isSupportedCandidateUrl\(targetTab\.url\)\)/);
   assert.match(background, /persistWindowConfigCommand/);
   assert.match(background, /POLARIS_WINDOW_STATE/);
-  assert.match(background, /POLARIS_WINDOW_IMAGE/);
   assert.match(background, /message\.command === "refresh-state"/);
   assert.match(background, /isNormalSourceTab/);
   assert.match(content, /__POLARIS_CONTENT_SCRIPT_ACTIVE__/);
@@ -39,7 +38,6 @@ test("内容脚本通过快照桥提供 Maker、章节和设置操作", () => {
   assert.match(content, /POLARIS_WINDOW_COMMAND/);
   assert.match(content, /POLARIS_CONTENT_STATE/);
   assert.match(content, /POLARIS_WINDOW_CHAPTERS/);
-  assert.match(content, /request-image-preview/);
   assert.match(content, /markerItems/);
   assert.match(content, /currentModelLabel/);
   assert.match(content, /Select ChatGPT model/);
@@ -141,14 +139,6 @@ test("AI 流式快照原位协调 Maker，用户分组正文不再重建", () =>
   assert.match(windowCss, /\.maker-card-ai\.is-streaming \.maker-streaming-loader \{[\s\S]*?animation: polaris-window-marker-loader-spin/);
 });
 
-test("侧栏图片预览使用中性遮罩并带有可读名称", () => {
-  assert.match(windowCss, /\.image-preview \{[^}]*background: var\(--polaris-overlay\);/);
-  assert.match(windowSource, /close\.setAttribute\("aria-label", t\("userMarker\.closeImagePreview"\)\)/);
-  assert.match(windowSource, /previous\.setAttribute\("aria-label", t\("userMarker\.previousImage"\)\)/);
-  assert.match(windowSource, /next\.setAttribute\("aria-label", t\("userMarker\.nextImage"\)\)/);
-  assert.match(windowSource, /image\.alt = t\("userMarker\.imagePreview"\)/);
-});
-
 test("侧栏缩略图加载失败后移除破图并保留 Maker 文本", () => {
   assert.match(windowSource, /image\.addEventListener\("error", \(\) => \{[\s\S]*?image\.remove\(\)/);
   assert.match(windowSource, /button\.insertBefore\(image, button\.querySelector\(":scope > \.maker-copy"\)\)/);
@@ -218,9 +208,9 @@ test("空状态使用每个平台打包的 favicon 资源", async () => {
 });
 
 test("居中平台切换器在搜索栏吸顶前位于搜索栏之上，不被裁剪", () => {
-  const rule = windowCss.match(/#polaris-window:not\(\[data-search-stuck\]\) > \.window-header--main \{([^}]*)\}/);
+  const rule = windowCss.match(/#polaris-window > \.window-header--main \{([^}]*)\}/);
   assert.ok(rule, "unstuck main header has its own stacking rule");
-  assert.match(rule[1], /position: relative;/);
+  assert.match(rule[1], /position: sticky;/);
   const headerZ = Number(rule[1].match(/z-index: (\d+);/)?.[1]);
   const barZ = Number(windowCss.match(/\.window-search-bar \{[^}]*z-index: (\d+);/)?.[1]);
   assert.ok(headerZ > barZ, `header z-index ${headerZ} must exceed search bar ${barZ}`);

@@ -1,5 +1,9 @@
 const SAFE_DATA_IMAGE_URL = /^data:image\/(?:png|apng|jpe?g|gif|webp|avif|bmp|x-icon)(?:;[^,]*)?,/i;
 const CHATGPT_USER_IMAGE_SELECTOR = [
+  'button[aria-haspopup="dialog"] > img[alt="User attachment" i]',
+  'img[alt="已上传的图片"]',
+  'img[alt="Uploaded an image" i]',
+  'img[src*="/estuary/content?id=file"]',
   'img[alt*="uploaded image" i]',
   '[data-testid*="image-attachment" i] img',
   '[data-testid*="image-preview" i] img',

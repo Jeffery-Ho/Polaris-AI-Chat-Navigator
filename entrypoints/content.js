@@ -2,6 +2,7 @@ import { defineContentScript } from "wxt/utils/define-content-script";
 import { SUPPORTED_MATCHES } from "../src/supported-sites.js";
 import { initializeContent } from "../src/content.js";
 import "../src/styles.css";
+import "../src/image-preview.css";
 
 export default defineContentScript({
   matches: [...SUPPORTED_MATCHES],

@@ -122,7 +122,6 @@
   --gpt-ai-content-bg: var(--gpt-glass-bg);
   --gpt-marker-shadow-buffer: 32px;
   --gpt-nav-tooltip-z-index: 3;
-  --gpt-nav-image-preview-z-index: 2147483648;
   width: var(--gpt-nav-width, calc(100vw - 28px));
   display: flex;
   flex-direction: column;
@@ -454,7 +453,6 @@ html.gpt-paragraph-nav--dragging * {
 
 .gpt-paragraph-nav__control-tab-chevron,
 .gpt-paragraph-nav__explosion-copy-menu-trigger::after,
-.gpt-paragraph-nav__image-preview-nav::before,
 .gpt-paragraph-nav__user-chevron,
 .gpt-paragraph-nav__fold-chevron {
   display: block;
@@ -544,180 +542,6 @@ html.gpt-paragraph-nav--dragging * {
 
 .gpt-paragraph-nav__explosion-overlay[hidden] {
   display: none !important;
-}
-
-.gpt-paragraph-nav__image-preview-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: var(--gpt-nav-image-preview-z-index);
-  --gpt-explosion-action-bg: var(--polaris-bg-subtle);
-  --gpt-explosion-action-border: var(--polaris-border);
-  --gpt-explosion-action-text: var(--gpt-arco-text-2);
-  --gpt-explosion-action-hover-bg: var(--gpt-highlight-bg);
-  --gpt-explosion-action-hover-text: var(--gpt-highlight-text);
-  --gpt-explosion-close-bg: var(--polaris-bg-subtle);
-  --gpt-explosion-close-border: var(--polaris-border);
-  --gpt-explosion-close-text: var(--gpt-arco-text-1);
-  --gpt-explosion-close-hover-bg: var(--gpt-highlight-bg);
-  --gpt-explosion-close-hover-text: var(--gpt-highlight-text);
-  display: grid;
-  place-items: center;
-  box-sizing: border-box;
-  padding: 16px;
-  background: var(--gpt-ai-content-bg);
-  background: color-mix(in srgb, var(--gpt-ai-content-bg) 76%, transparent);
-  -webkit-backdrop-filter: blur(var(--gpt-glass-blur)) saturate(var(--gpt-glass-saturate));
-  backdrop-filter: blur(var(--gpt-glass-blur)) saturate(var(--gpt-glass-saturate));
-  pointer-events: auto;
-}
-
-.gpt-paragraph-nav__image-preview-overlay[hidden] {
-  display: none !important;
-}
-
-.gpt-paragraph-nav__image-preview-content {
-  position: relative;
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto auto;
-  align-items: center;
-  justify-items: center;
-  gap: 10px;
-  width: min(1200px, calc(100vw - 32px));
-  height: min(900px, calc(100dvh - 32px));
-  min-height: 0;
-  padding: 16px;
-  box-sizing: border-box;
-  border: 1px solid var(--polaris-border);
-  border-radius: var(--polaris-radius-lg);
-  background: var(--gpt-ai-content-bg);
-  background: color-mix(in srgb, var(--gpt-ai-content-bg) 76%, transparent);
-  box-shadow: none;
-  -webkit-backdrop-filter: blur(var(--gpt-glass-blur)) saturate(var(--gpt-glass-saturate));
-  backdrop-filter: blur(var(--gpt-glass-blur)) saturate(var(--gpt-glass-saturate));
-}
-
-.gpt-paragraph-nav__image-preview-viewport {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-}
-
-.gpt-paragraph-nav__image-preview-image {
-  display: block;
-  max-width: 100%;
-  max-height: 100%;
-  width: auto;
-  height: auto;
-  object-fit: contain;
-  border-radius: var(--polaris-radius-lg);
-  box-shadow: none;
-}
-
-.gpt-paragraph-nav__image-preview-image[hidden],
-.gpt-paragraph-nav__image-preview-nav[hidden],
-.gpt-paragraph-nav__image-preview-counter[hidden],
-.gpt-paragraph-nav__image-preview-failure[hidden] {
-  display: none !important;
-}
-
-.gpt-paragraph-nav__image-preview-nav {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-  border: 1px solid var(--gpt-explosion-action-border);
-  background: var(--gpt-explosion-action-bg);
-  color: var(--gpt-explosion-action-text);
-  cursor: pointer;
-  transition: background 120ms ease, color 120ms ease, transform 120ms ease;
-}
-
-.gpt-paragraph-nav__image-preview-nav {
-  position: absolute;
-  top: 50%;
-  z-index: 1;
-  width: 38px;
-  height: 38px;
-  padding: 0;
-  border-radius: 999px;
-  transform: translateY(-50%);
-}
-
-.gpt-paragraph-nav__image-preview-nav::before {
-  content: "";
-  width: 8px;
-  height: 8px;
-  border-top: 1.5px solid currentColor;
-  border-right: 1.5px solid currentColor;
-  transform: translateY(0.5px) rotate(-135deg);
-}
-
-.gpt-paragraph-nav__image-preview-nav.is-next::before {
-  transform: translateY(0.5px) rotate(45deg);
-}
-
-.gpt-paragraph-nav__image-preview-nav.is-previous {
-  left: 8px;
-}
-
-.gpt-paragraph-nav__image-preview-nav.is-next {
-  right: 8px;
-}
-
-.gpt-paragraph-nav__image-preview-nav:hover,
-.gpt-paragraph-nav__image-preview-nav:focus-visible {
-  background: var(--gpt-explosion-action-hover-bg);
-  color: var(--gpt-explosion-action-hover-text);
-  transform: translateY(-50%) scale(1.04);
-}
-
-.gpt-paragraph-nav__image-preview-nav:focus-visible {
-  outline: 2px solid var(--polaris-focus);
-  outline-offset: 2px;
-}
-
-.gpt-paragraph-nav__image-preview-counter,
-.gpt-paragraph-nav__image-preview-failure {
-  color: var(--gpt-arco-text-2);
-  font: 600 12px/1.4 ui-sans-serif, system-ui, sans-serif;
-  text-align: center;
-}
-
-.gpt-paragraph-nav__image-preview-failure {
-  padding: 8px 12px;
-  border-radius: 999px;
-  background: var(--polaris-bg-muted);
-}
-
-#gpt-paragraph-nav[data-page-theme="light"] .gpt-paragraph-nav__image-preview-overlay {
-  background: var(--gpt-ai-content-bg);
-  background: color-mix(in srgb, var(--gpt-ai-content-bg) 76%, transparent);
-}
-
-@media (max-width: 720px) {
-  .gpt-paragraph-nav__image-preview-content {
-    width: calc(100vw - 20px);
-    height: calc(100dvh - 20px);
-    padding: 10px;
-    border-radius: var(--polaris-radius-lg);
-  }
-
-  .gpt-paragraph-nav__image-preview-nav {
-    width: 34px;
-    height: 34px;
-  }
-
-  .gpt-paragraph-nav__image-preview-nav.is-previous {
-    left: 4px;
-  }
-
-  .gpt-paragraph-nav__image-preview-nav.is-next {
-    right: 4px;
-  }
 }
 
 .gpt-paragraph-nav__release-notice-overlay {
@@ -1060,14 +884,6 @@ html.gpt-paragraph-nav--dragging * {
 .gpt-paragraph-nav__explosion-close:focus-visible {
   outline: 2px solid var(--gpt-arco-primary);
   outline-offset: 2px;
-}
-
-.gpt-paragraph-nav__image-preview-close.gpt-paragraph-nav__explosion-close {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  z-index: 2;
-  box-sizing: border-box;
 }
 
 .gpt-paragraph-nav__copy-toast {
@@ -1993,8 +1809,6 @@ html.gpt-paragraph-nav--dragging * {
 @media (prefers-reduced-motion: reduce) {
   #gpt-paragraph-nav,
   #gpt-paragraph-nav *,
-  .gpt-paragraph-nav__image-preview-overlay,
-  .gpt-paragraph-nav__image-preview-overlay *,
   .gpt-paragraph-nav__release-notice-overlay,
   .gpt-paragraph-nav__release-notice-overlay *,
   .gpt-paragraph-nav__explosion-overlay,

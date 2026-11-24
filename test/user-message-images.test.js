@@ -1,3 +1,4 @@
+import { JSDOM } from "jsdom";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -172,7 +173,6 @@ test("支持的平台均能扫描当前用户消息中的图片附件", () => {
 test("图片地址属性变化会触发用户 Maker 刷新", () => {
   assert.match(contentSource, /const USER_MESSAGE_IMAGE_ATTRIBUTE_FILTER = \["src", "srcset", "data-src", "data-original", "data-url"\];/);
   assert.match(contentSource, /state\.observer\.observe\(document\.documentElement, \{[\s\S]*?attributes: true,[\s\S]*?attributeFilter:[\s\S]*?USER_MESSAGE_IMAGE_ATTRIBUTE_FILTER,[\s\S]*?childList: true,/);
-  assert.match(contentSource, /function syncOpenImagePreviewForThumbnail\(labelThumbnail\) \{[\s\S]*?state\.imagePreviewUrls = urls;[\s\S]*?syncImagePreviewOverlay\(overlay\)/);
 });
 
 test("用户图片可从延迟加载属性读取地址并避免失败图重复显示", () => {
@@ -187,5 +187,16 @@ test("用户图片可从延迟加载属性读取地址并避免失败图重复�
 test("独立窗口快照不会直接传递网页上下文的 blob 图片地址", () => {
   assert.match(contentSource, /inlineUserMessageImageSource/);
   assert.match(contentSource, /thumbnailSrc: standaloneWindowImageSource\(item\.thumbnailSrc\)/);
-  assert.match(contentSource, /imageUrls: await Promise\.all/);
+});
+
+test("ChatGPT 用户附件支持本地化描述和文件内容地址", () => {
+  const dom = new JSDOM(`<article data-turn="user">
+    <img alt="已上传的图片" src="/localized-upload.png">
+    <img alt="diagram.png" src="https://chatgpt.com/backend-api/estuary/content?id=file_2">
+    <button aria-haspopup="dialog"><img alt="User attachment" src="blob:https://chatgpt.com/upload"></button>
+    <img alt="Avatar" src="/avatar.png">
+  </article>`);
+  const images = dom.window.document.querySelectorAll(userMessageImageSelectorForPlatform("chatgpt"));
+  assert.deepEqual(Array.from(images, (image) => image.alt), ["已上传的图片", "diagram.png", "User attachment"]);
+  dom.window.close();
 });

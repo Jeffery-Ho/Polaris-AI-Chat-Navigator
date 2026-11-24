@@ -1,3 +1,4 @@
+import { showImagePreview } from "./image-preview.js";
 import { billingAllowsIndex, billingAllowsPlatform } from "./billing-access.js";
 import { createContentLifecycle } from "./content-lifecycle.js";
 import { createDOMIndexController } from "./dom-index-controller.js";
@@ -284,7 +285,6 @@ export function initializeContent() {
   const SETTINGS_PANEL_ID = "gpt-paragraph-nav-settings-panel";
   const ROUTE_CHANGE_EVENT = "polaris-for-web-route-change";
   const FLOATING_ACTIVE_CLASS = "gpt-paragraph-nav__floating-active";
-  const IMAGE_PREVIEW_CLASS = "gpt-paragraph-nav__image-preview-overlay";
   const LIQUID_GLASS_SELECTOR = [
     `.${CONTROL_CAPSULE_CLASS}`,
     `.${CONTROL_COMPACT_TOGGLE_CLASS}`,
@@ -391,7 +391,6 @@ export function initializeContent() {
     enabledUnorderedListByPlatform: DEFAULT_UNORDERED_LIST_BY_PLATFORM
   });
   const liquidGlassSignatures = new WeakMap();
-  const userImagePreviewSources = new WeakMap();
   const standaloneWindowImageCache = new Map();
   const standaloneWindowImagePromises = new Map();
   const settingsPanelControllers = new WeakMap();
@@ -448,9 +447,6 @@ export function initializeContent() {
     activeExplosionSectionIndex: 0,
     lastExplosionRenderSignature: "",
     isImagePreviewOpen: false,
-    imagePreviewUrls: [],
-    activeImagePreviewIndex: 0,
-    imagePreviewReturnElement: null,
     scrollLock: null,
     routeKey: "",
     isExtensionContextInvalidated: false,
@@ -768,7 +764,7 @@ export function initializeContent() {
     window.dispatchEvent(new Event("polaris-for-web-route-dispose"));
     document.querySelector("script[data-polaris-route-bridge]")?.remove();
     closeExplosionOverlay();
-    closeImagePreviewOverlay();
+    dismissPreview?.();
     state.isReleaseNoticeOpen = false;
     unlockPageScroll();
     cancelPointerDrag("extension-context-invalidated");
@@ -1389,221 +1385,16 @@ export function initializeContent() {
     return overlay;
   }
 
-  function getImagePreviewOverlay(root = getRoot()) {
-    let overlay = root.querySelector(`.${IMAGE_PREVIEW_CLASS}`);
-    if (!overlay) {
-      overlay = document.createElement("div");
-      overlay.className = IMAGE_PREVIEW_CLASS;
-      overlay.setAttribute("role", "dialog");
-      overlay.setAttribute("aria-modal", "true");
-      overlay.setAttribute("aria-label", t("userMarker.imagePreview"));
-      overlay.hidden = true;
-      overlay.addEventListener("click", (event) => {
-        if (event.target === overlay) {
-          closeImagePreviewOverlay();
-        }
-      });
-
-      const content = document.createElement("div");
-      content.className = "gpt-paragraph-nav__image-preview-content";
-
-      const closeButton = document.createElement("button");
-      closeButton.type = "button";
-      closeButton.className = "gpt-paragraph-nav__image-preview-close gpt-paragraph-nav__explosion-close";
-      closeButton.setAttribute("aria-label", t("userMarker.closeImagePreview"));
-      closeButton.setAttribute("title", t("userMarker.closeImagePreview"));
-      closeButton.addEventListener("click", closeImagePreviewOverlay);
-      content.appendChild(closeButton);
-
-      const viewport = document.createElement("div");
-      viewport.className = "gpt-paragraph-nav__image-preview-viewport";
-
-      const previousButton = document.createElement("button");
-      previousButton.type = "button";
-      previousButton.className = "gpt-paragraph-nav__image-preview-nav is-previous";
-      previousButton.setAttribute("aria-label", t("userMarker.previousImage"));
-      previousButton.setAttribute("title", t("userMarker.previousImage"));
-      previousButton.addEventListener("click", () => stepImagePreview(-1));
-      viewport.appendChild(previousButton);
-
-      const image = document.createElement("img");
-      image.className = "gpt-paragraph-nav__image-preview-image";
-      image.alt = "";
-      image.decoding = "async";
-      image.addEventListener("load", () => {
-        if (image.getAttribute("src") !== state.imagePreviewUrls[state.activeImagePreviewIndex]) {
-          return;
-        }
-        image.hidden = false;
-        const failure = overlay.querySelector(".gpt-paragraph-nav__image-preview-failure");
-        if (failure instanceof HTMLElement) {
-          failure.hidden = true;
-        }
-      });
-      image.addEventListener("error", () => {
-        if (image.getAttribute("src") !== state.imagePreviewUrls[state.activeImagePreviewIndex]) {
-          return;
-        }
-        image.hidden = true;
-        const failure = overlay.querySelector(".gpt-paragraph-nav__image-preview-failure");
-        if (failure instanceof HTMLElement) {
-          failure.hidden = false;
-        }
-      });
-      viewport.appendChild(image);
-
-      const nextButton = document.createElement("button");
-      nextButton.type = "button";
-      nextButton.className = "gpt-paragraph-nav__image-preview-nav is-next";
-      nextButton.setAttribute("aria-label", t("userMarker.nextImage"));
-      nextButton.setAttribute("title", t("userMarker.nextImage"));
-      nextButton.addEventListener("click", () => stepImagePreview(1));
-      viewport.appendChild(nextButton);
-      content.appendChild(viewport);
-
-      const counter = document.createElement("div");
-      counter.className = "gpt-paragraph-nav__image-preview-counter";
-      counter.setAttribute("aria-live", "polite");
-      content.appendChild(counter);
-
-      const failure = document.createElement("div");
-      failure.className = "gpt-paragraph-nav__image-preview-failure";
-      failure.hidden = true;
-      failure.textContent = t("userMarker.imagePreviewLoadFailure");
-      content.appendChild(failure);
-
-      overlay.appendChild(content);
-      root.appendChild(overlay);
-    }
-
-    syncImagePreviewOverlay(overlay);
-    return overlay;
-  }
-
-  function imagePreviewUrlsForSources(sources) {
-    const values = Array.isArray(sources) ? sources : [];
-    return userMessageThumbnailForSources(values, window.location.href).imageUrls;
-  }
-
-  function syncImagePreviewOverlay(overlay) {
-    const urls = state.imagePreviewUrls;
-    const index = Math.min(Math.max(state.activeImagePreviewIndex, 0), Math.max(urls.length - 1, 0));
-    state.activeImagePreviewIndex = index;
-    const image = overlay.querySelector(".gpt-paragraph-nav__image-preview-image");
-    const previousButton = overlay.querySelector(".gpt-paragraph-nav__image-preview-nav.is-previous");
-    const nextButton = overlay.querySelector(".gpt-paragraph-nav__image-preview-nav.is-next");
-    const counter = overlay.querySelector(".gpt-paragraph-nav__image-preview-counter");
-    const failure = overlay.querySelector(".gpt-paragraph-nav__image-preview-failure");
-    if (image instanceof HTMLImageElement) {
-      const nextSrc = urls[index] || "";
-      if (image.getAttribute("src") !== nextSrc) {
-        image.hidden = !nextSrc;
-        if (failure instanceof HTMLElement) {
-          failure.hidden = true;
-        }
-        if (nextSrc) {
-          image.src = nextSrc;
-        } else {
-          image.removeAttribute("src");
-        }
-      }
-    }
-    if (previousButton instanceof HTMLButtonElement) {
-      previousButton.hidden = urls.length < 2;
-      previousButton.disabled = urls.length < 2;
-    }
-    if (nextButton instanceof HTMLButtonElement) {
-      nextButton.hidden = urls.length < 2;
-      nextButton.disabled = urls.length < 2;
-    }
-    if (counter instanceof HTMLElement) {
-      counter.hidden = urls.length < 2;
-      counter.textContent = urls.length > 1
-        ? t("userMarker.imageCounter", { current: index + 1, count: urls.length })
-        : "";
-    }
-    overlay.hidden = !state.isImagePreviewOpen || urls.length === 0;
-  }
-
-  function syncOpenImagePreviewForThumbnail(labelThumbnail) {
-    if (!state.isImagePreviewOpen || state.imagePreviewReturnElement !== labelThumbnail) {
-      return;
-    }
-    const urls = imagePreviewUrlsForSources(userImagePreviewSources.get(labelThumbnail) || []);
-    if (!urls.length) {
-      closeImagePreviewOverlay();
-      return;
-    }
-    const currentUrl = state.imagePreviewUrls[state.activeImagePreviewIndex] || "";
-    const currentIndex = urls.indexOf(currentUrl);
-    state.imagePreviewUrls = urls;
-    state.activeImagePreviewIndex = currentIndex >= 0
-      ? currentIndex
-      : Math.min(state.activeImagePreviewIndex, urls.length - 1);
-    const overlay = document.querySelector(`#${ROOT_ID} .${IMAGE_PREVIEW_CLASS}`);
-    if (overlay instanceof HTMLElement) {
-      syncImagePreviewOverlay(overlay);
-    }
-  }
-
-  function openImagePreview(sources, returnElement) {
-    if (state.isReleaseNoticeOpen || state.isExplosionOpen) {
-      return;
-    }
-    const urls = imagePreviewUrlsForSources(sources);
-    if (!urls.length) {
-      return;
-    }
-    state.imagePreviewUrls = urls;
-    state.activeImagePreviewIndex = 0;
-    state.imagePreviewReturnElement = returnElement instanceof HTMLElement ? returnElement : null;
+  let dismissPreview;
+  function openImagePreview(thumbnail) {
+    if (state.isReleaseNoticeOpen || state.isExplosionOpen || state.isImagePreviewOpen) return;
     state.isImagePreviewOpen = true;
     lockPageScroll();
-    const overlay = getImagePreviewOverlay();
-    syncImagePreviewOverlay(overlay);
-    const closeButton = overlay.querySelector(".gpt-paragraph-nav__image-preview-close");
-    lifecycle.requestAnimationFrame(() => {
-      if (state.isImagePreviewOpen && closeButton instanceof HTMLButtonElement) {
-        closeButton.focus();
-      }
+    dismissPreview = showImagePreview(thumbnail, getRoot(), t, () => {
+      state.isImagePreviewOpen = false;
+      dismissPreview = null;
+      unlockPageScroll();
     });
-  }
-
-  function stepImagePreview(delta) {
-    if (!state.isImagePreviewOpen || state.imagePreviewUrls.length < 2) {
-      return;
-    }
-    const count = state.imagePreviewUrls.length;
-    state.activeImagePreviewIndex = (state.activeImagePreviewIndex + delta + count) % count;
-    const overlay = document.querySelector(`#${ROOT_ID} .${IMAGE_PREVIEW_CLASS}`);
-    if (overlay instanceof HTMLElement) {
-      syncImagePreviewOverlay(overlay);
-    }
-  }
-
-  function closeImagePreviewOverlay() {
-    if (!state.isImagePreviewOpen) {
-      return;
-    }
-
-    state.isImagePreviewOpen = false;
-    state.imagePreviewUrls = [];
-    state.activeImagePreviewIndex = 0;
-    const returnElement = state.imagePreviewReturnElement;
-    state.imagePreviewReturnElement = null;
-    unlockPageScroll();
-    const overlay = document.querySelector(`#${ROOT_ID} .${IMAGE_PREVIEW_CLASS}`);
-    if (overlay instanceof HTMLElement) {
-      syncImagePreviewOverlay(overlay);
-    }
-    let focusTarget = returnElement;
-    if (!(focusTarget instanceof HTMLElement && focusTarget.isConnected && !focusTarget.hidden)) {
-      const marker = returnElement?.closest?.(".gpt-paragraph-nav__marker-shell")?.querySelector("button");
-      focusTarget = marker instanceof HTMLElement ? marker : null;
-    }
-    if (focusTarget instanceof HTMLElement && focusTarget.isConnected && !focusTarget.hidden) {
-      focusTarget.focus({ preventScroll: true });
-    }
   }
 
   function getReleaseNoticeOverlay(root = getRoot()) {
@@ -1806,7 +1597,7 @@ export function initializeContent() {
   function clearNonConversationPageState() {
     closeReleaseNoticeForNonConversation();
     closeExplosionOverlay();
-    closeImagePreviewOverlay();
+    dismissPreview?.();
     unlockPageScroll();
     resetRouteState();
     removeNavigationRoot();
@@ -5080,7 +4871,7 @@ export function initializeContent() {
           labelThumbnail.addEventListener("click", (event) => {
             event.preventDefault();
             event.stopPropagation();
-            openImagePreview(userImagePreviewSources.get(labelThumbnail) || [], labelThumbnail);
+            openImagePreview(labelThumbnail);
           });
           labelThumbnail.addEventListener("keydown", (event) => {
             if (event.key !== "Enter" && event.key !== " ") {
@@ -5088,7 +4879,7 @@ export function initializeContent() {
             }
             event.preventDefault();
             event.stopPropagation();
-            openImagePreview(userImagePreviewSources.get(labelThumbnail) || [], labelThumbnail);
+            openImagePreview(labelThumbnail);
           });
           labelThumbnail.addEventListener("error", () => {
             const failedSrc = labelThumbnail.getAttribute("src") || "";
@@ -5168,7 +4959,6 @@ export function initializeContent() {
       label.classList.toggle("is-image-only", item.isImageOnly);
       const labelThumbnail = label.querySelector(".gpt-paragraph-nav__label-thumbnail");
       const imageUrls = Array.isArray(item.imageUrls) ? item.imageUrls : [];
-      userImagePreviewSources.set(labelThumbnail, imageUrls);
       labelThumbnail.tabIndex = imageUrls.length ? 0 : -1;
       labelThumbnail.setAttribute(
         "aria-label",
@@ -5205,7 +4995,6 @@ export function initializeContent() {
       const imageCount = marker.querySelector(".gpt-paragraph-nav__user-image-count");
       imageCount.hidden = item.imageCount < 2;
       imageCount.textContent = item.imageCount > 1 ? `+${item.imageCount - 1}` : "";
-      syncOpenImagePreviewForThumbnail(labelThumbnail);
     }
   }
 
@@ -5400,31 +5189,6 @@ export function initializeContent() {
       });
     }
     return "";
-  }
-
-  async function standaloneWindowImageUrlsForSources(sources) {
-    const values = Array.from(new Set(Array.isArray(sources) ? sources : []))
-      .map((source) => safeUserMessageImageUrl(source, window.location.href))
-      .filter(Boolean)
-      .slice(0, 8);
-    const result = {
-      imageUrls: await Promise.all(values.map((value) => {
-        if (standaloneWindowImageCache.has(value)) {
-          return standaloneWindowImageCache.get(value) || "";
-        }
-        return standaloneWindowImagePromises.get(value)
-          || inlineUserMessageImageSource(value, { pageUrl: window.location.href }).then((dataUrl) => {
-            const resolved = dataUrl || (value.startsWith("blob:") ? "" : value);
-            standaloneWindowImageCache.set(value, resolved);
-            return resolved;
-          }).catch(() => {
-            const resolved = value.startsWith("blob:") ? "" : value;
-            standaloneWindowImageCache.set(value, resolved);
-            return resolved;
-          });
-      }))
-    };
-    return result.imageUrls.filter(Boolean);
   }
 
   function windowSnapshot() {
@@ -5679,20 +5443,6 @@ export function initializeContent() {
     }
     if (message.command === "request-chapters") {
       publishWindowChapters({ onlyIfChanged: Boolean(message.onlyIfChanged) });
-      return;
-    }
-    if (message.command === "request-image-preview") {
-      const group = state.markerGroups.find((item) => item.key === String(message.groupKey || ""));
-      const indexedUser = conversationIndex.enabled() && conversationIndex.outline(state.config).items
-        .find((item) => item.type === "user" && item.groupKey === message.groupKey);
-      void standaloneWindowImageUrlsForSources((indexedUser?.imageUrls || group?.user?.imageUrls || []).slice(0, 8))
-        .then((imageUrls) => {
-          if (!isExtensionContextValid()) return;
-          sendRuntimeMessage(chrome, {
-            type: "POLARIS_WINDOW_IMAGE",
-            imageUrls
-          });
-        });
       return;
     }
     if (message.command === "update-config") {
@@ -6020,11 +5770,8 @@ export function initializeContent() {
     state.explosionSections = [];
     state.activeExplosionSectionIndex = 0;
     state.lastExplosionRenderSignature = "";
-    closeImagePreviewOverlay();
+    dismissPreview?.();
     state.isImagePreviewOpen = false;
-    state.imagePreviewUrls = [];
-    state.activeImagePreviewIndex = 0;
-    state.imagePreviewReturnElement = null;
     state.lastRenderedHeadingCount = 0;
     state.markerSearchQuery = "";
     state.explosionSearchQuery = "";
@@ -6079,7 +5826,7 @@ export function initializeContent() {
       return;
     }
     closeExplosionOverlay();
-    closeImagePreviewOverlay();
+    dismissPreview?.();
     state.awaitingRouteDom = true;
     scheduleRouteDomFallback();
     render();
@@ -6583,19 +6330,7 @@ export function initializeContent() {
       return;
     }
 
-    if (state.isImagePreviewOpen) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        closeImagePreviewOverlay();
-        return;
-      }
-      if (!event.metaKey && !event.ctrlKey && !event.altKey && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
-        event.preventDefault();
-        event.stopPropagation();
-        stepImagePreview(event.key === "ArrowLeft" ? -1 : 1);
-      }
-      return;
-    }
+    if (state.isImagePreviewOpen) return;
 
     if (event.key === "Escape" && state.isExplosionOpen) {
       const copyMenu = document.querySelector(`#${ROOT_ID} .gpt-paragraph-nav__explosion-copy-menu`);
