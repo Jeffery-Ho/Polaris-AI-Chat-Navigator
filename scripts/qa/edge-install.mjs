@@ -73,13 +73,11 @@ export async function installEdgeExtension(context, extensionPath, evidencePath)
     const pid = processInfo.find(p => p.type === "browser")?.id;
     if (!pid) throw new Error("无法确认 Edge 测试进程");
     await page.goto("edge://extensions/");
-    const load = page.getByText(/^(Load unpacked(?: extension)?|加载解压缩(?:的扩展)?|加载已解压(?:的扩展程序)?|加载解包(?:的扩展)?)[…\.]?$/i).first();
+    const load = page.getByText(/^(Load unpacked(?: extension)?|加载解压缩(?:的扩展)?|加载已解压(?:的扩展程序)?|加载解包(?:的扩展)?)[…\.]?$/i).filter({visible:true}).first();
     if (!(await load.isVisible())) {
-      const toggle = page.locator("fluent-switch#dev-switch");
+      const toggle = page.locator("fluent-switch#dev-switch:visible").first();
       await toggle.click({timeout: 10000});
-      if (!await toggle.evaluate(el => el.checked || el.getAttribute("aria-checked") === "true")) {
-        throw new Error("Edge 开发人员模式未开启");
-      }
+      await load.waitFor({state: "visible", timeout: 5000});
     }
     await load.click({timeout: 10000, noWaitAfter: true});
     if (process.platform === "darwin") await selectMacFolder(directory, pid);
