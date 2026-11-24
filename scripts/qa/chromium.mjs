@@ -106,14 +106,25 @@ export async function launch({ browser, profile, out, packagePath, fixturePage, 
       },
       panel:evaluate,
       async clickPanel(selector) {
-        const {x,y} = await evaluate(selector => {
+        // Native panels can appear before the browser has transferred mouse
+        // focus into their view. Activate the focused button via its real
+        // keyboard path, and verify that the panel received the trusted click.
+        await evaluate(selector => {
           const node = document.querySelector(selector);
-          node.scrollIntoView({block:"nearest"});
-          const rect = node.getBoundingClientRect();
-          return {x:rect.x+rect.width/2,y:rect.y+rect.height/2};
+          if (!node || node.disabled) throw Error("侧栏操作不可用 " + selector);
+          node.focus();
+          if (document.activeElement !== node) throw Error("侧栏按钮未获得焦点 " + selector);
+          window.__polarisQaActivation = null;
+          node.addEventListener("click", event => {
+            window.__polarisQaActivation = { trusted:event.isTrusted, disabled:node.disabled };
+          },{once:true});
         },selector);
-        await cdp.call("Input.dispatchMouseEvent",{type:"mousePressed",button:"left",clickCount:1,x,y},sessionId);
-        await cdp.call("Input.dispatchMouseEvent",{type:"mouseReleased",button:"left",clickCount:1,x,y},sessionId);
+        const key = { key:"Enter",code:"Enter",windowsVirtualKeyCode:13,nativeVirtualKeyCode:13 };
+        await cdp.call("Input.dispatchKeyEvent",{...key,type:"rawKeyDown"},sessionId);
+        await cdp.call("Input.dispatchKeyEvent",{...key,type:"keyUp"},sessionId);
+        const activation = await evaluate(() => window.__polarisQaActivation);
+        actions.push({ time:new Date().toISOString(), scope:"panel", selector, activation });
+        assert.ok(activation?.trusted && !activation.disabled,"侧栏未收到原生按钮激活事件 " + selector);
       },
       async capture(key) {
         await writeFile(path.join(out,key+"-actions.json"), JSON.stringify(actions,null,2));
