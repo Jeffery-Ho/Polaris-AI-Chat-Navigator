@@ -309,6 +309,7 @@ export function initializeSidepanel() {
       expectedTabId: tab, expectedRouteKey: route, generation, expectResult: true });
     if (requestId !== locateSequence || state.sourceTabId !== tab || state.routeKey !== route || state.snapshot?.conversationIndex?.generation !== generation) return;
     if (response?.ok || response?.reason === "navigation-cancelled") return;
+    if (response?.reason === "not-mounted" && !state.markerQuery.trim()) return;
     showIndexNotice(response?.reason, { markerKey });
   }
 

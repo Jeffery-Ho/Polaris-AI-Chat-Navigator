@@ -218,6 +218,24 @@ test("long mode backfills older messages beneath a mask and restores the reader'
   } finally { s.close(); }
 });
 
+test("backfill captures the last virtual window when its rows mount after scrolling settles", async () => {
+  const s = setup({ url: "https://chatgpt.com/g/project/c/long-chat" });
+  try {
+    const first = s.message("first", "user", "开头");
+    const last = s.message("last", "user", "末尾");
+    s.mount([first]);
+    Object.defineProperties(s.scroller, { scrollHeight: { value: 700 }, clientHeight: { value: 400 } });
+    s.scroller.scrollTo = ({ top }) => {
+      s.scroller.scrollTop = top;
+      if (top === 300) s.win.setTimeout(() => s.mount([last]), 350);
+    };
+    s.controller.configure(true, { retainLoaded: true, backfill: true });
+    await s.controller.syncMounted();
+    assert.equal(await waitForBackfill(s.controller), "done");
+    assert.equal(s.controller.snapshot().count, 2);
+  } finally { s.close(); }
+});
+
 test("user input stops backfill, restores the page and continue resumes it", async () => {
   const s = setup();
   try {
@@ -259,6 +277,97 @@ test("backfill holds the list still while in-view images await their source, wit
     assert.ok(page.seen.length > 0, "the wait for a missing source is bounded");
     s.win.dispatchEvent(new s.win.Event("keydown"));
     assert.equal(await waitForBackfill(s.controller), "stopped");
+  } finally { s.close(); }
+});
+
+test("backfill escapes a virtual list that recenters on an already scanned window", async () => {
+  const s = setup();
+  try {
+    const first = s.message("first", "user", "开头");
+    const last = s.message("last", "user", "末尾");
+    Object.defineProperties(s.scroller, { scrollHeight: { value: 600 }, clientHeight: { value: 100 } });
+    s.scroller.scrollTop = 500;
+    s.mount([last]);
+    let reachedStart = false;
+    s.scroller.scrollTo = ({ top }) => {
+      if (top === 0) reachedStart = true;
+      s.scroller.scrollTop = !reachedStart && top === 200 ? 500 : top;
+      s.mount([s.scroller.scrollTop === 0 ? first : last]);
+    };
+    s.controller.configure(true, { retainLoaded: true, backfill: true });
+    await s.controller.syncMounted();
+    assert.equal(await waitForBackfill(s.controller), "done");
+    assert.equal(s.controller.snapshot().count, 2);
+  } finally { s.close(); }
+});
+
+test("a slow backfill keeps going while it discovers older messages", async () => {
+  const s = setup();
+  try {
+    let clock = 0;
+    Object.defineProperty(s.win.performance, "now", { value: () => clock });
+    Object.defineProperties(s.scroller, { scrollHeight: { value: 700 }, clientHeight: { value: 100 } });
+    const rows = Array.from({ length: 7 }, (_, i) => s.message(String(i), "user", String(i)));
+    s.scroller.scrollTop = 600;
+    s.mount([rows[6]]);
+    s.scroller.scrollTo = ({ top }) => {
+      if (top < s.scroller.scrollTop) clock += 30000;
+      s.scroller.scrollTop = top;
+      s.mount([rows[Math.floor(top / 100)]]);
+    };
+    s.controller.configure(true, { retainLoaded: true, backfill: true });
+    await s.controller.syncMounted();
+    assert.equal(await waitForBackfill(s.controller), "done");
+    assert.deepEqual(s.controller.exportConversation().messages.map(message => message.text), rows.map(row => row.id));
+  } finally { s.close(); }
+});
+
+test("a slow native history button is pressed once per page and every page is indexed", async () => {
+  const s = setup();
+  try {
+    const button = s.win.document.createElement("button");
+    s.win.document.body.append(button);
+    const rows = ["oldest", "middle", "newest"].map(id => s.message(id, "user", id));
+    let start = 2;
+    let clicks = 0;
+    let pending = false;
+    const mount = () => s.mount(rows.slice(start), { loadEarlier: start ? button : null, hasEarlier: start > 0 });
+    button.onclick = () => {
+      clicks++;
+      if (pending) return;
+      pending = true;
+      s.win.setTimeout(() => { start--; pending = false; mount(); }, start === 2 ? 3200 : 700);
+    };
+    mount();
+    s.controller.configure(true, { retainLoaded: true, backfill: true });
+    await s.controller.syncMounted();
+    assert.equal(await waitForBackfill(s.controller, 9000), "done");
+    assert.equal(clicks, 2);
+    assert.equal(s.controller.snapshot().count, 3);
+  } finally { s.close(); }
+});
+
+test("continue after user input resumes from the interrupted window", async () => {
+  const s = setup();
+  try {
+    s.mount([s.message("current", "user", "current")]);
+    Object.defineProperties(s.scroller, { scrollHeight: { value: 1100 }, clientHeight: { value: 100 } });
+    s.scroller.scrollTop = 1000;
+    const positions = [];
+    s.scroller.scrollTo = ({ top }) => {
+      s.scroller.scrollTop = top;
+      positions.push(top);
+      if (top === 500 && !positions.includes(520)) s.win.setTimeout(() => s.win.dispatchEvent(new s.win.Event("wheel")), 0);
+    };
+    s.controller.configure(true, { retainLoaded: true, backfill: true });
+    await s.controller.syncMounted();
+    assert.equal(await waitForBackfill(s.controller), "stopped");
+    const before = positions.length;
+    const resumed = s.controller.backfill({ resume: true });
+    assert.equal(positions[before], 520);
+    assert.equal(s.controller.backfill({ resume: true }), resumed);
+    s.win.dispatchEvent(new s.win.Event("wheel"));
+    await resumed;
   } finally { s.close(); }
 });
 

@@ -465,6 +465,7 @@ test("indexed TOC and full-text results stay in TOC when native location is unav
     s.win.document.querySelector('.maker-card').click();
     await new Promise((resolve) => setTimeout(resolve, 30));
     assert.equal(s.commands.filter((command) => command.command === "request-chapters").length, 0);
+    assert.equal(s.win.document.querySelector(".index-notice"), null);
     assert.equal(s.win.document.querySelector(".window-search select"), null);
     const search = s.win.document.querySelector('.window-search input');
     assert.equal(search.placeholder, "搜索已加载消息");
@@ -523,6 +524,7 @@ test("retained reading requests cannot reopen a dismissed notice or a different 
       const doc = s.win.document; let finish;
       const original = s.win.chrome.runtime.sendMessage;
       s.win.chrome.runtime.sendMessage = message => {
+        if (message.command === "search-conversation") return Promise.resolve({ generation: "one", items: [{ key: "index:old", markerKey: "index:old", type: "result", title: "Old", parts: [] }], total: 1 });
         if (message.command === "jump-to-marker") return Promise.resolve({ ok: false, reason: "not-mounted" });
         if (message.command === "read-retained-message") return new Promise(resolve => { finish = resolve; });
         return original(message);
@@ -530,7 +532,10 @@ test("retained reading requests cannot reopen a dismissed notice or a different 
       const snapshot = { ...s.snapshot, config: { historyMode: "loaded" }, conversationIndex: { generation: "one", phase: "complete", count: 2 } };
       s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot });
       await new Promise(resolve => setTimeout(resolve, 20));
-      doc.querySelector(".maker-card").click(); await new Promise(resolve => setTimeout(resolve, 0));
+      const input = doc.querySelector(".window-search input");
+      input.value = "Old"; input.dispatchEvent(new s.win.Event("input"));
+      await new Promise(resolve => setTimeout(resolve, 200));
+      doc.querySelector(".index-search-result").click(); await new Promise(resolve => setTimeout(resolve, 0));
       doc.querySelector(".index-notice-read").click();
       if (cancel === "dismiss") doc.querySelector(".index-notice-actions button:last-child").click();
       else s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: { ...snapshot, routeKey: "https://chatgpt.com/c/two", conversationIndex: { ...snapshot.conversationIndex, generation: "two" } } });

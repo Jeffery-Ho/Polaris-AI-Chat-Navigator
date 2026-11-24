@@ -1,6 +1,7 @@
 import { createConversationIndex, normalizeAnchorText } from "./conversation-index.js";
 import { domMessageBlocks } from "./dom-message-blocks.js";
 import { visitConversationImages } from "./conversation-images.js";
+import { signalTranscriptScroll } from "./table-marker.js";
 import { createBackfillMask } from "./backfill-mask.js";
 
 // Budgets count only time while the page is visible to the user.
@@ -9,12 +10,10 @@ const BACKFILL_MAX_STEPS = 600;
 const SETTLE_MS = 150;
 // Longest wait for a virtualized list to render rows already in view.
 const MOUNT_WAIT_MS = 2000;
-// Quiet samples at the top before treating the site's history as exhausted for
+// Quiet samples at either end before treating that boundary as settled for
 // this run. A quiet page is never evidence of complete history.
-const TOP_QUIET_STEPS = 8;
+const BOUNDARY_QUIET_STEPS = 8;
 const CANCEL_EVENTS = ["wheel", "pointerdown", "touchstart", "keydown"];
-// Outer bound for a requested jump; it normally ends once it stops getting closer.
-const SEEK_TIMEOUT_MS = 20000;
 const DEFAULT_BACKFILL_LABELS = {
   title: "Loading earlier messages",
   running: (count) => `${count} messages read`,
@@ -93,8 +92,13 @@ export function createDOMIndexController({ window: win, platform, readMessages, 
       const matches = mounts.get(message.id) || [];
       if (!matches.some((entry) => entry.element === message.element)) matches.push(message);
       mounts.set(message.id, matches);
-      const top = base + message.element.getBoundingClientRect().top;
-      if (Number.isFinite(top)) positions.set(message.id, top);
+      const rect = message.element.getBoundingClientRect();
+      const top = base + rect.top;
+      if (!Number.isFinite(top)) continue;
+      const turn = platform === "chatgpt" && message.element.closest("[data-turn-id-container], [data-turn-key]");
+      const attribute = turn && (turn.hasAttribute("data-turn-id-container") ? "data-turn-id-container" : "data-turn-key");
+      positions.set(message.id, { top, attribute, turnKey: turn && turn.getAttribute(attribute),
+        offset: turn ? rect.top - turn.getBoundingClientRect().top : 0 });
     }
   }
 
@@ -132,6 +136,7 @@ export function createDOMIndexController({ window: win, platform, readMessages, 
       ...(Number.isInteger(version) ? { version } : {}),
       ...(typeof markdown === "string" ? { markdown } : {}),
       ...(replyTo !== undefined ? { replyTo } : {}) }));
+    const older = operation?.readingOlder === true;
     const authoritative = value.coverage === "complete";
     const replace = !retainLoaded || authoritative;
     const incoming = new Set([...(replace ? [] : seen), ...messages.map((message) => message.id)]);
@@ -151,7 +156,7 @@ export function createDOMIndexController({ window: win, platform, readMessages, 
       const initialRead = !current.status().count && messages.length > 0;
       const unchangedIds = new Set(messages.filter(message => Number.isInteger(message.version)
         && versions.get(message.id) === message.version).map(message => message.id));
-      await current.upsertMessages(messages, { coverage, replace, signal, unchangedIds, progressive: initialRead && retainLoaded,
+      await current.upsertMessages(messages, { coverage, replace, older, signal, unchangedIds, progressive: initialRead && retainLoaded,
         onProgress: initialRead ? (progress) => {
           if (signal.aborted || current !== index || session !== generation) return;
           readingProgress = progress; notify();
@@ -177,7 +182,12 @@ export function createDOMIndexController({ window: win, platform, readMessages, 
     if (!backfillWanted || backfillAttempted || operation || !index?.status().count || !canBackfill()) return;
     backfillAttempted = true;
     const current = index; const session = generation;
-    win.setTimeout(() => { if (current === index && session === generation) void backfill(); }, 0);
+    const scheduledAt = seekSequence;
+    win.setTimeout(() => {
+      if (current !== index || session !== generation) return;
+      if (scheduledAt === seekSequence) void backfill();
+      else { backfillState = { phase: "stopped", steps: 0 }; notify(); }
+    }, 0);
   }
 
   function syncMounted(options) {
@@ -326,7 +336,7 @@ export function createDOMIndexController({ window: win, platform, readMessages, 
   // calls a website API, and indexed content stays in this page's memory.
   function backfill({ resume = false } = {}) {
     if (disposed || !wanted || !backfillWanted || !index || !canBackfill()) return Promise.resolve(backfillState);
-    operation?.cancel("backfill-replaced");
+    if (operation) return operation.done || Promise.resolve(backfillState);
     const current = index; const session = generation; const initialRoute = route;
     let first;
     try { first = read(); } catch { first = { messages: [] }; }
@@ -349,13 +359,11 @@ export function createDOMIndexController({ window: win, platform, readMessages, 
     const initialMessage = initial?.element; const initialId = initial?.id;
     const initialOffset = initialMessage?.getBoundingClientRect().top;
     let timer = 0; let wake = null; let cancelReason = ""; let steps = 0;
-    const run = { cancel(reason) { cancelReason ||= reason; wake?.(); } };
+    let direction = checkpoint?.direction || "older";
+    const run = { get readingOlder() { return direction === "older"; }, cancel(reason) { cancelReason ||= reason; wake?.(); } };
     const sameSource = () => !disposed && index === current && session === generation;
-    const cancelled = () => {
-      if (cancelReason || !sameSource() || !wanted || !backfillWanted) return true;
-      try { return routeFor(read()) !== initialRoute; }
-      catch { cancelReason = "source-unavailable"; return true; }
-    };
+    const initialPage = pageRoute();
+    const cancelled = () => cancelReason || !sameSource() || !wanted || !backfillWanted || pageRoute() !== initialPage;
     const userCancel = () => run.cancel("user-cancelled");
     const pause = () => new Promise((resolve) => {
       const settle = () => { win.clearTimeout(timer); wake = null; resolve(); };
@@ -396,7 +404,6 @@ export function createDOMIndexController({ window: win, platform, readMessages, 
     operation = run; backfillState = { phase: "running", steps: 0 }; notify();
     const done = (async () => {
       let phase = "done";
-      let direction = checkpoint?.direction || "older";
       try {
         if (checkpoint) {
           const bounds = scrollBounds();
@@ -410,15 +417,26 @@ export function createDOMIndexController({ window: win, platform, readMessages, 
         let idle = 0; let lastState = ""; let mountWait = 0; let active = 0;
         // An image that never gets its source must not hold every step at the same place.
         let mediaSettledAt = null;
+        const visited = new Set();
+        let edgeAttempted = false;
+        let requestedHistoryWindow = null;
+        let progressCount = current.status().count;
+        let progressStep = 0;
         let last = win.performance.now();
         while (!cancelled()) {
           if (document.hidden) { await visible(); last = win.performance.now(); continue; }
           const now = win.performance.now(); active += now - last; last = now;
-          if (active >= BACKFILL_TIMEOUT_MS || steps >= BACKFILL_MAX_STEPS) { phase = "timeout"; break; }
+          if (active >= BACKFILL_TIMEOUT_MS || steps - progressStep >= BACKFILL_MAX_STEPS) { phase = "timeout"; break; }
           steps += 1;
           const value = read();
+          if (routeFor(value) !== initialRoute) { cancelReason = "source-changed"; break; }
           await capture(value);
           if (cancelled()) break;
+          const count = current.status().count;
+          if (count > progressCount) {
+            visited.clear(); edgeAttempted = false;
+            progressCount = count; progressStep = steps; active = 0;
+          }
           backfillState = { phase: "running", steps }; mask?.update(label()); notify();
           // Let rows and lazy images already in view render before moving on, within a bound.
           const waitMedia = value.pendingMedia && mediaSettledAt !== (scroller?.scrollTop || 0);
@@ -426,25 +444,42 @@ export function createDOMIndexController({ window: win, platform, readMessages, 
           if (waitMedia) mediaSettledAt = scroller?.scrollTop || 0;
           mountWait = 0;
           const state = JSON.stringify([value.messages.map((message) => message.id), scroller?.scrollTop || 0, scroller?.scrollHeight || 0]);
+          const cycle = state !== lastState && visited.has(state);
           idle = state === lastState ? idle + 1 : 0; lastState = state;
           const top = scroller?.scrollTop || 0; const bounds = scrollBounds();
           const step = Math.max(100, (scroller?.clientHeight || 500) * 0.8);
+          // Some virtual lists recenter on a previously scanned window before reaching the edge.
+          if (cycle && edgeAttempted) {
+            if (direction === "newer") break;
+            direction = "newer"; visited.clear(); edgeAttempted = false;
+            continue;
+          }
+          visited.add(state);
+          if (cycle) edgeAttempted = true;
           if (direction === "older") {
             if (scroller && top > bounds.oldest + 1) {
               if (idle >= 3) { phase = "unavailable"; break; }
-              scroll(Math.max(bounds.oldest, top - step));
-            } else if (value.loadEarlier?.isConnected && !value.loadEarlier.disabled && idle < 3) value.loadEarlier.click();
-            else if (idle < TOP_QUIET_STEPS) { /* the site may still be loading at the top */ }
-            else if (scroller) { direction = "newer"; idle = 0; lastState = ""; }
+              scroll(cycle ? bounds.oldest : Math.max(bounds.oldest, top - step));
+            } else if (value.hasEarlier || value.loadEarlier?.isConnected || value.historyLoading) {
+              // A disabled or slow native control still represents pending history.
+              const windowKey = JSON.stringify([value.messages[0]?.id, count]);
+              if (value.loadEarlier?.isConnected && !value.loadEarlier.disabled && !value.historyLoading
+                && requestedHistoryWindow !== windowKey) {
+                requestedHistoryWindow = windowKey;
+                value.loadEarlier.click();
+              }
+              idle = 0;
+            } else if (idle < BOUNDARY_QUIET_STEPS) { /* the site may still be loading at the top */ }
+            else if (scroller) { direction = "newer"; visited.clear(); edgeAttempted = false; idle = 0; lastState = ""; }
             else break;
           } else if (top < bounds.newest - 1) {
             if (idle >= 3) { phase = "unavailable"; break; }
-            scroll(Math.min(bounds.newest, top + step));
-          } else break;
+            scroll(cycle ? bounds.newest : Math.min(bounds.newest, top + step));
+          } else if (idle >= BOUNDARY_QUIET_STEPS) break;
           await pause();
         }
         if (cancelled()) phase = cancelReason === "user-cancelled" ? "stopped" : "";
-        if (phase === "timeout" && scroller?.isConnected) backfillCheckpoint = {
+        if ((phase === "timeout" || phase === "stopped") && sameSource() && scroller?.isConnected) backfillCheckpoint = {
           generation: session, scroller, direction, top: scroller.scrollTop, height: scroller.scrollHeight
         };
       } catch { phase = "unavailable"; }
@@ -464,67 +499,94 @@ export function createDOMIndexController({ window: win, platform, readMessages, 
     return done;
   }
 
-  // Every retained Maker should be reachable. A jump the user asked for scrolls
-  // the website's list back to a message the list unmounted: first to where it
-  // last sat, then toward it by conversation order while it keeps getting
-  // closer. Only with backfill consent may it press the site's own "load
-  // earlier" control. It never calls a website API, stops on user input and
-  // restores the page when the message no longer exists on the site.
+  // A Maker click owns the viewport. Use its last measured position once and
+  // let the virtual list render there without scanning other viewports.
+  let seekSequence = 0;
   async function ensureLocation(key, config) {
+    const request = ++seekSequence;
+    if (operation) {
+      const running = operation;
+      running.cancel("user-cancelled");
+      await running.done;
+      if (request !== seekSequence) return { element: null, reason: "navigation-cancelled" };
+    }
     let location = resolveLocation(key, config);
     if (location.reason !== "not-mounted") return location;
-    // The user's jump takes over from a running backfill, which stays resumable.
-    if (operation) {
-      const running = operation; running.cancel("user-cancelled");
-      await running.done?.catch(() => {});
-      location = resolveLocation(key, config);
-      if (location.reason !== "not-mounted") return location;
-    }
-    const target = outline(config).targets.get(key);
+    const targets = outline(config).targets;
+    const target = targets.get(key);
     const scroller = source.scroller;
-    if (!target || !scroller?.isConnected) return { ...location, stage: target ? "no-scroller" : "no-target" };
-    const rank = new Map();
-    for (const value of outline(config).targets.values()) if (!rank.has(value.messageId)) rank.set(value.messageId, rank.size);
-    const goal = rank.get(target.messageId);
-    const current = index; const session = generation; const start = scroller.scrollTop;
-    let stopped = false; const stop = () => { stopped = true; };
-    for (const name of CANCEL_EVENTS) win.addEventListener(name, stop, true);
-    const scrollTo = (top) => {
-      const before = scroller.scrollTop;
-      scroller.scrollTo({ top, behavior: "instant" });
-      return scroller.scrollTop !== before;
-    };
+    const recorded = positions.get(target?.messageId);
+    if (!scroller?.isConnected || !recorded) return location;
+
+    const start = scroller.scrollTop;
+    const current = index;
+    const session = generation;
+    let stopped = false;
+    const stop = () => { stopped = true; };
     try {
-      const deadline = win.performance.now() + SEEK_TIMEOUT_MS;
-      const recorded = positions.get(target.messageId);
-      if (Number.isFinite(recorded)) scrollTo(recorded - (scroller.clientHeight || 0) * 0.2);
-      let mountWait = 0; let best = Infinity; let stall = 0; let pressed = false; let stage = "timeout";
-      while (!stopped && current === index && session === generation && win.performance.now() < deadline) {
-        await new Promise((resolve) => win.setTimeout(resolve, SETTLE_MS));
-        if (stopped || current !== index || session !== generation) break;
+      const extent = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+      const style = win.getComputedStyle(scroller);
+      const reverse = style.flexDirection === "column-reverse" && /flex/.test(style.display);
+      let edgeProgress = null;
+      let destination = recorded.top - scroller.clientHeight * 0.2;
+      if (recorded.turnKey) {
+        const turn = Array.from(scroller.querySelectorAll(`[${recorded.attribute}]`))
+          .find(node => node.getAttribute(recorded.attribute) === recorded.turnKey);
+        if (turn) {
+          const rect = turn.getBoundingClientRect();
+          destination = contentOffset(scroller) + rect.top + Math.min(recorded.offset, rect.height || 0) - scroller.clientHeight * 0.2;
+        } else if (recorded.attribute === "data-turn-key") {
+          // This ChatGPT layout removes the whole turn. A recentered window
+          // can reuse the old pixel coordinate for a completely different row.
+          const ids = [...new Set(Array.from(targets.values(), item => item.messageId))];
+          const turnOf = id => positions.get(id)?.turnKey;
+          const first = turnOf(ids[0]) === recorded.turnKey;
+          if (first || turnOf(ids.at(-1)) === recorded.turnKey) {
+            const goal = ids.indexOf(target.messageId);
+            const distance = () => ids.reduce((nearest, id, i) =>
+              mounts.has(id) ? Math.min(nearest, Math.abs(i - goal)) : nearest, Infinity);
+            edgeProgress = { first, distance, previous: distance() };
+            destination = first ? (reverse ? -extent : 0) : (reverse ? 0 : extent);
+          }
+        }
+      }
+      const top = Math.max(reverse ? -extent : 0, Math.min(reverse ? 0 : extent, destination));
+      signalTranscriptScroll(scroller, top);
+      for (const name of CANCEL_EVENTS) win.addEventListener(name, stop, true);
+      if (top !== start) scroller.scrollTo({ top, behavior: "instant" });
+      let requestedEarlier = false;
+      let deadline = win.performance.now() + MOUNT_WAIT_MS;
+      while (true) {
+        await new Promise(resolve => win.setTimeout(resolve, SETTLE_MS));
+        if (request !== seekSequence) return { element: null, reason: "navigation-cancelled" };
+        if (stopped) return { ...location, stage: "user-cancelled" };
+        if (current !== index || session !== generation) return { element: null, reason: "source-changed" };
         location = resolveLocation(key, config);
         if (location.reason !== "not-mounted") return location;
-        if (source.historyLoading && mountWait < MOUNT_WAIT_MS) { mountWait += SETTLE_MS; continue; }
-        mountWait = 0;
-        const ranks = source.messages.map((message) => rank.get(message.id)).filter(Number.isInteger);
-        if (!ranks.length) { stage = "no-ranked-messages"; break; }
-        const older = Math.min(...ranks) > goal;
-        // The target's neighbours are mounted but it is not: its identity did not survive.
-        if (!older && Math.max(...ranks) > goal) { stage = "passed-target"; break; }
-        const distance = older ? Math.min(...ranks) - goal : goal - Math.max(...ranks);
-        if (distance < best) { best = distance; stall = 0; pressed = false; } else if (++stall >= TOP_QUIET_STEPS) { stage = "no-progress"; break; }
-        const step = Math.max(100, (scroller.clientHeight || 500) * 0.8);
-        if (scrollTo(scroller.scrollTop + (older ? -step : step))) continue;
-        // One press per stretch without progress; then give the site time to answer.
-        if (pressed) continue;
+        if (win.performance.now() < deadline) continue;
+        if (edgeProgress) {
+          const distance = edgeProgress.distance();
+          const extent = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+          const edge = edgeProgress.first ? (reverse ? -extent : 0) : (reverse ? 0 : extent);
+          if (distance < edgeProgress.previous && Math.abs(edge - scroller.scrollTop) > 1) {
+            // The site mounted a closer window and reanchored the scrollbar.
+            edgeProgress.previous = distance;
+            scroller.scrollTo({ top: edge, behavior: "instant" });
+            deadline = win.performance.now() + MOUNT_WAIT_MS;
+            continue;
+          }
+        }
         const loader = source.loadEarlier;
-        if (!(older && backfillWanted && canBackfill() && loader?.isConnected && !loader.disabled)) { stage = older ? "list-start" : "list-end"; break; }
-        loader.click(); pressed = true;
+        if (requestedEarlier || !backfillWanted || !canBackfill() || !loader?.isConnected || loader.disabled) break;
+        const ids = [...new Set(Array.from(targets.values(), item => item.messageId))];
+        const firstMounted = ids.findIndex(id => mounts.has(id));
+        if (ids.indexOf(target.messageId) >= firstMounted) break;
+        requestedEarlier = true;
+        loader.click();
+        deadline = win.performance.now() + MOUNT_WAIT_MS;
       }
-      if (stopped) stage = "user-cancelled";
-      else if (current !== index || session !== generation) stage = "source-changed";
-      if (!stopped && scroller.isConnected) scrollTo(start);
-      return { ...location, stage };
+      if (scroller.isConnected && scroller.scrollTop !== start) scroller.scrollTo({ top: start, behavior: "instant" });
+      return { ...location, stage: "not-remounted" };
     } finally {
       for (const name of CANCEL_EVENTS) win.removeEventListener(name, stop, true);
     }

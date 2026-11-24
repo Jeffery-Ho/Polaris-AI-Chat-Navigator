@@ -645,7 +645,12 @@ test("after backfill, jumping to an unmounted ChatGPT answer scrolls the list to
       assert.ok(s.list.top() > 1000, "the reader starts at the newest turns");
       const result = await command({ command: "jump-to-marker", markerKey });
       assert.deepEqual({ ...result }, { ok: true, reason: "" }, title);
-      assert.ok(s.list.top() < 1000, `${title} is near the top of the conversation`);
+      const target = [...s.list.scroller.querySelectorAll("h2, img")].find(node =>
+        node.tagName === "IMG" ? node.alt === title : node.textContent === title);
+      assert.ok(target, `${title} is mounted`);
+      const rect = target.getBoundingClientRect();
+      const viewport = s.list.scroller.getBoundingClientRect();
+      assert.ok(rect.top >= viewport.top && rect.top < viewport.bottom, `${title} is inside the viewport`);
       s.list.scroller.scrollTo({ top: 99999 });
       await new Promise((resolve) => setTimeout(resolve, 300));
     }

@@ -10,6 +10,15 @@ export function tableMarkerScrollTop({ scrollTop, targetTop, scrollerTop, header
   return Math.min(maximum, Math.max(0, targetScrollTop));
 }
 
+// ChatGPT's virtual transcript can keep following its last message after a
+// scrollTo. Notify the page of the requested direction before moving the list.
+export function signalTranscriptScroll(scroller, top) {
+  const deltaY = top - scroller.scrollTop;
+  if (!deltaY || !scroller.matches?.("[data-app-action-timeline-scroll]")) return;
+  const win = scroller.ownerDocument.defaultView;
+  scroller.dispatchEvent(new win.WheelEvent("wheel", { bubbles: true, deltaY }));
+}
+
 export function scrollMarkerIntoView({ element, scrollContainer, reverseFlow = false, headerHeight, gap, behavior }) {
   if (!element || typeof element.scrollIntoView !== "function") {
     return false;
@@ -41,6 +50,7 @@ export function scrollMarkerIntoView({ element, scrollContainer, reverseFlow = f
     return true;
   }
 
+  signalTranscriptScroll(scrollContainer, scrollTop);
   scrollContainer.scrollTo({ top: scrollTop, behavior });
   return true;
 }

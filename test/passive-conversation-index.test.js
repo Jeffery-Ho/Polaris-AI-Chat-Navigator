@@ -105,15 +105,95 @@ test("a requested jump scrolls the list back to where an unmounted message last 
   } finally { s.close(); }
 });
 
+test("a jump waits at the top for an older row to mount without a history button", async () => {
+  const s = setup();
+  try {
+    const old = s.message("old");
+    s.scroller.scrollTop = 0;
+    s.mount([old]); await s.ready(true);
+    s.scroller.scrollTop = 1800;
+    s.mount([s.message("new")]); await s.controller.syncMounted();
+    s.scroller.scrollTo = ({ top }) => {
+      s.scroller.scrollTop = top;
+      if (top === 0) s.win.setTimeout(() => s.mount([old]), 650);
+    };
+    const location = await s.controller.ensureLocation("index:old:0:0", {});
+    assert.equal(location.element, old.element.querySelector("h2"));
+    assert.deepEqual(s.loads, []);
+  } finally { s.close(); }
+});
+
+test("a Maker jump releases the ChatGPT transcript from following the latest message", async () => {
+  const s = setup();
+  try {
+    const old = s.message("old");
+    const latest = s.message("latest");
+    s.scroller.dataset.appActionTimelineScroll = "";
+    s.mount([old]); await s.ready(true);
+    s.mount([latest]); await s.controller.syncMounted();
+    let following = true;
+    s.scroller.addEventListener("wheel", event => { if (event.deltaY < 0) following = false; });
+    s.scroller.scrollTo = ({ top }) => {
+      s.scroller.scrollTop = top;
+      s.mount([old]);
+      s.win.setTimeout(() => { if (following) s.mount([latest]); }, 30);
+    };
+    const result = await s.controller.ensureLocation("index:old:0:0", {});
+    assert.equal(result.element, old.element.firstChild);
+    assert.deepEqual(s.loads, []);
+  } finally { s.close(); }
+});
+
+test("a moved ChatGPT placeholder locates the original by its current layout", async () => {
+  const s = setup();
+  try {
+    const old = s.message("old");
+    const slot = s.win.document.createElement("div");
+    slot.dataset.turnIdContainer = "turn-old";
+    s.mount([old]); s.scroller.append(slot); slot.append(old.element);
+    slot.getBoundingClientRect = () => ({ top: 0 });
+    await s.ready(true);
+    s.mount([s.message("current")]);
+    const replacement = slot.cloneNode(false);
+    s.scroller.prepend(replacement);
+    replacement.getBoundingClientRect = () => ({ top: 350 - s.scroller.scrollTop });
+    await s.controller.syncMounted();
+    s.scroller.scrollTo = ({ top }) => {
+      s.scrolls.push(top); s.scroller.scrollTop = top;
+      if (top === 250) s.mount([old]);
+    };
+    assert.equal((await s.controller.ensureLocation("index:old:0:0", {})).element, old.element.firstChild);
+    assert.deepEqual(s.scrolls, [250]);
+  } finally { s.close(); }
+});
+
+test("ChatGPT can remount the first retained turn after dropping its entire window", async () => {
+  const s = setup();
+  try {
+    const old = s.message("old"); old.element.dataset.turnKey = "early";
+    const later = s.message("later"); later.element.dataset.turnKey = "late";
+    const middle = s.message("middle"); middle.element.dataset.turnKey = "middle";
+    s.mount([old, middle, later]); await s.ready(true);
+    s.mount([later]); await s.controller.syncMounted();
+    s.scroller.scrollTo = ({ top }) => {
+      s.scrolls.push(top); s.scroller.scrollTop = top;
+      if (top === 0 && s.scrolls.length === 1) { s.mount([middle]); s.scroller.scrollTop = 500; }
+      else if (top === 0) s.mount([old]);
+    };
+    assert.equal((await s.controller.ensureLocation("index:old:0:0", {})).element, old.element.firstChild);
+    assert.deepEqual(s.scrolls, [0, 0]);
+  } finally { s.close(); }
+});
+
 test("a missing original that cannot be brought back is reported within a bound, restores the page and stays readable", async () => {
   const s = setup();
   try {
     s.mount([s.message("old")]); await s.ready(true);
     s.mount([s.message("current")]); await s.controller.syncMounted();
     const started = Date.now();
-    assert.deepEqual(await s.controller.ensureLocation("index:old:0:0", {}), { element: null, reason: "not-mounted", stage: "no-progress" });
+    assert.deepEqual(await s.controller.ensureLocation("index:old:0:0", {}), { element: null, reason: "not-mounted", stage: "not-remounted" });
     assert.ok(Date.now() - started < 5000);
-    assert.ok(s.scrolls.some((entry) => entry.top < 1800), "it looked toward the older message");
+    assert.deepEqual(s.scrolls.map(entry => entry.top), [1700, 1800], "one target position and one restoration, without sweeping the conversation");
     assert.equal(s.scroller.scrollTop, 1800, "the reader's position is restored");
     assert.equal((await s.controller.search("old")).total, 1);
     assert.equal(s.controller.exportConversation().scope, "loaded");
@@ -142,6 +222,22 @@ test("a jump during backfill stops the backfill, which stays resumable, and stil
   } finally { s.close(); }
 });
 
+test("selecting an already mounted Maker takes control from automatic backfill", async () => {
+  const s = setup();
+  try {
+    s.mount([s.message("current")]); await s.ready(true);
+    Object.defineProperty(s.win.document, "hidden", { value: false });
+    s.controller.configure(true, { retainLoaded: true, backfill: true });
+    await new Promise(resolve => setTimeout(resolve, 30));
+    const result = await s.controller.ensureLocation("index:current:0:0", {});
+    assert.ok(result.element);
+    assert.equal(s.controller.snapshot().backfill.phase, "stopped");
+    const moves = s.scrolls.length;
+    await new Promise(resolve => setTimeout(resolve, 200));
+    assert.equal(s.scrolls.length, moves);
+  } finally { s.close(); }
+});
+
 test("with backfill consent a jump may press the site's own load earlier control to reach its target", async () => {
   const s = setup();
   try {
@@ -154,8 +250,10 @@ test("with backfill consent a jump may press the site's own load earlier control
     let armed = false;
     s.win.document.querySelector("button").addEventListener("click", () => { if (armed) s.mount([old, current]); });
     s.controller.configure(true, { retainLoaded: true, backfill: true });
-    for (let i = 0; i < 200 && s.controller.snapshot()?.backfill?.phase !== "done"; i++) await new Promise((resolve) => setTimeout(resolve, 50));
-    assert.equal(s.controller.snapshot().backfill.phase, "done");
+    // The unresponsive history control keeps backfill pending. A user jump takes over.
+    for (let i = 0; i < 100 && !s.loads.length; i++) await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(s.loads.length, 1);
+    assert.equal(s.controller.snapshot().backfill.phase, "running");
     armed = true; const clicks = s.loads.length;
     const location = await s.controller.ensureLocation("index:old:0:0", {});
     assert.equal(location.element, old.element.querySelector("h2"));

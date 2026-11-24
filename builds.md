@@ -10,6 +10,31 @@
 - Version update type must be declared by the user before recording a build.
 - After each build is recorded, confirm the build number and version with the user.
 
+## 452
+- Date: 2026-11-24
+- Version: 1.6.7
+- Summary: Release ChatGPT’s follow-latest behavior when a Maker navigates the virtual transcript.
+
+## 451
+- Date: 2026-11-24
+- Version: 1.6.6
+- Summary: Resolve ChatGPT Maker jumps from live turn placeholders and the edges of windowed transcripts.
+
+## 450
+- Date: 2026-11-24
+- Version: 1.6.5
+- Summary: Stop automatic backfill before Maker navigation and use a single recorded position to remount an earlier message.
+
+## 449
+- Date: 2026-11-24
+- Version: 1.6.4
+- Summary: Locate earlier TOC entries silently through the native list and wait for delayed rows to mount.
+
+## 448
+- Date: 2026-11-24
+- Version: 1.6.3
+- Summary: Fix incomplete long conversation lists when virtualized windows repeat or history loads slowly, and resume interrupted reads from the saved position.
+
 ## 447
 - Date: 2026-11-23
 - Version: 1.6.2
