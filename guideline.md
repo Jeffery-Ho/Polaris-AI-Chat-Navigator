@@ -125,9 +125,6 @@
 
 ## Version And Build Rule
 
-- Build number uses plain integers from `1` to `999`, sorted by numeric order.
-- Every code or documentation modification must record a new build.
-- Bug fix updates the last version segment, feature update updates the middle segment, and major update updates the first segment.
-- Ask the user to declare the update type before changing the version.
-- After each build is recorded, confirm the build number and version with the user.
+Follow the [version and build rules](builds.md#build-rule) for development builds and store releases.
+
 - Every feature update must add a localized `x.y.0` entry in `src/release-notes.js`; patch updates remain in release records without a separate in-product notice.

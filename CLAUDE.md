@@ -37,10 +37,8 @@ pnpm test      # node --test (jsdom); package tests read dist/, so build first
 
 ## Versioning and records
 
-Every change records a build:
+Follow the [version and build rules](builds.md#build-rule) when choosing the shared store version and incrementing the build.
 
-- Bump `version` and `version_name` (`x.y.z(build)`) in `manifest.build.json`; build number increments by 1.
-- Fix bumps patch, feature bumps minor, major bumps major. Confirm the bump type with the user.
 - Add an entry at the top of `builds.md` (English) and `changelog.md` (Chinese).
 - User-visible features also get a `src/release-notes.js` entry.
 

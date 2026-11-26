@@ -2,13 +2,21 @@
 
 ## Build Rule
 
-- Build number uses plain integers from `1` to `999`, sorted by numeric order.
-- Every code or documentation modification must record a new build.
-- Bug fix updates the last version segment, for example `0.1.0` to `0.1.1`.
-- Feature update updates the middle version segment, for example `0.1.0` to `0.2.0`.
-- Major update updates the first version segment, for example `0.1.0` to `1.0.0`.
-- Version update type must be declared by the user before recording a build.
-- After each build is recorded, confirm the build number and version with the user.
+- Record each code or documentation change with the next build number (an integer from 1 to 999). Set `version_name` to `x.y.z(build)` in `manifest.build.json`.
+- During development, documentation changes and small UI fixes may keep `version`. Significant bug fixes increment patch, regular features increment minor, and architectural changes or major features increment major.
+- Treat the Chrome, Edge and Firefox packages produced by a release as store candidates. Use one shared numeric `version` greater than the highest version already uploaded to any target store, including pending submissions. Compare the numeric components in order.
+- If the candidate version already meets that requirement, keep it. Otherwise advance at least patch for a small fix (for example, published `1.6.10` → candidate `1.6.11`). Incrementing only the build in `version_name` does not qualify as a store update.
+- Before distributing the ZIPs, verify the root `manifest.json` in each browser package contains the chosen `version`. Report the version and build together.
+
+## 465
+- Date: 2026-11-26
+- Version: 1.6.11
+- Summary: Document shared store version selection and packaged manifest verification.
+
+## 464
+- Date: 2026-11-26
+- Version: 1.6.11
+- Summary: Increment the Chrome Web Store update version for the Maker position fixes.
 
 ## 463
 - Date: 2026-11-25
