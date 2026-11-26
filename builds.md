@@ -20,6 +20,11 @@
 - Version: 1.6.10
 - Summary: Preserve Maker position when refreshing the current conversation index.
 
+## 461
+- Date: 2026-11-24
+- Version: 1.6.10
+- Summary: Add offline release acceptance and independent live-site smoke checks.
+
 ## 460
 - Date: 2026-11-24
 - Version: 1.6.10

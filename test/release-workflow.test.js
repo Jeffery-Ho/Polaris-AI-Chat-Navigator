@@ -2,25 +2,28 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const [workflow, validator] = await Promise.all([
+const [workflow, validator, offline, runner] = await Promise.all([
   readFile(new URL("../.github/workflows/release.yml", import.meta.url), "utf8"),
-  readFile(new URL("../scripts/validate-extension-package.js", import.meta.url), "utf8")
+  readFile(new URL("../scripts/validate-extension-package.js", import.meta.url), "utf8"),
+  readFile(new URL("../.github/workflows/offline.yml", import.meta.url), "utf8"),
+  readFile(new URL("../scripts/qa/release.mjs", import.meta.url), "utf8")
 ]);
 
 test("发布工作流保留扩展构建与发布门槛", () => {
   assert.match(workflow, /push:\s+branches:\s+- main/);
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /permissions:\s+contents: write/);
-  assert.match(workflow, /pnpm install --frozen-lockfile/);
-  assert.match(workflow, /run: pnpm check/);
-  assert.match(workflow, /run: pnpm test/);
-  assert.match(workflow, /run: pnpm build/);
-  assert.match(workflow, /node scripts\/validate-extension-package\.js/);
+  assert.match(workflow, /needs: verify/);
+  assert.match(offline, /pull_request:/);
+  assert.match(offline, /workflow_call:/);
+  assert.match(offline, /pnpm install --frozen-lockfile/);
+  assert.match(offline, /pnpm test:release/);
+  assert.match(runner, /scripts\/validate-extension-package\.js/);
   assert.match(validator, /Root manifest\.json must not exist/);
   assert.match(validator, /built\.version !== source\.version/);
   assert.match(validator, /references files missing from dist/);
   assert.doesNotMatch(workflow, /files = \["manifest\.json"/);
-  assert.match(workflow, /-x '\*\.DS_Store'/);
+  assert.match(workflow, /sha256sum -c SHA256SUMS/);
 });
 
 test("发布工作流为最新版本提供经过校验的稳定 ZIP 资产", () => {
@@ -51,15 +54,10 @@ test("发布工作流为最新版本提供经过校验的稳定 ZIP 资产", () 
   assert.ok(latestCalls.at(-1) > publishIndex);
 });
 
-test("发布工作流在稳定包之后生成并上传 WXT 商店包", () => {
-  const stableIndex = workflow.indexOf("name: Package release assets");
-  const wxtIndex = workflow.indexOf("name: Package WXT store archives");
-  assert.ok(stableIndex >= 0 && wxtIndex > stableIndex);
-  for (const command of ["pnpm zip", "pnpm zip:edge", "pnpm zip:firefox"]) {
-    assert.match(workflow, new RegExp(`^\\s+${command}$`, "m"));
-  }
-  assert.match(workflow, /for target in chrome edge firefox sources; do/);
-
+test("发布工作流上传已验收的 WXT 商店包", () => {
+  assert.match(workflow, /name: tested-candidates/);
+  assert.match(workflow, /cp "Release\/wxt\/polaris-ai-chat-navigator-\$\{VERSION\}-chrome.zip"/);
+  assert.doesNotMatch(workflow, /run: pnpm (?:build|zip)/);
   const uploadIndex = workflow.lastIndexOf("gh release upload");
   const publishIndex = workflow.indexOf('gh release edit "$TAG" --draft=false');
   for (const target of ["chrome", "edge", "firefox", "sources"]) {

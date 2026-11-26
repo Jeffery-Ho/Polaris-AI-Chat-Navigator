@@ -1,0 +1,41 @@
+name: Real-site smoke
+on:
+  schedule:
+    - cron: '17 2 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: polaris-live-smoke
+  cancel-in-progress: false
+jobs:
+  smoke:
+    if: github.ref == 'refs/heads/main'
+    environment: live-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Probe dedicated accounts once
+        env:
+          POLARIS_SMOKE_ACCOUNTS: ${{ secrets.POLARIS_SMOKE_ACCOUNTS }}
+        run: node scripts/qa/live-smoke.mjs
+      - if: always()
+        run: cat _local/qa/live/report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-smoke-report
+          path: _local/qa/live/report.md
+          retention-days: 14

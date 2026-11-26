@@ -1,0 +1,63 @@
+name: Offline acceptance
+on:
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    name: Polaris offline acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: browser-actions/setup-chrome@v2
+        id: chrome
+        continue-on-error: true
+        with:
+          chrome-version: stable
+      - name: Prepare browser tools
+        continue-on-error: true
+        run: |
+          echo "POLARIS_EDGE_PATH=$(command -v microsoft-edge)" >> "$GITHUB_ENV"
+          sudo apt-get update -qq && sudo apt-get install -y xdotool x11-apps
+      - name: Run candidate acceptance
+        id: qa
+        env:
+          GTK_USE_PORTAL: "0"
+          LANG: C.UTF-8
+          POLARIS_CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+        run: xvfb-run -a pnpm test:release
+      - name: Save diagnostics
+        id: diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: offline-report
+          path: |
+            Release/qa/run-*/**
+            !Release/qa/run-*/unpacked/**
+            !Release/qa/run-*/assets/**
+          if-no-files-found: error
+      - name: Link the downloadable report
+        if: always() && steps.diagnostics.outcome == 'success'
+        env:
+          REPORT_URL: ${{ steps.diagnostics.outputs.artifact-url }}
+        run: echo "[下载测试报告与失败证据]($REPORT_URL)" >> "$GITHUB_STEP_SUMMARY"
+      - name: Save tested candidates
+        uses: actions/upload-artifact@v4
+        with:
+          name: tested-candidates
+          path: ${{ steps.qa.outputs.output }}/assets/
+          if-no-files-found: error

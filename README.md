@@ -6,6 +6,11 @@ Polaris: AI Chat Navigator automatically detects headings and list titles in AI 
 
 ## Development
 
+Run `pnpm test:release` to package all three browsers and run offline acceptance. Each run writes its Markdown report, per-browser evidence and candidate digests under `Release/qa/`. The independent **Offline acceptance** workflow runs on pull requests and supports manual runs. The release workflow publishes the exact archives from a passing run.
+
+For a local run, set `POLARIS_CHROME_PATH` to the Chrome for Testing executable and `POLARIS_EDGE_PATH` to the Microsoft Edge executable. Install Firefox and geckodriver (`GECKODRIVER_PATH` overrides PATH). Linux requires a display or Xvfb, xdotool and x11-apps for the native Edge folder chooser. Use `xvfb-run -a pnpm test:release` on a headless runner. macOS uses System Events with Accessibility access. All three browsers use temporary test profiles. To run hosted acceptance, select **Offline acceptance → Run workflow**. See [real-site smoke setup](docs/live-smoke.md) for dedicated account configuration.
+
+
 `dist/` is the only extension package Chrome should load, and it is not committed. After cloning, run this once:
 
 ```bash
@@ -141,7 +146,7 @@ Visit the [Polaris support page](https://jeffery-ho.github.io/polaris-landing/en
 
 ## Release
 
-Do not commit `dist/` or load `dist.zip` as the extension. The release workflow builds from source and creates a versioned ZIP plus the stable `Polaris-AI.zip` alias from that fresh `dist/` directory (`cd dist && zip`). It validates both remote assets while the Release is still Draft, publishes only after that check, and then verifies the public Latest download URL. The same Release also carries the WXT store packages from `pnpm zip`, `pnpm zip:edge` and `pnpm zip:firefox` (Chrome, Edge, Firefox and the Firefox sources archive) for the same version. Locally, these commands write the packages to `Release/wxt/`. The same check fails if a root `manifest.json` reappears or if `dist/manifest.json` points at a file that is not in `dist/`. Git hooks do not run in CI.
+Do not commit `dist/` or load `dist.zip` as the extension. The release workflow builds from source and creates a versioned ZIP plus the stable `Polaris-AI.zip` alias as identical copies of the tested WXT Chrome archive. It validates both remote assets while the Release is still Draft, publishes only after that check, and then verifies the public Latest download URL. The same Release also carries the WXT store packages from `pnpm zip`, `pnpm zip:edge` and `pnpm zip:firefox` (Chrome, Edge, Firefox and the Firefox sources archive) for the same version. Locally, these commands write the packages to `Release/wxt/`. The same check fails if a root `manifest.json` reappears or if `dist/manifest.json` points at a file that is not in `dist/`. Git hooks do not run in CI.
 
 ## Version
 
