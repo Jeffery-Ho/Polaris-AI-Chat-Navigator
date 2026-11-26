@@ -103,7 +103,7 @@ test("Side Panel 使用窗口专属赤陶品牌层级", () => {
   assert.doesNotMatch(windowSource, /maker-badge maker-badge-model/);
   assert.match(windowSource, /previousContentTab/);
   assert.match(windowSource, /restoreViewState/);
-  assert.match(windowSource, /focusSearchInput\(activeSearch\)/);
+  assert.match(windowSource, /focusSearchInput\(\{ \.\.\.activeSearch, preventScroll: true \}\)/);
   assert.match(windowSource, /settingsButton\.addEventListener\("pointerdown", \(\) => \{\s*if \(state\.activeTab !== "settings"\) rememberViewState\(\)/);
   assert.match(windowSource, /\["navigation",[\s\S]*?\["chapters",/);
   assert.doesNotMatch(windowSource, /\["settings", locale/);

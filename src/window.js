@@ -76,7 +76,7 @@ export function initializeSidepanel() {
     lastUsedPlatform: "",
     routeKey: "",
     navigationScrollY: 0,
-    makerStartPending: false,
+    pendingMakerScrollY: null,
     pendingModeTarget: "",
     retainedReading: null,
     isChangingMode: false
@@ -251,6 +251,16 @@ export function initializeSidepanel() {
   }
 
   function cancelIndexedLocation() { locateSequence++; }
+
+  const makerPositions = new Map();
+
+  function rememberMakerPosition() {
+    if (!state.routeKey || !state.snapshot?.hasConversation) return;
+    const position = state.pendingMakerScrollY ?? (state.activeTab === "navigation" ? window.scrollY
+      : state.activeTab === "settings" && state.previousContentTab === "navigation" ? state.returnScrollY
+      : state.navigationScrollY);
+    makerPositions.set(JSON.stringify([state.sourceTabId, state.routeKey]), position);
+  }
 
   function resetVirtualMarkers() {
     virtualMarkers?.dispose(); virtualMarkers = null; virtualMarkerElement = null;
@@ -528,16 +538,17 @@ export function initializeSidepanel() {
       root.querySelector(`[data-settings-focus="${focusedSettingsControl}"]`)?.focus({ preventScroll: true });
     }
     if (activeSearch && state.activeTab !== "settings") {
-      focusSearchInput(activeSearch);
+      focusSearchInput({ ...activeSearch, preventScroll: true });
     }
     platformMenu.refresh();
     if (focusedPlatform) root.querySelector(".window-platform")?.focus({ preventScroll: true });
-    if (state.makerStartPending && state.activeTab === "navigation" && virtualMarkers
-      && snapshot.conversationIndex?.count > 0 && !state.markerQuery.trim()) {
-      state.makerStartPending = false;
-      state.navigationScrollY = 0; state.returnScrollY = 0;
-      window.scrollTo({ top: 0, behavior: "instant" });
-      virtualMarkers.refresh();
+    if (state.pendingMakerScrollY !== null && state.activeTab === "navigation"
+      && body.querySelector(".maker-list") && !state.markerQuery.trim()) {
+      const position = state.pendingMakerScrollY;
+      window.scrollTo({ top: position, behavior: "instant" });
+      state.navigationScrollY = window.scrollY;
+      if (window.scrollY >= position - 1 || !snapshot.conversationLoading) state.pendingMakerScrollY = null;
+      virtualMarkers?.refresh();
     }
     updateScrollControls();
   }
@@ -1749,11 +1760,14 @@ export function initializeSidepanel() {
       const changedConversation = didWindowConversationChange(state, message);
       const changedIndex = state.snapshot?.conversationIndex?.generation !== message.snapshot.conversationIndex?.generation;
       const changedHistoryMode = normalizeHistoryMode(state.snapshot?.config?.historyMode) !== normalizeHistoryMode(message.snapshot.config?.historyMode);
-      if (changedConversation || changedIndex || changedHistoryMode) {
-        state.makerStartPending = normalizeHistoryMode(message.snapshot.config?.historyMode) === "loaded";
-        if (state.makerStartPending) {
-          state.navigationScrollY = 0;
-          if (state.activeTab === "navigation" || state.previousContentTab === "navigation") state.returnScrollY = 0;
+      if (changedConversation || !message.snapshot.routeKey) rememberMakerPosition();
+      if (changedConversation || changedHistoryMode) {
+        const saved = changedConversation && message.snapshot.routeKey
+          ? makerPositions.get(JSON.stringify([nextTabId, message.snapshot.routeKey])) : undefined;
+        state.pendingMakerScrollY = saved ?? (normalizeHistoryMode(message.snapshot.config?.historyMode) === "loaded" ? 0 : null);
+        if (state.pendingMakerScrollY !== null) {
+          state.navigationScrollY = state.pendingMakerScrollY;
+          if (state.activeTab === "navigation" || state.previousContentTab === "navigation") state.returnScrollY = state.pendingMakerScrollY;
         }
       }
       if (changedConversation || changedIndex) {
@@ -1761,7 +1775,8 @@ export function initializeSidepanel() {
         document.querySelector(".index-notice")?.remove();
         cancelIndexedLocation();
         state.markerQuery = ""; state.chapterQuery = ""; state.fullSearch = { key: "", items: [], total: 0, hasMore: false, loading: false };
-        window.clearTimeout(searchTimer); resetVirtualMarkers();
+        window.clearTimeout(searchTimer);
+        if (changedConversation) resetVirtualMarkers();
         state.treeChapters = [];
         dismissPreview?.();
         state.chaptersStatus = "idle";

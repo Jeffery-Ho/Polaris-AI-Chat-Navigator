@@ -1325,7 +1325,7 @@ test("indexed Makers render during loading and long mode scrolls the sidebar to 
     s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot });
     assert.ok(s.win.document.querySelector(".conversation-skeleton.is-reading"));
     assert.equal(s.win.document.querySelector(".index-list-status"), null);
-    const firstBatch = { ...snapshot, markerItems: [
+    const firstBatch = { ...snapshot, activeMarkerKey: "index:first", markerItems: [
       { key: "index:first", markerKey: "index:first", type: "user", title: "Earliest loaded message" }
     ], conversationIndex: { ...snapshot.conversationIndex, revision: 2, count: 1, progress: { count: 1, total: 40 } } };
     s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: firstBatch });
@@ -1344,7 +1344,37 @@ test("indexed Makers render during loading and long mode scrolls the sidebar to 
       conversationIndex: { ...snapshot.conversationIndex, phase: "complete", count: 40, total: null } } });
     assert.equal(s.win.document.querySelector(".conversation-skeleton"), null);
     assert.equal(s.win.scrollY, 300);
+    const selected = firstBatch.markerItems[0];
+    const activeRow = s.win.document.querySelector(".maker-card.is-active");
+    assert.equal(activeRow?.dataset.markerRenderKey, selected.key);
+    const refreshed = { ...firstBatch,
+      conversationLoading: false, conversationIndex: { ...firstBatch.conversationIndex, generation: "refreshed", phase: "complete" } };
+    s.send({ type: "POLARIS_WINDOW_STATE", tabId: 7, snapshot: refreshed });
+    assert.equal(s.win.scrollY, 300, "refreshing the same conversation index preserves the reading position");
+    assert.equal(s.win.document.querySelector(".maker-card.is-active"), activeRow);
     assert.equal(s.commands.length, commands, "rendering and scrolling the sidebar must not send website navigation commands");
+  } finally { s.dom.window.close(); }
+});
+
+test("switching browser tabs restores each conversation's Maker position after loading placeholders", async () => {
+  const s = await boot("sidepanel", { openChapters: false });
+  try {
+    const first = { ...s.snapshot, config: { historyMode: "loaded" }, conversationIndex: { generation: "first", phase: "complete", count: 1 } };
+    const second = { ...first, routeKey: "https://chatgpt.com/c/two" };
+    const loading = { config: first.config, supportedRoute: true, loading: true, routeKey: "" };
+    const send = (tabId, snapshot) => s.send({ type: "POLARIS_WINDOW_STATE", tabId, snapshot });
+    send(7, first);
+    s.win.scrollTo({ top: 640 });
+    send(8, loading);
+    send(8, second);
+    s.win.scrollTo({ top: 280 });
+    send(7, loading);
+    s.win.scrollTo({ top: 0 });
+    send(7, first);
+    assert.equal(s.win.scrollY, 640);
+    assert.equal(s.win.document.querySelector(".maker-card.is-active")?.dataset.markerRenderKey, "ai-second");
+    send(8, second);
+    assert.equal(s.win.scrollY, 280);
   } finally { s.dom.window.close(); }
 });
 
