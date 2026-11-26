@@ -10,6 +10,16 @@
 - Version update type must be declared by the user before recording a build.
 - After each build is recorded, confirm the build number and version with the user.
 
+## 463
+- Date: 2026-11-25
+- Version: 1.6.10
+- Summary: Restore each conversation’s Maker scroll position after switching browser tabs.
+
+## 462
+- Date: 2026-11-25
+- Version: 1.6.10
+- Summary: Preserve Maker position when refreshing the current conversation index.
+
 ## 460
 - Date: 2026-11-24
 - Version: 1.6.10
